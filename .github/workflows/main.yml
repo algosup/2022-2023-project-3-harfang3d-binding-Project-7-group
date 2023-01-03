@@ -9,7 +9,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
-    - run: source .travis/setup_lua.sh
+    - name: setup-lua
+      uses: ljmf00/setup-lua@v1.0.0
     - name: Set up Python 3.10
       uses: actions/setup-python@v3
       with:
