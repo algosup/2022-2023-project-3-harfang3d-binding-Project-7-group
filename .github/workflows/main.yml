@@ -1,0 +1,26 @@
+name: Global Testing
+
+on:
+  pull_request:
+    branches:
+    - main
+jobs:
+  Build_Linux:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - run: source .travis/setup_lua.sh
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v3
+      with:
+        python-version: '3.10'
+    - name: Set up Go
+      uses: actions/setup-go@v3
+      with:
+        go-version: 1.19
+    - run: sudo apt-get -y install golang-golang-x-tools
+    - run: pip install pypeg2
+    - run: pip install coverage
+    - run: pip install PyYAML==5.1
+    - run: pip install python-coveralls==2.9.1
+    - run: python3 -m coverage run tests.py --x64 --linux --pybase "" --luabase $LUA_HOME_DIR --go
