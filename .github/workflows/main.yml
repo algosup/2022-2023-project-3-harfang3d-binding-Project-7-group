@@ -9,7 +9,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
-    - run: sudo su
     - run: source .travis/setup_lua.sh
     - name: Set up Python 3.10
       uses: actions/setup-python@v3
