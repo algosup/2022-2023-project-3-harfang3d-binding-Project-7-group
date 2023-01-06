@@ -1,65 +1,101 @@
-# Introduction
-Harfang3D is a 3D engine and scripting platform developed by Golaem. It is designed for use in a variety of 3D applications, including films, games, and visual effects. This document outlines the requirements for a binding of Harfang3D in Rust, which will allow Rust programs to use the functionality provided by the Harfang3D C++ API.
+# **Functional Specifications**
 
-# Objectives
+<details>
+<summary>
+Table of contents
+</summary>
+
+* [Introduction](#Introduction)
+* [Objectives](#Objectives)
+* [Scope](#Scope)
+* [Requirement](#Requirement)
+* [Deliverables](#Deliverables)
+* [License](#License)
+* [Compatibility](#Compatibility)
+* [Documentation](#Documentation)
+* [Testing](#Testing)
+* [Support](#Support)
+* [Conclusion](#Conclusion)
+* [Glossary](#Glossary)
+</details>
+
+## Project Team
+
+| Members         | Roles             |
+| --------------- | ----------------- |
+| [Ivan Molnar](https://github.com/ivan-molnar)        | Project Manager   |
+| [Mathis Kakal](https://github.com/mathiskakal)       | Tech Lead         |
+| [Maxime Pages](https://github.com/MaximePagesAlgoSup)| Software Engineer |
+| [Matieu Chaput](https://github.com/Chaput-Mathieu)   | Program Manager   |
+
+
+
+## Introduction
+The goal of the project is to create an access to [Harfang3D](https://github.com/harfang3d/harfang3d) in rust. To do that we will need to create a binding between c++ and rust using [FABgen](https://github.com/ejulien/FABGen). FABgen is a tool for generating bindings for C++ libraries.
+It is written in Python and is available on GitHub under an open source license. This document outlines the requirements for the addition of a Rust binding to FABgen, which will allow Rust programs to use the functionality provided by C++ libraries.
+
+## Objectives
 The main objectives of the binding are to:
-* Provide Rust programs with access to all of the functions and data structures in the Harfang3D C++ API.
+* Provide Rust programs with access to all of the functions and data structures in C++.
 * Be easy to use and integrate into Rust programs, with a clear and simple API that is easy to learn and use.
-* Be well-tested, with comprehensive unit and integration tests to ensure that it works correctly and is reliable.
-* Be actively maintained, with regular updates to fix bugs and add new features.
+* Be well-tested, following the templates existing, to ensure that it works correctly and is reliable.
 * Be released under an open source license, allowing developers to use and modify it as needed.
 
-# Scope
+## Scope
 The scope of the binding includes:
-* All functions and data structures in the Harfang3D C++ API.
-* Support for all platforms that Harfang3D supports, including Windows, MacOS, and Linux.
+* All functions and data structures in C++.
+* Support for all platforms that FABgen supports, including Windows, and Linux.
 * Documentation for all functions and data structures, including descriptions of their behavior and usage examples.
-* Memory management and other low-level details.
 
-# Requirements
+## Requirements
 The binding must meet the following requirements:
-* Provide Rust programs with access to all of the functions and data structures in the Harfang3D C++ API.
-* Be implemented as a Rust crate
-* Support all platforms that Harfang3D supports, including Windows, MacOS, and Linux.
+* Provide Rust programs with access to all of the functions and data structures in C++.
+<!-- * Be implemented as a Rust crate -->
+* Support all platforms that FABgen supports, including Windows and Linux.
 * Provide documentation for all functions and data structures, including descriptions of their behavior and usage examples.
 * Be easy to use and integrate into Rust programs, with a clear and simple API that is easy to learn and use.
-* Be well-tested, with comprehensive unit and integration tests to ensure that it works correctly and is reliable.
-* Be actively maintained, with regular updates to fix bugs and add new features.
+* Be well-tested, with comprehensive unit and integration tests, following the existing templates of binding, to ensure that it works correctly and is reliable.
 * Be released under an open source license, allowing developers to use and modify it as needed.
 
-# Deliverables
+## Risks and Assumptions
+The following risks and assumptions have been made:
+* FABgen is a viable solution for generating bindings for C++ libraries.
+* FABgen will be able to generate a binding for the C++ library that is compatible with Rust.
+* FABgen will be able to generate the documentation for the binding.
+* The template for the tests is complete and reliable.
+
+## Deliverables
 The final deliverables for the binding will include:
-* The Rust crate, including all necessary Rust code and configuration files.
-* Documentation for the crate, including descriptions of all functions and data structures, usage examples, and any other necessary information.
-* Tests for the crate, including unit and integration tests to ensure that it works correctly and is reliable.
+<!-- * The Rust crate, including all necessary Rust code and configuration files. -->
+* Documentation for the binding, including descriptions of all functions and data structures, usage examples, and any other necessary information.
+* Tests for the binding, including unit and integration tests, following the existing templates of binding, to ensure that it works correctly and is reliable.
 
-# Maintenance
-The binding will be actively maintained, with regular updates to fix bugs and add new features. The maintenance plan will include:
-* Responding to bug reports and issues filed on the project's issue tracker.
-* Releasing new versions of the crate with bug fixes and new features.
-* Providing support and assistance to users of the crate.
-
-# License
-The binding will be released under an open source license, allowing developers to use and modify it as needed. 
-
-
-# Compatibility
+## Compatibility
 The binding should be compatible with the latest stable version of Rust, as well as any earlier versions that are still in active use.
 
-# Documentation
-The binding should include comprehensive documentation for all functions and data structures, including descriptions of their behavior and usage examples. The documentation should be easy to understand and follow, and should include both high-level overviews and detailed explanations of specific features.
+## Documentation
+The documentation for the binding will be generated automatically by FABgen, and will include descriptions of all functions and data structures.
 
-# Testing
-The binding should be well-tested, with comprehensive unit and integration tests to ensure that it works correctly and is reliable. The testing plan should include both manual and automated testing, and should be designed to cover a wide range of use cases and edge cases.
+## License
+The binding will be released under an open source license, allowing developers to use and modify it as needed. 
 
-# Deployment
-The binding should be distributed as a fork of the existing repository of the Harfang3D C++ API. The fork should include all necessary Rust code and configuration files, and should be kept up to date with the latest version of the C++ API.
+## Testing
+The binding will be tested following the templates existing in the FABgen project. The tests will include unit and integration tests to ensure that it works correctly and is reliable.
+<!-- 
+## Deployment
+The binding should be distributed as a fork of the existing repository of the Harfang3D C++ API. The fork should include all necessary Rust code and configuration files, and should be kept up to date with the latest version of the C++ API. -->
 
-# Support
-The binding should be actively maintained, with regular updates to fix bugs and add new features. Users will also be able to file bug reports and feature requests on the project's issue tracker on Github, and will be able to receive support and assistance from the developers.
+## Support
+Users will be able to file bug reports and feature requests on the project's issue tracker on Github.
 
-# Conclusion
-This functional specification outlines the requirements for a binding of Harfang3D in Rust, which will provide Rust programs with access to the functionality provided by the Harfang3D C++ API. By meeting these requirements, the binding will allow Rust developers to use Harfang3D in their projects, and will provide a safe and idiomatic interface for working with the API.
-<!-- # Overview -->
-<!-- # Design Goals -->
-<!-- # Walkthrough -->
+## Conclusion
+This functional specification outlines the requirements for the addition of a Rust binding to FABgen, which will provide Rust programs with access to the functionality provided by the FABgen Python module. By meeting these requirements, the Rust binding will allow Rust developers to use FABgen in their projects, and will provide a safe and idiomatic binding to work with C++.
+<!-- ## Overview -->
+<!-- ## Design Goals -->
+<!-- ## Walkthrough -->
+
+## Glossary
+* API: An application programming interface, which is a set of routines, protocols, and tools for building software applications.
+* Binding: A set of code that allows a program to use the functionality provided by another program.
+* Unit test: A test that checks the behavior of a single unit of code, such as a function or class.
+* Integration test: A test that checks the behavior of multiple units of code, such as a module or program.
