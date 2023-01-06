@@ -19,40 +19,29 @@ import lib
 def route_lambda(name):
 	return lambda args: "%s(%s);" % (name, ", ".join(args))
 
-
 def clean_name(name):
 	new_name = str(name).strip().replace("_", "").replace(":", "")
+
 	if new_name in ["break", "default", "func", "interface", "select", "case", "defer", "go", "map", "struct", "chan", "else", "goto", "package", "switch", "const", "fallthrough", "if", "range", "type", "continue", "for", "import", "return", "var" ]:
 		return new_name + "Go"
 	return new_name
 
-
 def clean_name_with_title(name):
+	name = name.strip()
 	new_name = ""
-	if "_" in name:
-		# redo a special string.title()
-		next_is_forced_uppercase = True
-		for c in name:
-			if c in ["*", "&"]:
-				new_name += c
-			elif c in ["_", "-"]:
-				next_is_forced_uppercase = True
-			else:
-				if next_is_forced_uppercase:
-					next_is_forced_uppercase = False
-					new_name += c.capitalize()
-				else:
-					new_name += c
-	else:
-		# make sur the first letter is capitalize
-		first_letter_checked = False
-		for c in name:
-			if c in ["*", "&"] or first_letter_checked:
-				new_name += c
-			elif not first_letter_checked:
-				first_letter_checked = True
-				new_name += c.capitalize()
-	return new_name.strip().replace("_", "").replace(":", "")
+	next_is_upper = True
+
+	for c in name:
+		match c:
+			case ":" : continue
+			case "*" | "&" : new_name += c
+			case "_" | "-" : next_is_upper = True
+			case _ :
+				if next_is_upper: c = c.capitalize()
+				next_is_upper = False
+				new_name += c	
+
+	return new_name
 
 
 class GoTypeConverterCommon(gen.TypeConverter):

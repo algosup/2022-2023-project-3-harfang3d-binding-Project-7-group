@@ -24,7 +24,7 @@ def bind_std(gen):
 				out = f"{out_var_p}1 := C.CString(*{in_var})\n"
 				out += f"{out_var_p} := &{out_var_p}1\n"
 			else:
-				out = f"{out_var_p, idFin{out_var_p} := wrapString({in_var})\n"
+				out = f"{out_var_p}, idFin{out_var_p} := wrapString({in_var})\n"
 				out += f"defer idFin{out_var_p}()\n"
 			return out
 
