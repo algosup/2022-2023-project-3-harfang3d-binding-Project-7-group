@@ -18,12 +18,14 @@ def bind_std(gen):
 			return ''
 
 		def to_c_call(self, in_var, out_var_p, is_pointer=False):
+			out_var_p = out_var_p.replace('&', '_')
+
 			if is_pointer:
-				out = f"{out_var_p.replace('&', '_')}1 := C.CString(*{in_var})\n"
-				out += f"{out_var_p.replace('&', '_')} := &{out_var_p.replace('&', '_')}1\n"
+				out = f"{out_var_p}1 := C.CString(*{in_var})\n"
+				out += f"{out_var_p} := &{out_var_p}1\n"
 			else:
-				out = f"{out_var_p.replace('&', '_')}, idFin{out_var_p.replace('&', '_')} := wrapString({in_var})\n"
-				out += f"defer idFin{out_var_p.replace('&', '_')}()\n"
+				out = f"{out_var_p, idFin{out_var_p} := wrapString({in_var})\n"
+				out += f"defer idFin{out_var_p}()\n"
 			return out
 
 		def from_c_call(self, out_var, expr, ownership):
@@ -44,10 +46,12 @@ def bind_std(gen):
 			return ''
 
 		def to_c_call(self, in_var, out_var_p, is_pointer):
+			out_var_p = out_var_p.replace('&', '_')
+
 			if is_pointer:
-				out = f"{out_var_p.replace('&', '_')} := (*{self.go_to_c_type})(unsafe.Pointer({in_var}))\n"
+				out = f"{out_var_p} := (*{self.go_to_c_type})(unsafe.Pointer({in_var}))\n"
 			else:
-				out = f"{out_var_p.replace('&', '_')} := {self.go_to_c_type}({in_var})\n"
+				out = f"{out_var_p} := {self.go_to_c_type}({in_var})\n"
 			return out
 
 		def from_c_call(self, out_var, expr, ownership):
@@ -99,10 +103,11 @@ def bind_std(gen):
 			return ''
 
 		def to_c_call(self, in_var, out_var_p, is_pointer):
+			out_var_p = out_var_p.replace('&', '_')
 			if is_pointer:
-				out = f"{out_var_p.replace('&', '_')} := (*C.bool)(unsafe.Pointer({in_var}))\n"
+				out = f"{out_var_p} := (*C.bool)(unsafe.Pointer({in_var}))\n"
 			else:
-				out = f"{out_var_p.replace('&', '_')} := C.bool({in_var})\n"
+				out = f"{out_var_p} := C.bool({in_var})\n"
 			return out
 
 		def from_c_call(self, out_var, expr, ownership):
