@@ -24,4 +24,5 @@ jobs:
     - run: pip install coverage
     - run: pip install PyYAML==5.1
     - run: pip install python-coveralls==2.9.1
-    - run: python3 run tests.py --x64 --linux --pybase "" --luabase $LUA_HOME_DIR --go
+    - run: pypath=$(which python3)
+    - run: python3 run tests.py --x64 --linux --pybase $pypath --luabase $LUA_HOME_DIR --go
