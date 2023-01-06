@@ -360,7 +360,7 @@ uint32_t %s(void* p) {
 						src += f"	auto retPointer = {retval_name};\n"
 					else:
 						src += f"	auto retPointer = new {val['conv'].ctype}({retval_name});\n"
-				retval_name = f"({clean_name_with_title(self._name)}{clean_name_with_title(val['conv'].bound_name)})(retPointer)"
+				retval_name = f"({clean_name_with_title(self._name)}{clean_name_with_title(val['conv'].bound_name)})(retPointer)" # Clean name justified
 		else:
 			# special std::string (convert to const char*)
 			if val["conv"] is not None and "std::string" in str(val["conv"].ctype):
@@ -1767,7 +1767,7 @@ uint32_t %s(void* p) {
 		self.go_c = go_c
 
 		# .go
-		go_bind = f"package {clean_name_with_title(self._name)}\n" \
+		go_bind = f"package {clean_name_with_title(self._name).lower()}\n" \
 				'// #include "wrapper.h"\n' \
 				'// #cgo CFLAGS: -I . -Wall -Wno-unused-variable -Wno-unused-function -O3\n' \
 				'// #cgo CXXFLAGS: -std=c++14 -O3\n'
