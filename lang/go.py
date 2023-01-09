@@ -52,22 +52,22 @@ class GoTypeConverterCommon(gen.TypeConverter):
 		self.go_type = None
 
 	def get_type_api(self, module_name):
-		out = "// type API for %s\n" % self.ctype
+		out = f"// type API for {self.ctype}\n"
+
 		if self.c_storage_class:
-			out += "struct %s;\n" % self.c_storage_class
-		if self.c_storage_class:
-			out += "void %s(int idx, void *obj, %s &storage);\n" % (self.to_c_func, self.c_storage_class)
+			out += f"struct {self.c_storage_class};\n"
+			out += f"void {self.to_c_func}(int idx, void *obj, {self.c_storage_class} &storage);\n"
 		else:
-			out += "void %s(int idx, void *obj);\n" % self.to_c_func
-		out += "int %s(void *obj, OwnershipPolicy);\n" % self.from_c_func
-		out += "\n"
+			out += f"void {self.to_c_func}(int idx, void *obj);\n"
+
+		out += f"int {self.from_c_func}(void *obj, OwnershipPolicy);\n\n"
 		return out
 
 	def to_c_call(self, in_var, out_var_p, is_pointer):
 		return ""
 
 	def from_c_call(self, out_var, expr, ownership):
-		return "%s((void *)%s, %s);\n" % (self.from_c_func, expr, ownership)
+		return f"{self.from_c_func}((void *){expr}, {ownership});\n"
 
 
 class DummyTypeConverter(gen.TypeConverter):
@@ -146,31 +146,33 @@ class GoExternTypeConverter(GoTypeConverterCommon):
 
 	def to_c_call(self, in_var, out_var_p):
 		out = ''
+
 		if self.c_storage_class:
-			c_storage_var = 'storage_%s' % out_var_p.replace('&', '_')
-			out += '%s %s;\n' % (self.c_storage_class, c_storage_var)
-			out += '(*%s)(%s, (void *)%s, %s);\n' % (self.to_c_func, in_var, out_var_p, c_storage_var)
+			c_storage_var = f"storage_{out_var_p.replace('&', '_')}"
+			out += f'{self.c_storage_class} {c_storage_var};\n'
+			out += f'(*{self.to_c_func})({in_var}, (void *){out_var_p}, {c_storage_var});\n'
 		else:
-			out += '(*%s)(%s, (void *)%s);\n' % (self.to_c_func, in_var, out_var_p)
+			out += f'(*{self.to_c_func})({in_var}, (void *){out_var_p});\n'
+
 		return out
 
 	def from_c_call(self, out_var, expr, ownership):
-		return "%s = (*%s)((void *)%s, %s);\n" % (out_var, self.from_c_func, expr, ownership)
+		return f"{out_var} = (*{self.from_c_func})((void *){expr}, {ownership});\n"
 
 	def check_call(self, in_var):
-		return "(*%s)(%s)" % (self.check_func, in_var)
+		return f"(*{self.check_func})({in_var})"
 
 	def get_type_glue(self, gen, module_name):
-		out = '// extern type API for %s\n' % self.ctype
+		out = f'// extern type API for {self.ctype}\n'
 		if self.c_storage_class:
-			out += 'struct %s;\n' % self.c_storage_class
-		out += 'bool (*%s)(void *o) = nullptr;\n' % self.check_func
-		if self.c_storage_class:
-			out += 'void (*%s)(void *o, void *obj, %s &storage) = nullptr;\n' % (self.to_c_func, self.c_storage_class)
+			out += f'struct {self.c_storage_class};\n'
+			out += f'bool (*{self.check_func})(void *o) = nullptr;\n'
+			out += f'void (*{self.to_c_func})(void *o, void *obj, {self.c_storage_class} &storage) = nullptr;\n'
 		else:
-			out += 'void (*%s)(void *o, void *obj) = nullptr;\n' % self.to_c_func
-		out += 'int (*%s)(void *obj, OwnershipPolicy) = nullptr;\n' % self.from_c_func
-		out += '\n'
+			out += f'bool (*{self.check_func})(void *o) = nullptr;\n'
+			out += f'void (*{self.to_c_func})(void *o, void *obj) = nullptr;\n'
+		out += f'int (*{self.from_c_func})(void *obj, OwnershipPolicy) = nullptr;\n\n'
+
 		return out
 
 
@@ -321,19 +323,27 @@ uint32_t %s(void* p) {
 
 	def __get_stars(self, val, start_stars=0, add_start_for_ref=True):
 		stars = "*" * start_stars
+		ref = ""
+
 		if "carg" in val and hasattr(val["carg"].ctype, "ref"):
-			stars += "*" * (len(val["carg"].ctype.ref) if add_start_for_ref else val["carg"].ctype.ref.count('*'))
+			ref = val["carg"].ctype.ref
 		elif "storage_ctype" in val and hasattr(val["storage_ctype"], "ref"):
-			stars += "*" * (len(val["storage_ctype"].ref) if add_start_for_ref else val["storage_ctype"].ref.count('*'))
+			ref = val["storage_ctype"].ref
 		elif hasattr(val["conv"].ctype, "ref"):
-			stars += "*" * (len(val["conv"].ctype.ref) if add_start_for_ref else val["conv"].ctype.ref.count('*'))
+			ref = val["conv"].ctype.ref
+
+		stars += "*" * (len(ref) if add_start_for_ref else ref.count('*'))
 		return stars
 
 	def __arg_from_cpp_to_c(self, val, retval_name, just_copy):
 		src = ""
 		# type class, not a pointer
-		if val['conv'] is not None and val['conv'].is_type_class() and \
-			not val['conv'].ctype.is_pointer() and ('storage_ctype' not in val or not hasattr(val['storage_ctype'], 'ref') or not any(s in val['storage_ctype'].ref for s in ["&", "*"])):
+		if 	val['conv'] is not None and \
+			val['conv'].is_type_class() and \
+			not val['conv'].ctype.is_pointer() and \
+			('storage_ctype' not in val or not hasattr(val['storage_ctype'], 'ref') or \
+			not any(s in val['storage_ctype'].ref for s in ["&", "*"])):
+
 				# special shared ptr
 				if 'proxy' in val['conv']._features:
 					src += f"	if(!{retval_name})\n" \
@@ -440,20 +450,15 @@ uint32_t %s(void* p) {
 		rval_ownership = self._FABGen__ctype_to_ownership_policy(val["conv"].ctype)
 
 		src = ""
-		# check if pointer 
-		if ('carg' in val and (val['carg'].ctype.is_pointer() or (hasattr(val['carg'].ctype, 'ref') and any(s in val['carg'].ctype.ref for s in ["&", "*"])))) or \
+		# check if pointer - bool
+		is_pointer = ('carg' in val and (val['carg'].ctype.is_pointer() or (hasattr(val['carg'].ctype, 'ref') and any(s in val['carg'].ctype.ref for s in ["&", "*"])))) or \
 			('carg' not in val and 'storage_ctype' in val and (val['storage_ctype'].is_pointer() or (hasattr(val['storage_ctype'], 'ref') and any(s in val['storage_ctype'].ref for s in ["&", "*"])))) or \
-			('carg' not in val and 'storage_ctype' not in val and (val['conv']._is_pointer or val['conv'].ctype.is_pointer())):
-			is_pointer = True
-		else:
-			is_pointer = False
+			('carg' not in val and 'storage_ctype' not in val and (val['conv']._is_pointer or val['conv'].ctype.is_pointer()))
 
-		# check if ref 
-		if ('carg' in val and (hasattr(val['carg'].ctype, 'ref') and any(s in val['carg'].ctype.ref for s in ["&"]))) or \
-			('carg' not in val and 'storage_ctype' in val and ((hasattr(val['storage_ctype'], 'ref') and any(s in val['storage_ctype'].ref for s in ["&"])))):
-			is_ref = True
-		else:
-			is_ref = False
+
+		# check if ref - bool
+		is_ref = ('carg' in val and (hasattr(val['carg'].ctype, 'ref') and any(s in val['carg'].ctype.ref for s in ["&"]))) or \
+			('carg' not in val and 'storage_ctype' in val and ((hasattr(val['storage_ctype'], 'ref') and any(s in val['storage_ctype'].ref for s in ["&"]))))
 
 		# check if need convert from c
 		# if not a pointer
@@ -870,6 +875,7 @@ uint32_t %s(void* p) {
 
 		name = name.replace(":", "")
 		name = clean_name_with_title(name)
+		classname = clean_name_with_title(classname)
 
 		arg_bound_name = self.__get_arg_bound_name_to_go({"conv": conv})
 
@@ -881,24 +887,24 @@ uint32_t %s(void* p) {
 			if is_global and member["ctype"].const:
 				go += f"// {name} ...\n"
 				if self.__get_is_type_class_or_pointer_with_class(conv):
-					go += f"var {clean_name(name)} = {arg_bound_name.replace('*', '')}{{h:C.{clean_name_with_title(self._name)}{clean_name_with_title(classname)}Get{name}()}}\n"
+					go += f"var {clean_name(name)} = {arg_bound_name.replace('*', '')}{{h:C.{clean_name_with_title(self._name)}{classname}Get{name}()}}\n"
 				elif implicit_cast is not None:
-					go += f"var {clean_name(name)} = {implicit_cast}(C.{clean_name_with_title(self._name)}{clean_name_with_title(classname)}Get{name}())\n"
+					go += f"var {clean_name(name)} = {implicit_cast}(C.{clean_name_with_title(self._name)}{classname}Get{name}())\n"
 				else:
-					go += f"var {clean_name(name)} = {arg_bound_name}(C.{clean_name_with_title(self._name)}{clean_name_with_title(classname)}Get{name}())\n"
+					go += f"var {clean_name(name)} = {arg_bound_name}(C.{clean_name_with_title(self._name)}{classname}Get{name}())\n"
 			else:
 				go += "// "
 				if do_static:
-					go += f"{clean_name_with_title(classname)}"
+					go += f"{classname}"
 				go += f"Get{name} ...\n"
 				go += f"func "
 				if do_static:
-					go += f"{clean_name_with_title(classname)}"
+					go += f"{classname}"
 				else:
-					go += f"(pointer *{clean_name_with_title(classname)}) "
+					go += f"(pointer *{classname}) "
 
 				go += f"Get{name}() {arg_bound_name} {{\n"
-				go += f"v := C.{clean_name_with_title(self._name)}{clean_name_with_title(classname)}Get{name}("
+				go += f"v := C.{clean_name_with_title(self._name)}{classname}Get{name}("
 				if not static and not is_global:
 					go += "pointer.h"
 				go += ")\n"
@@ -915,14 +921,14 @@ uint32_t %s(void* p) {
 			if not member["ctype"].const:
 				go += f"// "
 				if do_static:
-					go += f"{clean_name_with_title(classname)}"
+					go += f"{classname}"
 				go += f"Set{name} ...\n" \
 						f"func "
 						
 				if do_static:
-					go += f"{clean_name_with_title(classname)}"
+					go += f"{classname}"
 				else:
-					go += f"(pointer *{clean_name_with_title(classname)}) "
+					go += f"(pointer *{classname}) "
 
 				go += f"Set{name}(v {arg_bound_name}) {{\n"
 
@@ -933,7 +939,7 @@ uint32_t %s(void* p) {
 				else:
 					go += "vToC := v\n"
 
-				go += f"	C.{clean_name_with_title(self._name)}{clean_name_with_title(classname)}Set{name}("
+				go += f"	C.{clean_name_with_title(self._name)}{classname}Set{name}("
 				if not static and not is_global:
 					go += "pointer.h, "
 				go += "vToC)\n"

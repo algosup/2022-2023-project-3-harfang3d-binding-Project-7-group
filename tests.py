@@ -13,6 +13,7 @@ import os
 import lang.cpython
 import lang.lua
 import lang.go
+import lang.rust
 
 
 start_path = os.path.dirname(__file__)
@@ -21,6 +22,7 @@ parser = argparse.ArgumentParser(description='Run generator unit tests.')
 parser.add_argument('--pybase', dest='python_base_path', help='Path to the Python interpreter')
 parser.add_argument('--luabase', dest='lua_base_path', help='Path to the Lua interpreter')
 parser.add_argument('--go', dest='go_build', help='Build GO', action="store_true")
+parser.add_argument('--rust', dest='rust_build', help='Build Rust', action="store_true")
 parser.add_argument('--debug', dest='debug_test', help='Generate a working solution to debug a test')
 parser.add_argument('--x64', dest='x64', help='Build for 64 bit architecture', action='store_true', default=False)
 parser.add_argument('--linux', dest='linux', help='Build on Linux', action='store_true', default=False)
@@ -56,7 +58,7 @@ def run_test(gen, name, testbed):
 	work_path = tempfile.mkdtemp()
 	print('Working directory is ' + work_path)
 
-	test_module = importlib.import_module(name)
+	test_module = importlib.import_module(name)	# imports from ./lib/
 
 	# generate the interface file
 	files = test_module.bind_test(gen)
@@ -451,6 +453,45 @@ class GoTestBed:
 
 		return success
 
+#########################################################################
+####### RUST ############################################################
+#########################################################################
+
+# ./lib/rust must be functional before this'll work
+
+def create_rust_cmake_file(module, work_path, sources):
+	return False
+
+def build_and_deploy_rust_extension(work_path, build_path):
+	return False
+
+class RustTestBed:
+	def build_and_test_extension(self, work_path, module, sources):
+		# Not sure about this so its commented for now
+		# if not hasattr(module, "test_rust"):
+		# 	print("Can't find test_rust")
+		# 	return False
+		
+		test_path = os.path.join(work_path, 'test.rs')
+		with open(test_path, 'w') as file:
+			file.write(module.test_rust)
+
+		build_path = os.path.join(work_path, 'build')
+		os.mkdir(build_path)
+		os.chdir(build_path)
+
+		create_rust_cmake_file("test", work_path, sources, args.lua_base_path)
+		create_clang_format_file(work_path)
+
+		if not build_and_deploy_rust_extension(work_path, build_path):
+			return False
+
+		# We might have something related to wrapper here
+		print("Executing Rust test...")
+
+		return False
+
+#########################################################################
 
 # Clang format
 def create_clang_format_file(work_path):

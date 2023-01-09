@@ -181,31 +181,21 @@ def get_symbol_default_bound_name(name):
 
 
 def clean_name_with_title(name):
+	name = name.strip()
 	new_name = ""
-	if "_" in name:
-		# redo a special string.title()
-		next_is_forced_uppercase = True
-		for c in name:
-			if c in ["*", "&"]:
-				new_name += c
-			elif c in ["_", "-"]:
-				next_is_forced_uppercase = True
-			else:
-				if next_is_forced_uppercase:
-					next_is_forced_uppercase = False
-					new_name += c.capitalize()
-				else:
-					new_name += c
-	else:
-		# make sur the first letter is captialize
-		first_letter_checked = False
-		for c in name:
-			if c in ["*", "&"] or first_letter_checked:
-				new_name += c
-			elif not first_letter_checked:
-				first_letter_checked = True
-				new_name += c.capitalize()
-	return new_name.strip().replace("_", "").replace(":", "")
+	next_is_upper = True
+
+	for c in name:
+		match c:
+			case ":" : continue
+			case "*" | "&" : new_name += c
+			case "_" | "-" : next_is_upper = True
+			case _ :
+				if next_is_upper: c = c.capitalize()
+				next_is_upper = False
+				new_name += c	
+
+	return new_name
 
 #
 typename = re.compile(r"(_|[A-z])[A-z0-9_]*")
