@@ -8,8 +8,8 @@ Table of contents
 * [Introduction](#Introduction)
 * [Use case](#Use-case)
 * [Personas](#Personas)
-    * [Anna](Anna)
-    * [John](John)
+    * [Anna](#Anna)
+    * [John](#John)
 * [Objectives](#Objectives)
 * [Scope](#Scope)
 * [Requirements](#Requirements)
@@ -42,8 +42,8 @@ The goal of the project is to create an access to [Harfang3D](https://github.com
 * User wants to import a C++ library in Rust
 
 ## Personas
-![Anna](./images/Persona_Anna.png)
-![John](./images/Persona_John.png)
+![#Anna](./images/Persona_Anna.png)
+![#John](./images/Persona_John.png)
 
 
 ## Objectives
