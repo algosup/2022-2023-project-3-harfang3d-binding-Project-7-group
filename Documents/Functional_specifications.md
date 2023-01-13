@@ -32,7 +32,7 @@ Table of contents
 | [Matieu Chaput](https://github.com/Chaput-Mathieu)   | Program Manager   |
 
 ## Introduction
-The goal of the project is to create access to [Harfang3D](https://github.com/harfang3d/harfang3d) in Rust. HARFANG®3D is an all-in-one 3D visualization library available in C++, Python, Lua and Go. To bind it to Rust we will need to create a binding between C++ and Rust using [Fabgen](https://github.com/ejulien/FABGen). Fabgen is a tool for generating bindings for C++ libraries. It was written for the Harfang 3D project to bring the C++ engine to languages such as Python, Lua and Go. This document outlines the requirements for the addition of a Rust binding to Fabgen, which will allow Rust programs to use the functionality provided by C++ libraries.
+The main objective of this project is to allow Rust programs to utilize the functionality of the all-in-one 3D visualization library, [Harfang3D](https://github.com/harfang3d/harfang3d), by creating a binding between C++ and Rust using [Fabgen](https://github.com/ejulien/FABGen). This will enable Rust developers to use Harfang3D's C++ engine in their programs.Fabgen is a tool for generating bindings for C++ libraries. Fabgen was created for the Harfang3D project to enable usage of the C++ engine in other languages such as Python, Lua, and Go. This document outlines the requirements for the addition of a Rust binding to Fabgen, which will allow Rust programs to use the functionality provided by C++ libraries.
 
 ## Use case
 * User wants to use a C++ library in Rust
@@ -46,10 +46,9 @@ The goal of the project is to create access to [Harfang3D](https://github.com/ha
 ![#Anna](./images/Persona_Anna.png)
 ![#John](./images/Persona_John.png)
 
-
 ## Objectives
 The main objectives of the binding are to:
-* Provide Rust programs with access to all of the functions and data structures in C++.
+* Provide Rust programs with access to all of C++'s functions and data structures.
 * Be easy to use and integrate into Rust programs, with a clear and simple API that is easy to learn and use.
 * Be well-tested, following Fabgen's existing templates, to ensure that it works correctly and is reliable.
 * Be released under an open-source license, allowing developers to use and modify it as needed.
@@ -67,7 +66,7 @@ The scope of the binding includes:
 ## Requirements
 The binding must meet the following requirements:
 <!-- * Be implemented as a Rust crate -->
-* Provide Rust programs with access to all of the functions and data structures in C++.
+* Provide Rust programs with access to all of C++'s functions and data structures.
 * Be easy to use and integrate into Rust programs, with a clear and simple API that is easy to learn and use.
 * Be well-tested, with comprehensive unit and integration tests, following Fabgen's existing template, to ensure that it works correctly and is reliable.
 * Support all platforms that Fabgen supports, including Windows and Linux.
