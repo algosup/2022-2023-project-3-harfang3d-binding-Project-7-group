@@ -126,5 +126,12 @@ class RustExternTypeConverter(RustTypeConverterCommon):
 		return out
 
 class RustGenerator(gen.FABGen):
+	default_ptr_converter = RustPtrTypeConverter
+	default_class_converter = RustClassTypeDefaultConverter
+	default_extern_converter = RustExternTypeConverter
+
 	def __init__(self):
 		super().__init__()
+		self.check_self_type_in_ops = True
+		self.rust = ""
+		
