@@ -1767,7 +1767,7 @@ uint32_t %s(void* p) {
 		self.go_c = go_c
 
 		# .go
-		go_bind = f"package {clean_name_with_title(self._name)}\n" \
+		go_bind = f"package {clean_name_with_title(self._name).lower()}\n" \
 				'// #include "wrapper.h"\n' \
 				'// #cgo CFLAGS: -I . -Wall -Wno-unused-variable -Wno-unused-function -O3\n' \
 				'// #cgo CXXFLAGS: -std=c++14 -O3\n'

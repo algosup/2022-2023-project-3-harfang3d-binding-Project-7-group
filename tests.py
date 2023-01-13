@@ -448,6 +448,7 @@ class GoTestBed:
 		success = True
 		try:
 			subprocess.check_output('go mod init mytest', shell=True, stderr=subprocess.STDOUT)
+			subprocess.check_output("go mod tidy", shell=True, stderr=subprocess.STDOUT)
 			subprocess.check_output("go fmt mytest", shell=True, stderr=subprocess.STDOUT)
 			subprocess.check_output("goimports -w bind.go", shell=True, stderr=subprocess.STDOUT)
 			subprocess.check_output('go test -run ""', shell=True, stderr=subprocess.STDOUT)
