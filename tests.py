@@ -395,7 +395,8 @@ def build_and_deploy_go_extension(work_path, build_path):
 		else:
 			subprocess.check_output(['cmake', '--build', '.', '--config', 'Release'])
 	except subprocess.CalledProcessError as e:
-		print(e.output.decode('utf-8'))
+		# print(e.output.decode('utf-8'))
+		sys.stdout.buffer.write(bytes(e.output))
 		return False
 
 	print("install extension...")
