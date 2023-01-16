@@ -284,7 +284,7 @@
 			"name": "All: GO Bind Harfang",
 			"type": "python",
 			"request": "launch",
-			"stopOnEntry": false,
+			"stopOnEntry": true,
 			"python": "${command:python.interpreterPath}",
 			"program": "${workspaceRoot}/bind.py",
 			"cwd": "${workspaceRoot}",
