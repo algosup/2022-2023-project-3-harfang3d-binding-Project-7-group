@@ -54,3 +54,13 @@ func Test(t *testing.T) {
 }
 """
 
+test_rust = """\
+extern crate my_test;
+
+#[test]
+fn test() {
+	unsafe {
+		let o = my_test::Object::new();
+		assert_eq!(o.get(4), 15);
+	}
+}

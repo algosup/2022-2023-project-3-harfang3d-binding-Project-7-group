@@ -91,3 +91,24 @@ func Test(t *testing.T) {
 	assert.Equal(t, GetU(), float32(7), "should be the same.")
 }
 '''
+
+test_rust = '''\
+extern crate my_test;
+
+#[test]
+fn test() {
+	unsafe {
+		assert_eq!(my_test::v, 2);
+		my_test::v = 5;
+		assert_eq!(my_test::v, 5);
+		
+		assert_eq!(my_test::s.v, 4);
+		my_test::s.v = 9;
+		assert_eq!(my_test::s.v, 9);
+
+		assert_eq!(my_test::w, 14);
+
+		assert_eq!(my_test::u, 7.0);
+	}
+}
+'''

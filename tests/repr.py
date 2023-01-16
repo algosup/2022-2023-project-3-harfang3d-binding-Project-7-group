@@ -39,3 +39,15 @@ test_go = '''\
 package mytest
 
 '''
+
+test_rust = '''\
+extern crate my_test;
+
+#[test]
+fn test() {
+	unsafe {
+		let o = my_test::SomeStruct::new();
+		assert_eq!(o.repr(), "repr!");
+	}
+}
+'''

@@ -27,3 +27,7 @@ my_test = require "my_test"
 test_go = '''\
 package mytest
 '''
+
+test_rust = '''\
+extern crate my_test;
+'''

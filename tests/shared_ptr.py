@@ -104,3 +104,26 @@ func Test(t *testing.T) {
 	assert.True(t, spn.IsNil(), "should be nil.")
 }
 '''
+
+test_rust = '''\
+extern crate my_test;
+
+#[test]
+fn test() {
+	unsafe {
+		let sp = my_test::get_shared_ptr_to_simple_struct();
+
+		assert_eq!(sp.u, 4.0);
+		assert_eq!(sp.v, 7);
+
+		let sp2 = my_test::ssimple_struct::new(9.0);
+		
+		assert_eq!(sp2.u, 9.0);
+		assert_eq!(sp2.v, 90);
+
+		let spn = my_test::get_empty_shared_ptr();
+
+		assert!(spn.is_none());
+	}
+}
+'''

@@ -45,3 +45,22 @@ end
 test_go = '''\
 package mytest
 '''
+
+test_rust = '''\
+extern crate my_test;
+
+#[test]
+fn test() {
+	unsafe {
+		let do_step = || Result<(),MyError> {
+			assert_eq!(my_test::get_int(), 8);
+			Ok(())
+		};
+
+		if let Err(_err) = do_steps() {
+			write_to_const_failed = true;
+		}
+		assert!(write_to_const_failed);
+	}
+}
+'''
