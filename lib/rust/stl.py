@@ -1,7 +1,5 @@
 
-
 import lang.rust
-
 
 def bind_stl(gen):
     gen.include('vector',True)
@@ -29,4 +27,28 @@ def bind_stl(gen):
             return out
 
         def from_c_call(self, out_var, expr, ownership):
-            return "C.GoString(%s)" % (out_var)
+            return "C.RustString(%s)" % (out_var)
+
+    
+def bind_function_T(gen, type, bound_name=None):
+	class RustStdFunctionConverter(lang.rust.RustTypeConverterCommon):
+		def get_type_glue(self, gen, module_name):
+			return ""
+
+	return gen.bind_type(RustStdFunctionConverter(type))
+
+
+class RustSliceToStdVectorConverter(lang.rust.RustTypeConverterCommon):
+	def __init__(self, type, T_conv):
+		native_type = f"std::vector<{T_conv.ctype}>"
+		super().__init__(type, native_type, None, native_type)
+		self.T_conv = T_conv
+
+	def get_type_glue(self, gen, module_name):
+		return ''
+		
+	def to_c_call(self, in_var, out_var_p, is_pointer):
+		return ""
+
+	def from_c_call(self, out_var, expr, ownership):
+		return ""

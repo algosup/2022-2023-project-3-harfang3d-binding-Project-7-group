@@ -1,10 +1,52 @@
 import gen
+import lib
+import lib.rust.std
+import lib.rust.stl
+import re
+import json
+from pypeg2 import parse
 
+def route_lambda(name):
+	return lambda args: "%s(%s);" % (name, ", ".join(args))
+
+
+def clean_name(name):
+	new_name = str(name).strip().replace("_", "").replace(":", "")
+	if new_name in ["break", "default", "func", "interface", "select", "case", "defer", "go", "map", "struct", "chan", "else", "goto", "package", "switch", "const", "fallthrough", "if", "range", "type", "continue", "for", "import", "return", "var" ]:
+		return new_name + "Go"
+	return new_name
+
+
+def clean_name_with_title(name):
+	new_name = ""
+	if "_" in name:
+		# redo a special string.title()
+		next_is_forced_uppercase = True
+		for c in name:
+			if c in ["*", "&"]:
+				new_name += c
+			elif c in ["_", "-"]:
+				next_is_forced_uppercase = True
+			else:
+				if next_is_forced_uppercase:
+					next_is_forced_uppercase = False
+					new_name += c.capitalize()
+				else:
+					new_name += c
+	else:
+		# make sur the first letter is capitalize
+		first_letter_checked = False
+		for c in name:
+			if c in ["*", "&"] or first_letter_checked:
+				new_name += c
+			elif not first_letter_checked:
+				first_letter_checked = True
+				new_name += c.capitalize()
+	return new_name.strip().replace("_", "").replace(":", "")
 
 class RustTypeConverterCommon(gen.TypeConverter):
 	def __init__(self, type, to_c_storage_type=None, bound_name=None, from_c_storage_type=None, needs_c_storage_class=None):
-		super.__init__(self, type, to_c_storage_type, bound_name,
-					from_c_storage_type, needs_c_storage_class)
+		super().__init__(type, to_c_storage_type, bound_name,from_c_storage_type, needs_c_storage_class)
 		self.base_type = type
 		self.rust_to_c_type = None
 		self.rust_type = None
@@ -401,7 +443,7 @@ uint32_t %s(void* p) {
 			# check the convert from the base (in case of ptr)
 			if  ('carg' in val and (val['carg'].ctype.is_pointer() or (hasattr(val['carg'].ctype, 'ref') and any(s in val['carg'].ctype.ref for s in ["&", "*"])))) or \
 				('storage_ctype' in val and (val['storage_ctype'].is_pointer() or (hasattr(val['storage_ctype'], 'ref') and any(s in val['storage_ctype'].ref for s in ["&", "*"])))) or \
-				isinstance(val['conv'], GoPtrTypeConverter):
+				isinstance(val['conv'], RustPtrTypeConverter):
 				# check if it's an enum
 				if val['conv'].bound_name in self._enums.keys():
 					enum_conv = self._get_conv_from_bound_name(val['conv'].bound_name)
@@ -423,7 +465,7 @@ uint32_t %s(void* p) {
 								arg_bound_name += f"{val['conv'].ctype} "
 					
 						# if it's a ptr type, remove a star
-						if isinstance(val['conv'], GoPtrTypeConverter):
+						if isinstance(val['conv'], RustPtrTypeConverter):
 							arg_bound_name = arg_bound_name.replace("*", "").replace("&", "")
 					else:
 						arg_bound_name += f"{val['conv'].bound_name} "
@@ -538,7 +580,7 @@ uint32_t %s(void* p) {
 		cleanClassname = clean_name_with_title(classname)
 
 		# special Slice
-		if isinstance(conv, lib.go.stl.GoSliceToStdVectorConverter):
+		if isinstance(conv, lib.rust.stl.RustSliceToStdVectorConverter):
 			arg_bound_name = self.__get_arg_bound_name_to_c({"conv": conv.T_conv})
 		else:
 			arg_bound_name = self.__get_arg_bound_name_to_c({"conv": conv})
@@ -669,7 +711,7 @@ uint32_t %s(void* p) {
 
 					# get arg name
 					# special Slice
-					if isinstance(argin["conv"], lib.go.stl.GoSliceToStdVectorConverter):
+					if isinstance(argin["conv"], lib.rust.stl.RustSliceToStdVectorConverter):
 						arg_bound_name = self.__get_arg_bound_name_to_c({"conv": argin["conv"].T_conv})
 					else:
 						arg_bound_name = self.__get_arg_bound_name_to_c(argin)
@@ -679,7 +721,7 @@ uint32_t %s(void* p) {
 					arg_bound_name = arg_bound_name.replace("const const", "const")
 
 					# special Slice
-					if isinstance(argin["conv"], lib.go.stl.GoSliceToStdVectorConverter):
+					if isinstance(argin["conv"], lib.rust.stl.RustSliceToStdVectorConverter):
 						go += f"size_t {clean_name(argin['carg'].name)}ToCSize, {arg_bound_name} *{clean_name(argin['carg'].name)}ToCBuf"
 					else:
 						# normal argument
@@ -710,7 +752,7 @@ uint32_t %s(void* p) {
 					# other normal args
 					for argin in proto["args"]:
 						# special Slice
-						if isinstance(argin["conv"], lib.go.stl.GoSliceToStdVectorConverter):
+						if isinstance(argin["conv"], lib.rust.stl.RustSliceToStdVectorConverter):
 							src, retval_c = self.__arg_from_c_to_cpp(argin, clean_name(str(argin["carg"].name)))
 						else:
 							src, retval_c = self.__arg_from_c_to_cpp(argin, str(argin["carg"].name))
@@ -1112,7 +1154,7 @@ uint32_t %s(void* p) {
 		# check if reflect package is needed
 		for conv in self._FABGen__type_convs.values():
 			# special Slice
-			if isinstance(conv, lib.go.stl.GoSliceToStdVectorConverter):
+			if isinstance(conv, lib.rust.stl.RustSliceToStdVectorConverter):
 				rust_bind += '	"reflect"\n'
 				break
 		# add runtime package if we have class
@@ -1124,7 +1166,7 @@ uint32_t %s(void* p) {
 		rust_bind += '	"unsafe"\n' \
 				')\n'
 
-		with open("lib/go/WrapperConverter.go_", "r") as file:
+		with open("lib/rust/WrapperConverter.rust_", "r") as file:
 			lines = file.readlines()
 			rust_bind += "".join(lines)
 			rust_bind += "\n"
@@ -1139,7 +1181,7 @@ uint32_t %s(void* p) {
 			cleanBoundName = clean_name_with_title(conv.bound_name)
 
 			# special Slice
-			if isinstance(conv, lib.go.stl.GoSliceToStdVectorConverter):
+			if isinstance(conv, lib.rust.stl.RustSliceToStdVectorConverter):
 				arg_boung_name = self.__get_arg_bound_name_to_go({"conv":conv.T_conv})
 				rust_bind += f"// {clean_name_with_title(conv.bound_name)} ...\n" \
 							f"type {clean_name_with_title(conv.bound_name)} []{arg_boung_name}\n\n"
@@ -1158,8 +1200,8 @@ uint32_t %s(void* p) {
 							"}\n\n" \
 							f"// New{cleanBoundName}FromCPointer ...\n" \
 							f"func New{cleanBoundName}FromCPointer(p unsafe.Pointer) *{cleanBoundName} {{\n" \
-							f"	retvalGO := &{cleanBoundName}{{h: (C.{clean_name_with_title(self._name)}{cleanBoundName})(p)}}\n" \
-							f"	return retvalGO\n" \
+							f"	retvalRust := &{cleanBoundName}{{h: (C.{clean_name_with_title(self._name)}{cleanBoundName})(p)}}\n" \
+							f"	return retvalRust\n" \
 							"}\n"
 			
 			# it's a sequence

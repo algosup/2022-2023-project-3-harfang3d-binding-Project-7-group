@@ -127,7 +127,7 @@
 			"python": "${command:python.interpreterPath}",
 			"program": "${workspaceRoot}/bind.py",
 			"cwd": "${workspaceRoot}",
-			"args": ["${workspaceRoot}/examples/harfang.py", "--cpython", "--out", "${workspaceRoot}/out"],
+			"args": ["${workspaceRoot}/examples/simple_example/adder.py", "--rust", "--out", "${workspaceRoot}/out"],
 			"env": null,
 			"envFile": "${workspaceRoot}/.env",
 			"debugOptions": [
