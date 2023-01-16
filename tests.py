@@ -439,8 +439,8 @@ class GoTestBed:
 			return False
 
 		# after build, delete the wrapper.cpp to test the lib which has been build
-		if os.path.exists(os.path.join(work_path, 'wrapper.cpp')):
-			os.remove(os.path.join(work_path, 'wrapper.cpp'))
+		# if os.path.exists(os.path.join(work_path, 'wrapper.cpp')):
+		# 	os.remove(os.path.join(work_path, 'wrapper.cpp'))
 
 		print("Executing Go test...")
 		os.chdir(work_path)
