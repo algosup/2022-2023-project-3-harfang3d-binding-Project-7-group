@@ -47,3 +47,14 @@ func Test(t *testing.T) {
 	assert.Equal(t, GetFloat(), float32(8), "should be the same.")
 }
 """
+
+test_rust = """\
+extern crate my_test;
+
+#[test]
+fn test() {
+	unsafe {
+		assert_eq!(my_test::get_int(), 8);
+		assert_eq!(my_test::get_float(), 8.0);
+	}
+}

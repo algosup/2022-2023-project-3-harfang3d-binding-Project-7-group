@@ -95,3 +95,27 @@ func Test(t *testing.T) {
 	assert.Equal(t, NEc, NamedEnum(4096), "should be the same.")
 }
 '''
+
+test_rust = '''\
+extern crate my_test;
+
+#[test]
+fn test() {
+	unsafe {
+		assert_eq!(my_test::GE_a, 0);
+		assert_eq!(my_test::GE_b, 1);
+		assert_eq!(my_test::GE_c, 8);
+
+		assert_eq!(my_test::SE_a, 0);
+		assert_eq!(my_test::SE_b, 128);
+		assert_eq!(my_test::SE_c, 512);
+
+		assert_eq!(my_test::TE_a, 0);
+		assert_eq!(my_test::TE_b, 1);
+		assert_eq!(my_test::TE_c, 16384);
+
+		assert_eq!(my_test::NE_a, 0);
+		assert_eq!(my_test::NE_b, 1);
+		assert_eq!(my_test::NE_c, 4096);
+	}
+}
