@@ -71,7 +71,6 @@ assert(my_test.add_int_by_pointer(3, 4) == 7)
 assert(my_test.add_int_by_reference(3, 4) == 7)
 '''
 
-
 test_go = '''\
 package mytest
 
@@ -100,8 +99,9 @@ func Test(t *testing.T) {
 
 test_rust = '''\
 extern crate my_test;
-[%test]
+#[test]
 fn test() {
+	unsafe {
 	assert_eq!(my_test::return_int(), 8);
 	assert_eq!(my_test::return_float(), 8.0);
 	assert_eq!(my_test::return_const_char_ptr(), "const char * -> string");
@@ -114,4 +114,6 @@ fn test() {
 	let b = 4;
 	assert_eq!(my_test::add_int_by_pointer(&a, &b), 7);
 	assert_eq!(my_test::add_int_by_reference(a, b), 7);
+}
+}
 '''

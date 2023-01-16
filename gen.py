@@ -24,21 +24,22 @@ enum OwnershipPolicy { NonOwning, Copy, Owning };
 '''
 
 
-#
+#converts a function to its C representation
 def get_fully_qualified_function_signature(func):
 	out = ''
-	if hasattr(func, 'void_rval'):
+	#Get return type
+	if hasattr(func, 'void_rval'): # void return type
 		out += 'void'
 	else:
-		out += str(func.rval)
-
+		out += str(func.rval) # return type
+	#Get all arguments from the Ctype function
 	if hasattr(func, 'args'):
 		args = [str(arg) for arg in func.args]
 		out += '(%s)' % ', '.join(args)
-	else:
+	else: #No arguments
 		out += '()'
 
-	return out
+	return out #return a string of the form rtype [arg1,arg2...]
 
 
 def get_fully_qualified_ctype_name(ctype):
@@ -210,7 +211,6 @@ def clean_name_with_title(name):
 #
 typename = re.compile(r"(_|[A-z])[A-z0-9_]*")
 ref_re = re.compile(r"[&*]+")
-
 
 #
 class _CType:
