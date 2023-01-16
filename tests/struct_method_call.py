@@ -139,3 +139,37 @@ func Test(t *testing.T) {
 	assert.Equal(t, sOut2.GetA(), int32(28), "should be the same.")
 }
 '''
+
+test_rust = '''\
+extern crate my_test;
+
+#[test]
+fn test() {
+	unsafe {
+		let s = my_test::simple_struct::SimplestConstructor();
+
+		assert_eq!(s.get_a(), 1);
+		assert_eq!(s.set_a_with_v0_v1(8, 2), true);
+
+		assert_eq!(s.get_a(), 10);
+		assert_eq!(s.set_a(9), 9);
+		assert_eq!(s.get_a(), 9);
+
+		assert_eq!(my_test::simple_struct::get_static_int(), 4);
+
+		let mut s_out = my_test::get_modify_arg_out();
+		assert_eq!(s_out.get_a(), 4);
+
+		let mut s_out = my_test::get_modify_arg_out_with_k(my_test::simple_struct::WithV(5));
+		assert_eq!(s_out.get_a(), 16);
+
+		let s2 = my_test::simple_struct2::WithOtherStruct(s_out);
+		assert_eq!(s2.get_a(), 16);
+
+		let mut s_out2 = my_test::get_modify_arg_out2();
+		assert_eq!(s_out2.get_a(), 4);
+
+		let mut s_out2 = my_test::get_modify_arg_out2_with_k(s);
+		assert_eq!(s_out2.get_a(), 28);
+	}
+}

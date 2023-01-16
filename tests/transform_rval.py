@@ -109,3 +109,20 @@ func Test(t *testing.T) {
 	assert.Equal(t, C.GetBaseValue(), int32(12), "should be the same.")
 }
 '''
+
+test_rust = '''\
+extern crate my_test;
+
+#[test]
+fn test() {
+	unsafe {
+		let b = my_test::get_b();
+		assert_eq!(b.b, 3);
+		assert_eq!(b.GetBaseValue(), 12);
+		
+		let c = my_test::get_c();
+		assert_eq!(c.c, 7);
+		assert_eq!(c.GetBaseValue(), 12);
+	}
+}
+'''
