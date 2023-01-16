@@ -22,7 +22,7 @@ def bind_defaults(gen):
 		lib.go.stl.bind_stl(gen)
 	elif gen.get_language() == 'Rust':
 		import lib.rust.std
-		#import lib.rust.stl
+		import lib.rust.stl
 
 		lib.rust.std.bind_std(gen)
-		#lib.rust.stl.bind_stl(gen)
+		lib.rust.stl.bind_stl(gen)

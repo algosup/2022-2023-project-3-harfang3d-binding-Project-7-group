@@ -1,10 +1,8 @@
-
-
 import lang.rust
 
 def bind_stl(gen):
-    gen.include('vector',True)
-    gen.include('string',True)
+    gen.add_include('vector',True)
+    gen.add_include('string',True)
 
     class RustStringConverter(lang.rust.RustTypeConverterCommon):
         def __init__(self, type, to_c_storage_type=None, bound_name=None, from_c_storage_type=None, needs_c_storage_class=False):
@@ -30,7 +28,6 @@ def bind_stl(gen):
         def from_c_call(self, out_var, expr, ownership):
             return "C.RustString(%s)" % (out_var)
 
-    
 def bind_function_T(gen, type, bound_name=None):
 	class RustStdFunctionConverter(lang.rust.RustTypeConverterCommon):
 		def get_type_glue(self, gen, module_name):

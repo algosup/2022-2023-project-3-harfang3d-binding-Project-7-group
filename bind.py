@@ -122,11 +122,6 @@ if args.go:
 if args.rust:
 	rust_gen = lang.rust.RustGenerator()
 	output_binding(setup_generator(rust_gen))
-
-
-
-	os.chdir("..")
-	
 if args.xml:
 	output_binding(setup_generator(lang.xml.XMLGenerator()))
 
