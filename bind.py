@@ -125,6 +125,8 @@ if args.rust:
 
 
 
+	os.chdir("..")
+	
 if args.xml:
 	output_binding(setup_generator(lang.xml.XMLGenerator()))
 

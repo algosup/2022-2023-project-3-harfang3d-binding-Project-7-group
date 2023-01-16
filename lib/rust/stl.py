@@ -1,4 +1,5 @@
 
+
 import lang.rust
 
 def bind_stl(gen):
