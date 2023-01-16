@@ -1,10 +1,10 @@
-import gen
-import lib
-import lib.rust.std
-import lib.rust.stl
 import re
 import json
 from pypeg2 import parse
+import gen
+import lib
+# import lib.rust.std
+# import lib.rust.stl
 
 def route_lambda(name):
 	return lambda args: "%s(%s);" % (name, ", ".join(args))
@@ -1166,7 +1166,7 @@ uint32_t %s(void* p) {
 		rust_bind += '	"unsafe"\n' \
 				')\n'
 
-		with open("lib/rust/WrapperConverter.rust_", "r") as file:
+		with open("lib/rust/WrapperConverter.rs_", "r") as file:
 			lines = file.readlines()
 			rust_bind += "".join(lines)
 			rust_bind += "\n"
