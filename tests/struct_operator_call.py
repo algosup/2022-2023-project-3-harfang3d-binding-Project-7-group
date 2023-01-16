@@ -170,3 +170,44 @@ func Test(t *testing.T) {
 	assert.True(t, a.Ne(b), "should be the same.")
 }
 """
+
+test_rust = '''\
+extern crate my_test;
+
+#[test]
+fn test() {
+	unsafe {
+		let a = my_test::simple_struct::new(4);
+		let b = my_test::simple_struct::new(8);
+		
+		let mut s = a.add_simple_struct(&b);
+		assert_eq!(s.get_v(), 12);
+		s.inplace_add_simple_struct(&b);
+		assert_eq!(s.get_v(), 20);
+		s.inplace_add_int(4);
+		assert_eq!(s.get_v(), 24);
+		
+		s = s.div_int(4);
+		assert_eq!(s.get_v(), 6);
+		s.inplace_div_int(3);
+		assert_eq!(s.get_v(), 2);
+		s.inplace_add_simple_struct(&a);
+		assert_eq!(s.get_v(), 6);
+
+
+		s = s.mul_simple_struct(&a);
+		assert_eq!(s.get_v(), 24);
+		s.inplace_mul_int(2);
+		assert_eq!(s.get_v(), 48);
+
+		s = s.sub_simple_struct(&b);
+		assert_eq!(s.get_v(), 40);
+		s.inplace_sub_int(32);
+		assert_eq!(s.get_v(), 8);
+
+		let c = a.mul_int(2);
+		assert!(c.eq(&b));
+		assert!(!a.ne(&b));
+	}
+}
+'''

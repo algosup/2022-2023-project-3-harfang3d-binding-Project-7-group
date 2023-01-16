@@ -124,3 +124,28 @@ func Test(t *testing.T) {
 	TestStdFunction(t)
 }
 '''
+
+test_rust = '''\
+extern crate my_test;
+
+#[test]
+fn test() {
+	unsafe {
+		my_test::SetSimpleVoidFunction(simple_void_function);
+		my_test::InvokeSimpleVoidFunction();
+
+		my_test::SetComputeFunction(compute_function);
+		let r = my_test::InvokeComputeFunction(5, 3, 4);
+
+		assert_eq!(r, 19);
+	}
+}
+
+extern "C" fn simple_void_function() {
+	println!("void function called!");
+}
+
+extern "C" fn compute_function(v: i32, m: i32, c: i32) -> i32 {
+	v * m + c
+}
+'''

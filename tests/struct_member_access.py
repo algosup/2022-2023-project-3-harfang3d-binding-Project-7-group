@@ -137,3 +137,47 @@ func Test(t *testing.T) {
 	assert.Equal(t, s.GetD(), int32(9), "should be the same.")
 }
 """
+
+test_rust = '''\
+extern crate my_test;
+
+#[test]
+fn test() {
+	unsafe {
+		let s = my_test::return_simple_struct_by_pointer();
+
+		assert_eq!(s.a, 7);
+		assert_eq!(s.b, 17.5);
+		assert_eq!(s.c, true);
+		assert_eq!(s.d, 9);
+		assert_eq!(s.text_field, "some content");
+
+		s.a = -2;
+		s.b = -4.5;
+		s.c = false;
+		
+		assert_eq!(s.a, -2);
+		assert_eq!(s.b, -4.5);
+		assert_eq!(s.c, false);
+
+		s.a += 4;
+		assert_eq!(s.a, 2);
+
+		// write to const member
+		// can't set d because it's a const
+		// check if it didn't bind it
+
+		let do_step = || Result<(),MyError> {
+			s.d = 12;
+			Ok(())
+		};
+
+		if let Err(_err) = do_steps() {
+			write_to_const_failed = true;
+		}
+		
+		assert_eq!(write_to_const_failed, true);
+		assert_eq!(s.d, 9);
+	}
+}
+'''
