@@ -574,7 +574,7 @@ class FABGen:
 	#
 	def begin_type(self, conv, features, nobind=False):
 		"""Declare a new type converter."""
-		if self.verbose:
+		if True:#self.verbose:
 			print('Binding type %s (%s)' % (conv.bound_name, conv.ctype))
 
 		self._header += conv.get_type_api(self._name)
