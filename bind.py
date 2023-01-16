@@ -116,6 +116,8 @@ if args.go:
 	except:
 		print("clang-format was not found, ideally use to have beautiful .h file")
 
+	os.chdir("..")
+	
 if args.xml:
 	output_binding(setup_generator(lang.xml.XMLGenerator()))
 
