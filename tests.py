@@ -15,7 +15,7 @@ import os
 import lang.cpython
 import lang.lua
 import lang.go
-
+import lang.rust
 #endregion
 
 #region Parsing
@@ -492,34 +492,34 @@ install(TARGETS my_test DESTINATION "${{CMAKE_SOURCE_DIR}}/" COMPONENT my_test)
 
 def build_and_deploy_rust_extension(work_path, build_path):
 	print("Generating build system...")
-	try:
-		if args.linux:
-			subprocess.check_output(['cmake', '..'])
-		else:
-			subprocess.check_output('cmake .. -G "%s"' % cmake_generator)
-	except subprocess.CalledProcessError as e:
-		print(e.output.decode('utf-8'))
-		return False
+	#try:
+	#	if args.linux:
+	#		subprocess.check_output(['cmake', '..'])
+	#	else:
+	#		subprocess.check_output('cmake .. -G "%s"' % cmake_generator)
+	#except subprocess.CalledProcessError as e:
+	#	print(e.output.decode('utf-8'))
+	#	return False
 
 	print("Building extension...")
-	try:
-		if args.linux:
-			subprocess.check_output(['make'])
-		else:
-			subprocess.check_output(['cmake', '--build', '.', '--config', 'Release'])
-	except subprocess.CalledProcessError as e:
-		print(e.output.decode('utf-8'))
-		return False
+	#try:
+	#	if args.linux:
+	#		subprocess.check_output(['make'])
+	#	else:
+	#		subprocess.check_output(['cmake', '--build', '.', '--config', 'Release'])
+	#except subprocess.CalledProcessError as e:
+	#	print(e.output.decode('utf-8'))
+	#	return False
 
 	print("install extension...")
-	try:
-		if args.linux:
-			subprocess.check_output(['make', 'install'])
-		else:
-			subprocess.check_output(['cmake', '--install', '.', '--config', 'Release'])
-	except subprocess.CalledProcessError as e:
-		print(e.output.decode('utf-8'))
-		return False
+	#try:
+	#	if args.linux:
+	#		subprocess.check_output(['make', 'install'])
+	#	else:
+	#		subprocess.check_output(['cmake', '--install', '.', '--config', 'Release'])
+	#except subprocess.CalledProcessError as e:
+	#	print(e.output.decode('utf-8'))
+	#	return False
 
 	return True
 
@@ -532,7 +532,7 @@ class RustTestBed:
 		# copy test file
 		test_path = os.path.join(work_path, 'test.rs')
 		with open(test_path, 'w') as file:
-			file.write(module.test_go)
+			file.write(module.test_rust)
 
 		# if need special other file in package
 		if hasattr(module, "test_special_rust"):
@@ -551,8 +551,8 @@ class RustTestBed:
 			return False
 
 		# after build, delete the wrapper.cpp to test the lib which has been build
-		if os.path.exists(os.path.join(work_path, 'wrapper.cpp')):
-			os.remove(os.path.join(work_path, 'wrapper.cpp'))
+		#if os.path.exists(os.path.join(work_path, 'wrapper.cpp')):
+		#	os.remove(os.path.join(work_path, 'wrapper.cpp'))
 
 		print("Executing Rust test...")
 		os.chdir(work_path)
@@ -601,7 +601,7 @@ else:
 	test_names = [file[:-3] for file in os.listdir('./tests') if file.endswith('.py')]
 
 
-if args.linux or args.python_base_path:
+if args.python_base_path:
 	gen = lang.cpython.CPythonGenerator()
 	gen.verbose = False
 	run_tests(gen, test_names, CPythonTestBed())
@@ -618,7 +618,7 @@ if args.go_build:
 
 if args.rust_build:
 	gen = lang.rust.RustGenerator()
-	gen.verbose = False
+	gen.verbose = True
 	run_tests(gen, test_names, RustTestBed())
 
 
