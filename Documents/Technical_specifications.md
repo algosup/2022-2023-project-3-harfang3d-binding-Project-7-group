@@ -1,0 +1,40 @@
+- ## Introduction
+    - ### Document Tracking and version (Revision History)
+    - ### Purpose of Document
+        - #### Global definition
+        - #### Benefits to engineers
+        - #### Benefits to the team
+    - ### Points of contact
+        - #### Points of Contact
+    - ### Project Overview
+        - ### Context/Background
+        - ### Goals, Product/Client requirements
+        - ### Assumptions
+        - ### Constraints
+    - ### Glossary
+- ## Proposed Solution
+    - ### Dependencies
+    - ### External Elements
+    - ### Architecture Diagram:
+    - ### Technical Specifications
+    - ### Test Plan & Quality Assurance
+    - ### Risk assessment and security risks/measures
+    - ### Environment
+    - ### Performance
+    - ### Rollback plan (?)
+    - ### Security
+    - ### Pros and Cons
+    - ### Alternate designs or solutions
+- ## Development & Maintenance
+    - ### Schedule of development
+    - #### Work estimates and timelines
+    - #### Prioritization
+    - #### Milestones
+    - #### Future work
+    - ### Success Assessment
+        - #### a. Impact
+        - #### b. Metrics
+    - ### Testing
+    - ### CI/CD, maintaining
+- ## Conclusion
+    - ### Future improvements
