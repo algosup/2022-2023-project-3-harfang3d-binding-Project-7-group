@@ -96,18 +96,18 @@ fn test() {
 	unsafe {
 		let mut s = my_test::simple_struct::new();
 
-		assert_eq!(s.get_a(), 3);
-		assert_eq!(s.get_b(), 11);
-		assert_eq!(s.get_c(), 1);
+		assert_eq!(s.GetA(), 3);
+		assert_eq!(s.GetB(), 11);
+		assert_eq!(s.GetC(), 1);
 
-		s.set_a(1);
-		s.set_b(7);
-		s.set_c(2);
+		s.SetA(1);
+		s.SetB(7);
+		s.SetC(2);
 
-		assert_eq!(s.get_a(), 1);
-		assert_eq!(s.get_b(), 7);
-		assert_eq!(s.get_c(), 2);
+		assert_eq!(s.GetA(), 1);
+		assert_eq!(s.GetB(), 7);
+		assert_eq!(s.GetC(), 2);
 	}
 }
-'''w
+'''
 	

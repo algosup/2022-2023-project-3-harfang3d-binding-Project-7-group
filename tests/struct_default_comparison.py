@@ -85,12 +85,12 @@ extern crate my_test;
 #[test]
 fn test() {
 	unsafe {
-		let a = my_test::get_obj0();
-		let b = my_test::get_obj0();
+		let a = my_test::MyTestGetObj0();
+		let b = my_test::MyTestGetObj0();
 		
 		assert!(a == b, "should be the same.");
 
-		let c = my_test::get_obj1();
+		let c = my_test::MyTestGetObj1();
 		
 		assert!(a != c, "should not be the same.");
 		assert!(b != c, "should not be the same.");

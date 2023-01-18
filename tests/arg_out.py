@@ -127,25 +127,25 @@ extern crate my_test;
 fn test() {
 	unsafe {
 		let mut a = my_test::A::new();
-		my_test::modify_in_out_struct(&mut a);
+		my_test::MyTestModifyInOutStruct(&mut a);
 		assert_eq!(a.v, 3);
 
-		let (a, b) = my_test::out_values_function_call(2, 3);
+		let (a, b) = my_test::MyTestOutValuesFunctionCall(2, 3);
 		assert_eq!(a, 16);
 		assert_eq!(b, 42);
 
-		let (r, a, b) = my_test::out_values_function_call_rval(2);
+		let (r, a, b) = my_test::MyTestOutValuesFunctionCallRval(2);
 		assert_eq!(r, 2);
 		assert_eq!(a, 16);
 		assert_eq!(b, 28);
 
-		let (r, a, b) = my_test::out_values_function_call_rval_with_k(2, 2);
+		let (r, a, b) = my_test::MyTestOutValuesFunctionCallRvalWithK(2, 2);
 		assert_eq!(r, 4);
 		assert_eq!(a, 16);
 		assert_eq!(b, 28);
 
 		let mut w = 5;
-		let rb = my_test::in_out_value(&mut w);
+		let rb = my_test::MyTestInOutValue(&mut w);
 		assert!(rb);
 		assert_eq!(w, 20);
 	}

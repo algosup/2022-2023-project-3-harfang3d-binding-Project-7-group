@@ -144,7 +144,7 @@ extern crate my_test;
 #[test]
 fn test() {
 	unsafe {
-		let s = my_test::return_simple_struct_by_pointer();
+		let s = my_test::MyTestReturnSimpleStructByPointer();
 
 		assert_eq!(s.a, 7);
 		assert_eq!(s.b, 17.5);
