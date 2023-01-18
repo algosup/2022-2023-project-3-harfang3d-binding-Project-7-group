@@ -54,7 +54,7 @@ extern crate my_test;
 #[test]
 fn test() {
 	unsafe {
-		assert_eq!(my_test::get_int(), 8);
-		assert_eq!(my_test::get_float(), 8.0);
+		assert_eq!(my_test::MyTestGetInt(), 8);
+		assert_eq!(my_test::MyTestGetFloat(), 8.0);
 	}
 }

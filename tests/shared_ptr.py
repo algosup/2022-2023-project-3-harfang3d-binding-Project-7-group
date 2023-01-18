@@ -111,19 +111,19 @@ extern crate my_test;
 #[test]
 fn test() {
 	unsafe {
-		let sp = my_test::get_shared_ptr_to_simple_struct();
+		let sp = my_test::MyTestGetSharedPtrToSimpleStruct();
 
 		assert_eq!(sp.u, 4.0);
 		assert_eq!(sp.v, 7);
 
-		let sp2 = my_test::ssimple_struct::new(9.0);
+		let sp2 = my_test::MyTestSsimpleStruct::new(9.0);
 		
 		assert_eq!(sp2.u, 9.0);
 		assert_eq!(sp2.v, 90);
 
-		let spn = my_test::get_empty_shared_ptr();
+		let spn = my_test::MyTestGetEmptySharedPtr();
 
-		assert!(spn.is_none());
+		assert!(spn.isNone());
 	}
 }
 '''
