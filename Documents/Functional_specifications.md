@@ -45,6 +45,8 @@ The main objective of this project is to allow Rust programs to utilize the func
 ## Personas
 ![#Anna](./images/Persona_Anna.png)
 ![#John](./images/Persona_John.png)
+![#Michael](./images/Persona_Michael.png)
+![#Michael](./images/Persona_Sarah.png)
 
 ## Objectives
 The main objectives of the binding are to:
@@ -53,6 +55,7 @@ The main objectives of the binding are to:
 * Be well-tested, following Fabgen's existing templates, to ensure that it works correctly and is reliable.
 * Be released under an open-source license, allowing developers to use and modify it as needed.
 * Be as well optimized as possible not to slow down programs using the library
+* Make the Rust code as user-friendly as possible by using idiomatic language.
 
 ## Scope
 The scope of the binding includes:
