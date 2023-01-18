@@ -5,7 +5,6 @@
         - #### Benefits to engineers
         - #### Benefits to the team
     - ### Points of contact
-        - #### Points of Contact
     - ### Project Overview
         - ### Context/Background
         - ### Goals, Product/Client requirements
@@ -13,28 +12,24 @@
         - ### Constraints
     - ### Glossary
 - ## Proposed Solution
-    - ### Dependencies
-    - ### External Elements
-    - ### Architecture Diagram:
+    - ### Dependencies External Elements
+    - ### Architecture Diagrams:
     - ### Technical Specifications
     - ### Test Plan & Quality Assurance
     - ### Risk assessment and security risks/measures
-    - ### Environment
     - ### Performance
-    - ### Rollback plan (?)
-    - ### Security
     - ### Pros and Cons
     - ### Alternate designs or solutions
 - ## Development & Maintenance
     - ### Schedule of development
-    - #### Work estimates and timelines
-    - #### Prioritization
-    - #### Milestones
-    - #### Future work
+      - #### Work estimates and timelines
+      - #### Prioritization
+      - #### Milestones
+      - #### Future work
     - ### Success Assessment
         - #### a. Impact
         - #### b. Metrics
-    - ### Testing
-    - ### CI/CD, maintaining
+    - ### Ongoing Testing
+    - ### CI/CD Pipeline
 - ## Conclusion
     - ### Future improvements
