@@ -12,5 +12,7 @@ i128 & u128 & biguint(int256): How to deal with them?)-->
 
 
 Do they want to see specifications
-Do they want some kind of delivery (crate, pull request …x
+Do they want some kind of delivery (crate, pull request …)
 Do we need to cover multiple os’s
+
+Do they know there's an issue on test 15 of go ? -> Do they know how to fix it ?
