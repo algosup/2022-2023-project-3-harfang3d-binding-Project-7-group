@@ -46,7 +46,7 @@ The main objective of this project is to allow Rust programs to utilize the func
 ![#Anna](./images/Persona_Anna.png)
 ![#John](./images/Persona_John.png)
 ![#Michael](./images/Persona_Michael.png)
-![#Michael](./images/Persona_Sarah.png)
+![#Sarah](./images/Persona_Sarah.png)
 
 ## Objectives
 The main objectives of the binding are to:
@@ -117,6 +117,30 @@ The binding should be distributed as a fork of the existing repository of the Ha
 
 ## Support
 Users will be able to file bug reports and feature requests on the project's issue tracker on Github. 
+
+## Examples
+### FABGen
+In order to use the Rust binding, the user must first describe the functions they want in a python file. Here is an example on how to do it:
+```python
+```
+
+Then, they must use Fabgen to generate a Rust binding for the C++ library. 
+```bash
+python3 bind.py <lang> --out <output-folder> <script.py>
+```
+For example:
+```bash
+python3 bind.py --rust --out ./out ./examples/harfang.py
+```
+Finally, they must import the library/crate created by Fabgen and use the Rust binding in their Rust program:
+```rust
+```
+
+### Harfang3D
+Harfang3D is an all-in-one 3D visualization library. Here is an example on how to use the Rust binding to create a 3D scene:
+```rust
+```
+
 
 ## Conclusion
 This functional specification outlines the requirements for the addition of a Rust binding to Fabgen, which will provide Rust programs with access to the functionalities provided by Fabgen. By meeting these requirements, the Rust binding will allow Rust developers to use Harfang3D in their projects and will provide a safe and idiomatic binding to work with C++ libraries.
