@@ -102,18 +102,18 @@ extern crate my_test;
 #[test]
 fn test() {
 	unsafe {
-		assert_eq!(my_test::return_int(), 8);
-		assert_eq!(my_test::return_float(), 8.0);
-		assert_eq!(my_test::return_const_char_ptr(), "const char * -> string");
+		assert_eq!(my_test::MyTestReturnInt(), 8);
+		assert_eq!(my_test::MyTestReturnFloat(), 8.0);
+		assert_eq!(my_test::MyTestReturnConstCharPtr(), "const char * -> string");
 
-		assert_eq!(my_test::return_int_by_pointer(), 9);
-		assert_eq!(my_test::return_int_by_reference(), 9);
+		assert_eq!(my_test::MyTestReturnIntByPointer(), 9);
+		assert_eq!(my_test::MyTestReturnIntByReference(), 9);
 
-		assert_eq!(my_test::add_int_by_value(3, 4), 7);
+		assert_eq!(my_test::MyTestAddIntByValue(3, 4), 7);
 		let a = 3;
 		let b = 4;
-		assert_eq!(my_test::add_int_by_pointer(&a, &b), 7);
-		assert_eq!(my_test::add_int_by_reference(a, b), 7);
+		assert_eq!(my_test::MyTestAddIntByPointer(&a, &b), 7);
+		assert_eq!(my_test::MyTestAddIntByReference(a, b), 7);
 	}
 }
 '''
