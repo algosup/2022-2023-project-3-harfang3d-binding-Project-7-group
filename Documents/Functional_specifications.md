@@ -139,6 +139,21 @@ Finally, they must import the library/crate created by Fabgen and use the Rust b
 ### Harfang3D
 Harfang3D is an all-in-one 3D visualization library. Here is an example on how to use the Rust binding to create a 3D scene:
 ```rust
+use harfang;
+hg::InputInit();
+hg::WindowSystemInit();
+
+let win = hg::RenderInit(400, 300, hg::RF_None);
+
+while !hg::ReadKeyboard().Key(hg::K_Escape) {
+    hg::SetViewRect(0, 0, 0, 400, 300);
+    hg::SetViewClear(0, hg::CF_Color, hg::RGBA32(96, 32, 255));
+
+    hg::Touch(0);
+
+    hg::Frame();
+    hg::UpdateWindow(win);
+}
 ```
 
 
