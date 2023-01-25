@@ -121,7 +121,41 @@ Users will be able to file bug reports and feature requests on the project's iss
 ## Examples
 ### FABGen
 In order to use the Rust binding, the user must first describe the functions they want in a python file. Here is an example on how to do it:
+C++ files you want to import:
+
+subtracter.h:
+```c++
+#pragma once
+int subtracter(int a, int b);
+float subtracter(float a, float b);
+```
+adder.h:
+```c++
+#pragma once
+int adder(int a, int b);
+float adder(float a, float b);
+```
+Python file describing the functions you want to use:
 ```python
+import lib
+
+def bind_adder(gen):
+    gen.add_include('./adder.h', True)
+    gen.bind_function('adder', 'int', ['int a', 'int b'])
+    gen.bind_function('adder', 'float', ['float a', 'float b'])
+    
+def bind_subtracter(gen):
+    gen.add_include('./subtracter.h', True)
+    gen.bind_function('subtracter', 'int', ['int a', 'int b'])
+    gen.bind_function('subtracter', 'float', ['float a', 'float b'])
+
+def bind(gen):
+    gen.start('math') # name of the generated library
+    lib.bind_defaults(gen)
+    bind_adder(gen)
+    bind_subtracter(gen)
+    gen.finalize()
+    return gen.get_output()
 ```
 
 Then, they must use Fabgen to generate a Rust binding for the C++ library. 
@@ -134,6 +168,9 @@ python3 bind.py --rust --out ./out ./examples/harfang.py
 ```
 Finally, they must import the library/crate created by Fabgen and use the Rust binding in their Rust program:
 ```rust
+use math;
+println!("{}", math::adder(1, 2));
+println!("{}", math::subtracter(1.0, 2.0));
 ```
 
 ### Harfang3D
@@ -155,7 +192,6 @@ while !hg::ReadKeyboard().Key(hg::K_Escape) {
     hg::UpdateWindow(win);
 }
 ```
-
 
 ## Conclusion
 This functional specification outlines the requirements for the addition of a Rust binding to Fabgen, which will provide Rust programs with access to the functionalities provided by Fabgen. By meeting these requirements, the Rust binding will allow Rust developers to use Harfang3D in their projects and will provide a safe and idiomatic binding to work with C++ libraries.
