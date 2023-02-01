@@ -122,6 +122,13 @@ if args.go:
 if args.rust:
 	rust_gen = lang.rust.RustGenerator()
 	output_binding(setup_generator(rust_gen))
+	os.chdir(args.out)
+	os.system(f"cargo init new {rust_gen._name}")
+	os.chdir("..")
+	#create a build.rs file
+	with open(os.path.join(args.out, "build.rs"), "w") as f:
+		f.write("fn main() {\n\tprintln!(\"cargo:rustc-link-lib=dylib=python3.8\");\n}")
+		
 if args.xml:
 	output_binding(setup_generator(lang.xml.XMLGenerator()))
 

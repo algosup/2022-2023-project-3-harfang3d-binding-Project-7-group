@@ -109,5 +109,5 @@ fn test() {
 		assert_eq!(s.get_c(), 2);
 	}
 }
-'''w
+'''
 	

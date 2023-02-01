@@ -395,7 +395,7 @@ def build_and_deploy_go_extension(work_path, build_path):
 		else:
 			subprocess.check_output(['cmake', '--build', '.', '--config', 'Release'])
 	except subprocess.CalledProcessError as e:
-		# print(e.output.decode('utf-8'))
+		#// print(e.output.decode('utf-8'))
 		sys.stdout.buffer.write(bytes(e.output))
 		return False
 
@@ -492,6 +492,8 @@ install(TARGETS my_test DESTINATION "${{CMAKE_SOURCE_DIR}}/" COMPONENT my_test)
 
 def build_and_deploy_rust_extension(work_path, build_path):
 	print("Generating build system...")
+	# TODO: use cargo to build rust extension
+	# TODO: cargo should call Cmake and then Make before compiling the rust	
 	#try:
 	#	if args.linux:
 	#		subprocess.check_output(['cmake', '..'])
@@ -561,10 +563,9 @@ class RustTestBed:
 		try:
 			subprocess.check_output('cargo new test_rust', shell=True, stderr=subprocess.STDOUT)
 			os.chdir(os.path.join(work_path, 'test_rust'))
-			subprocess.call("mv ../test.rs ./src/main.rs", shell=True, stderr=subprocess.STDOUT)
+			shutil.copyfile(f"{work_path}/test.rs", f"{work_path}/test_rust/src/lib.rs")
+			#shutil.rmtree(f"{work_path}/test_rust/src")
 			subprocess.check_output("cargo test", shell=True, stderr=subprocess.STDOUT)
-			#subprocess.check_output("goimports -w bind.go", shell=True, stderr=subprocess.STDOUT)
-			#subprocess.check_output('go test -run ""', shell=True, stderr=subprocess.STDOUT)
 		except subprocess.CalledProcessError as e:
 			print(e.output.decode('utf-8'))
 			success = False
