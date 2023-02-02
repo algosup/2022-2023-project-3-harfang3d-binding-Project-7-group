@@ -13,11 +13,11 @@ def bind_std(gen):
 
 		def to_c_call(self, in_var, out_var_p, is_pointer=False):
 			if is_pointer:
-				out = f"{out_var_p.replace('&', '_')}1 := C.CString(*{in_var})\n"
-				out += f"{out_var_p.replace('&', '_')} := &{out_var_p.replace('&', '_')}1\n"
+				out = f"let *mut {out_var_p.replace('&', '_')} : &str = wrapString(*{in_var})\n"
+				#out += f"{out_var_p.replace('&', '_')} := &{out_var_p.replace('&', '_')}1\n"
 			else:
-				out = f"{out_var_p.replace('&', '_')}, idFin{out_var_p.replace('&', '_')} := wrapString({in_var})\n"
-				out += f"defer idFin{out_var_p.replace('&', '_')}()\n"
+				out = f"let *mut {out_var_p.replace('&', '_')} : &str = wrapString({in_var})\n"
+				#out += f"defer idFin{out_var_p.replace('&', '_')}()\n"
 			return out
 
 		def from_c_call(self, out_var, expr, ownership):
@@ -76,7 +76,7 @@ def bind_std(gen):
 	gen.bind_type(RustBasicTypeConverter('char32_t','c_int', 'i32'))
 
 	#TODO: This should be defined at runtime instead to support systems other than 64bits
-	gen.bind_type(RustBasicTypeConverter('sie_t','c_long', 'isize'))
+	gen.bind_type(RustBasicTypeConverter('size_t','c_long', 'isize'))
 
 	gen.bind_type(RustBasicTypeConverter('float','c_float', 'f32'))
 	gen.bind_type(RustBasicTypeConverter('double','c_double', 'f64'))
