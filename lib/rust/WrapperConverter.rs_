@@ -1,0 +1,4 @@
+
+fn wrapString<'a>(s : &'a const* char) -> &'a str {
+    unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(s as *const u8, std::strlen(s)))}
+}
