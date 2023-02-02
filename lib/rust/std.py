@@ -23,7 +23,7 @@ def bind_std(gen):
 		def from_c_call(self, out_var, expr, ownership):
 			return "C.GoString(%s)" % (out_var)
 
-	gen.bind_type(RustConstCharPtrConverter("const char *"))
+	gen.bind_type(RustConstCharPtrConverter("&str"))
 
 	class RustBasicTypeConverter(lang.rust.RustTypeConverterCommon):
 		def __init__(self, type, c_type, rust_type, to_c_storage_type=None, bound_name=None, from_c_storage_type=None, needs_c_storage_class=False):
