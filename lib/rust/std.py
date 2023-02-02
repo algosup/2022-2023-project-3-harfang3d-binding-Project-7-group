@@ -75,6 +75,8 @@ def bind_std(gen):
 	gen.bind_type(RustBasicTypeConverter('char16_t','c_short', 'i16'))
 	gen.bind_type(RustBasicTypeConverter('char32_t','c_int', 'i32'))
 
+	gen.bind_type(RustBasicTypeConverter('intptr_t', 'C.intptr_t', 'uintptr'))
+
 	#TODO: This should be defined at runtime instead to support systems other than 64bits
 	gen.bind_type(RustBasicTypeConverter('size_t','c_long', 'isize'))
 
