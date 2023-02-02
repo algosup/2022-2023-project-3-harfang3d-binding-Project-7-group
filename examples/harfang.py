@@ -5,7 +5,6 @@ import lang.cpython
 import lib.std
 import lib.stl
 import lib
-
 import copy
 
 
@@ -17,39 +16,56 @@ def route_lambda(name):
 	return lambda args: '%s(%s);' % (name, ', '.join(args))
 
 
-def bind_std_vector(gen, T_conv):
+def bind_std_vector(gen, T_conv, bound_name=None):
 	if gen.get_language() == 'CPython':
-		PySequence_T_type = 'PySequenceOf%s' % T_conv.bound_name.title()
+		PySequence_T_type = 'PySequenceOf%s' % T_conv.bound_name
 		gen.bind_type(lib.cpython.stl.PySequenceToStdVectorConverter(PySequence_T_type, T_conv))
 	elif gen.get_language() == 'Lua':
-		LuaTable_T_type = 'LuaTableOf%s' % T_conv.bound_name.title()
+		LuaTable_T_type = 'LuaTableOf%s' % T_conv.bound_name
 		gen.bind_type(lib.lua.stl.LuaTableToStdVectorConverter(LuaTable_T_type, T_conv))
-	
-	conv = gen.begin_class('std::vector<%s>' % T_conv.ctype, bound_name='%sList' % T_conv.bound_name.title(), features={'sequence': lib.std.VectorSequenceFeature(T_conv)})
+	elif gen.get_language() == 'Go':
+		GoTable_T_type = 'GoSliceOf%s' % T_conv.bound_name
+		gen.bind_type(lib.go.stl.GoSliceToStdVectorConverter(GoTable_T_type, T_conv))
+
+	if bound_name is None:
+		bound_name = '%sList' % T_conv.bound_name
+
+	conv = gen.begin_class('std::vector<%s>' % T_conv.ctype, bound_name=bound_name, features={'sequence': lib.std.VectorSequenceFeature(T_conv)})
 	if gen.get_language() == 'CPython':
 		gen.bind_constructor(conv, ['?%s sequence' % PySequence_T_type])
 	elif gen.get_language() == 'Lua':
 		gen.bind_constructor(conv, ['?%s sequence' % LuaTable_T_type])
+	elif gen.get_language() == 'Go':
+		gen.bind_constructor(conv, ['?%s sequence' % GoTable_T_type])
 
+	def validate_std_vector_at_idx(gen, var, ctx):
+		out = 'if ((_self->size() == 0) || (%s >= _self->size())) {\n' % var
+		out += gen.proxy_call_error("Invalid index", ctx)
+		out += '}\n'
+		return out
+
+	gen.bind_method(conv, 'clear', 'void', [])
+	gen.bind_method(conv, 'reserve', 'void', ['size_t size'])
 	gen.bind_method(conv, 'push_back', 'void', ['%s v' % T_conv.ctype])
 	gen.bind_method(conv, 'size', 'size_t', [])
-	gen.bind_method(conv, 'at', repr(T_conv.ctype), ['int idx'])
+	gen.bind_method(conv, 'at', repr(T_conv.ctype), ['size_t idx'], features={'validate_arg_in': [validate_std_vector_at_idx]})
 
 	gen.end_class(conv)
 	return conv
 
 
-def expand_std_vector_proto(gen, protos):
+def expand_std_vector_proto(gen, protos, is_constructor_proto=False):
 	prefix = {
 		'CPython' : 'PySequenceOf',
-		'Lua' : 'LuaTableOf'
+		'Lua' : 'LuaTableOf',
+		'Go' : 'GoSliceOf'
 	}
 	name_prefix = {
 		'CPython' : 'SequenceOf',
 		'Lua' : 'TableOf',
 		'Go' : 'SliceOf'
 	}
-	
+
 	if gen.get_language() not in prefix:
 		return protos
 
@@ -57,18 +73,41 @@ def expand_std_vector_proto(gen, protos):
 	for proto in protos:
 		expanded = []
 		add_expanded = False
-		for arg in proto[1]:
+
+		start = 0 if is_constructor_proto else 1
+		args = proto[start]
+		blacklist = []
+
+		feats = proto[start+1]
+		if 'arg_out' in feats:
+			blacklist = blacklist + feats['arg_out']
+
+		for arg in args:
+			is_optional = arg[0:1] == '?'
+			if is_optional:
+				arg = arg[1:]
+
 			carg = gen.parse_named_ctype(arg)
 			conv = gen.select_ctype_conv(carg.ctype)
+
 			has_sequence = ('sequence' in conv._features) if conv is not None else False
-			if has_sequence:
+			is_blacklisted = carg.name.naked_name() in blacklist
+
+			if has_sequence and not is_blacklisted:
 				add_expanded = True
 				seq = conv._features['sequence']
 				arg = '%s%s %s_%s' % (prefix[gen.get_language()], seq.wrapped_conv.bound_name, name_prefix[gen.get_language()], carg.name)
-			else:	
-				expanded.append(arg)
+
+			if is_optional:
+				arg = '?' + arg
+
+			expanded.append(arg)
+
 		if add_expanded:
-			expanded_protos.append((proto[0], expanded, copy.deepcopy(proto[2])))
+			if is_constructor_proto:
+				expanded_protos.append((expanded, proto[1]))
+			else:
+				expanded_protos.append((proto[0], expanded, copy.deepcopy(proto[2])))
 
 	return protos + expanded_protos
 
@@ -88,95 +127,15 @@ static void _DeleteWorkers() { hg::g_task_system.get().delete_workers(); }
 def bind_log(gen):
 	gen.add_include('foundation/log.h')
 
-	gen.bind_named_enum('hg::LogLevel', ['LogMessage', 'LogWarning', 'LogError', 'LogDebug', 'LogAll'], storage_type='uint32_t')
+	gen.bind_named_enum('hg::LogLevel', ['LL_Normal', 'LL_Warning', 'LL_Error', 'LL_Debug', 'LL_All'])
 
-	gen.bind_function('hg::SetLogLevel', 'void', ['hg::LogLevel mask'])
-	gen.bind_function('hg::SetLogIsDetailed', 'void', ['bool is_detailed'])
+	gen.bind_function('hg::set_log_level', 'void', ['hg::LogLevel log_level'], bound_name='SetLogLevel')
+	gen.bind_function('hg::set_log_detailed', 'void', ['bool is_detailed'], bound_name='SetLogDetailed')
 
-	gen.bind_function('hg::FlushLog', 'void', [])
-
-
-def bind_binary_data(gen):
-	gen.add_include('foundation/binary_data.h')
-
-	binary_data = gen.begin_class('hg::BinaryData')
-
-	gen.bind_constructor_overloads(binary_data, [
-		([], []),
-		(['const hg::BinaryData &data'], [])
-	])
-
-	gen.bind_method(binary_data, 'GetDataSize', 'size_t', [])
-
-	gen.bind_method(binary_data, 'GetCursor', 'size_t', [])
-	gen.bind_method(binary_data, 'SetCursor', 'void', ['size_t position'])
-
-	gen.bind_method(binary_data, 'GetCursorPtr', 'const char *', [])
-	gen.bind_method(binary_data, 'GetDataSizeAtCursor', 'size_t', [])
-
-	gen.bind_method(binary_data, 'Reset', 'void', [])
-
-	gen.bind_method(binary_data, 'Commit', 'void', ['size_t size'])
-	gen.bind_method(binary_data, 'Grow', 'void', ['size_t size'])
-	gen.bind_method(binary_data, 'Skip', 'void', ['size_t size'])
-
-	def bind_write(type, alias):
-		# unit write
-		gen.bind_method(binary_data, 'Write<%s>' % type, 'void', ['const %s &v' % type], bound_name='Write%s' % alias)
-
-		# batch write
-		gen.insert_binding_code('''
-static void _BinaryData_Write%ss(hg::BinaryData *data, const std::vector<%s> &vs) {
-	for (auto &v : vs)
-		data->Write<%s>(v);
-}
-''' % (alias, type, type))
-
-		features = {'route': lambda args: '_BinaryData_Write%ss(%s);' % (alias, ', '.join(args))}
-
-		protos = [('void', ['const std::vector<%s> &vs' % type], features)]
-		gen.bind_method_overloads(binary_data, 'Write%ss' % alias, expand_std_vector_proto(gen, protos))
-
-	bind_write('int8_t', 'Int8')
-	bind_write('int16_t', 'Int16')
-	bind_write('int32_t', 'Int32')
-	bind_write('int64_t', 'Int64')
-	bind_write('uint8_t', 'UInt8')
-	bind_write('uint16_t', 'UInt16')
-	bind_write('uint32_t', 'UInt32')
-	bind_write('uint64_t', 'UInt64')
-	bind_write('float', 'Float')
-	bind_write('double', 'Double')
-
-	def bind_write_at(type, alias):
-		gen.bind_method(binary_data, 'WriteAt<%s>' % type, 'void', ['const %s &v' % type, 'size_t position'], bound_name='Write%sAt' % alias)
-
-	bind_write_at('int8_t', 'Int8')
-	bind_write_at('int16_t', 'Int16')
-	bind_write_at('int32_t', 'Int32')
-	bind_write_at('int64_t', 'Int64')
-	bind_write_at('uint8_t', 'UInt8')
-	bind_write_at('uint16_t', 'UInt16')
-	bind_write_at('uint32_t', 'UInt32')
-	bind_write_at('uint64_t', 'UInt64')
-	bind_write_at('float', 'Float')
-	bind_write_at('double', 'Double')
-
-	# TODO Read<T> requires tuple return value
-
-	gen.bind_method(binary_data, 'Free', 'void', [])
-
-	gen.end_class(binary_data)
-
-	#
-	gen.bind_function('BinaryDataBlur3d', 'void', ['hg::BinaryData &data', 'uint32_t width', 'uint32_t height', 'uint32_t depth'])
-
-
-def bind_task_system(gen):
-	gen.add_include('foundation/task.h')
-
-	gen.typedef('hg::task_affinity', 'char')
-	gen.typedef('hg::task_priority', 'char')
+	gen.bind_function('hg::log', 'void', ['const char *msg', '?const char *details'], bound_name='Log')
+	gen.bind_function('hg::warn', 'void', ['const char *msg', '?const char *details'], bound_name='Warn')
+	gen.bind_function('hg::error', 'void', ['const char *msg', '?const char *details'], bound_name='Error')
+	gen.bind_function('hg::debug', 'void', ['const char *msg', '?const char *details'], bound_name='Debug')
 
 
 def bind_time(gen):
@@ -210,115 +169,529 @@ def bind_time(gen):
 
 	gen.bind_function('hg::time_now', 'hg::time_ns', [])
 
+	gen.add_include('foundation/time_to_string.h')
+
 	gen.bind_function('hg::time_to_string', 'std::string', ['hg::time_ns t'])
 
-	lib.stl.bind_future_T(gen, 'hg::time_ns', 'FutureTime')
+
+def bind_clock(gen):
+	gen.add_include('foundation/clock.h')
+
+	gen.bind_function('hg::reset_clock', 'void', [], bound_name='ResetClock')
+
+	gen.bind_function('hg::tick_clock', 'hg::time_ns', [], bound_name='TickClock')
+	gen.bind_function('hg::get_clock', 'hg::time_ns', [], bound_name='GetClock')
+	gen.bind_function('hg::get_clock_dt', 'hg::time_ns', [], bound_name='GetClockDt')
+
+	gen.bind_function('hg::skip_clock', 'void', [], bound_name='SkipClock')
 
 
 def bind_input(gen):
 	gen.add_include('platform/input_system.h')
 
-	gen.bind_named_enum('hg::InputDeviceType', [
-		'InputDeviceAny', 'InputDeviceKeyboard', 'InputDeviceMouse', 'InputDevicePad', 'InputDeviceTouch', 'InputDeviceHMD', 'InputDeviceController'
-	])
+	gen.bind_function('hg::InputInit', 'void', [])
+	gen.bind_function('hg::InputShutdown', 'void', [])
 
+	# mouse
+	gen.bind_named_enum('hg::MouseButton', ['MB_0', 'MB_1', 'MB_2', 'MB_3', 'MB_4', 'MB_5', 'MB_6', 'MB_7'])
+
+	gen.insert_binding_code('''
+static int _MouseState_X(hg::MouseState *s) { return s->x; }
+static int _MouseState_Y(hg::MouseState *s) { return s->y; }
+static bool _MouseState_Button(hg::MouseState *s, int btn) { return s->button[btn]; }
+static int _MouseState_Wheel(hg::MouseState *s) { return s->wheel; }
+static int _MouseState_HWheel(hg::MouseState *s) { return s->hwheel; }
+''')
+
+	mouse_state = gen.begin_class('hg::MouseState')
+	gen.bind_method(mouse_state, 'X', 'int', [], {'route': route_lambda('_MouseState_X')})
+	gen.bind_method(mouse_state, 'Y', 'int', [], {'route': route_lambda('_MouseState_Y')})
+	gen.bind_method(mouse_state, 'Button', 'bool', ['hg::MouseButton btn'], {'route': route_lambda('_MouseState_Button')})
+	gen.bind_method(mouse_state, 'Wheel', 'int', [], {'route': route_lambda('_MouseState_Wheel')})
+	gen.bind_method(mouse_state, 'HWheel', 'int', [], {'route': route_lambda('_MouseState_HWheel')})
+	gen.end_class(mouse_state)
+
+	gen.bind_function('hg::ReadMouse', 'hg::MouseState', ['?const char *name'])
+	gen.bind_function('hg::GetMouseNames', 'std::vector<std::string>', [])
+
+	mouse = gen.begin_class('hg::Mouse')
+	gen.bind_constructor(mouse, ['?const char *name'])
+
+	gen.bind_method(mouse, 'X', 'int', [])
+	gen.bind_method(mouse, 'Y', 'int', [])
+	gen.bind_method(mouse, 'DtX', 'int', [])
+	gen.bind_method(mouse, 'DtY', 'int', [])
+
+	gen.bind_method(mouse, 'Down', 'bool', ['int button'])
+	gen.bind_method(mouse, 'Pressed', 'bool', ['int button'])
+	gen.bind_method(mouse, 'Released', 'bool', ['int button'])
+
+	gen.bind_method(mouse, 'Wheel', 'int', [])
+	gen.bind_method(mouse, 'HWheel', 'int', [])
+
+	gen.bind_method(mouse, 'Update', 'void', [])
+
+	gen.bind_method(mouse, 'GetState', 'hg::MouseState', []) 
+	gen.bind_method(mouse, 'GetOldState', 'hg::MouseState', []) 
+
+	gen.end_class(mouse)
+
+	# keyboard
 	gen.bind_named_enum('hg::Key', [
-		'KeyLShift', 'KeyRShift', 'KeyLCtrl', 'KeyRCtrl', 'KeyLAlt', 'KeyRAlt', 'KeyLWin', 'KeyRWin',
-		'KeyTab', 'KeyCapsLock', 'KeySpace', 'KeyBackspace', 'KeyInsert', 'KeySuppr', 'KeyHome', 'KeyEnd', 'KeyPageUp', 'KeyPageDown',
-		'KeyUp', 'KeyDown', 'KeyLeft', 'KeyRight',
-		'KeyEscape',
-		'KeyF1', 'KeyF2', 'KeyF3', 'KeyF4', 'KeyF5', 'KeyF6', 'KeyF7', 'KeyF8', 'KeyF9', 'KeyF10', 'KeyF11', 'KeyF12',
-		'KeyPrintScreen', 'KeyScrollLock', 'KeyPause', 'KeyNumLock', 'KeyReturn',
-		'Key0', 'Key1', 'Key2', 'Key3', 'Key4', 'Key5', 'Key6', 'Key7', 'Key8', 'Key9',
-		'KeyNumpad0', 'KeyNumpad1', 'KeyNumpad2', 'KeyNumpad3', 'KeyNumpad4', 'KeyNumpad5', 'KeyNumpad6', 'KeyNumpad7', 'KeyNumpad8', 'KeyNumpad9',
-		'KeyAdd', 'KeySub', 'KeyMul', 'KeyDiv', 'KeyEnter',
-		'KeyA', 'KeyB', 'KeyC', 'KeyD', 'KeyE', 'KeyF', 'KeyG', 'KeyH', 'KeyI', 'KeyJ', 'KeyK', 'KeyL', 'KeyM', 'KeyN', 'KeyO', 'KeyP', 'KeyQ', 'KeyR', 'KeyS', 'KeyT', 'KeyU', 'KeyV', 'KeyW', 'KeyX', 'KeyY', 'KeyZ',
-		'KeyLast'
+		'K_LShift', 'K_RShift', 'K_LCtrl', 'K_RCtrl', 'K_LAlt', 'K_RAlt', 'K_LWin', 'K_RWin',
+		'K_Tab', 'K_CapsLock', 'K_Space', 'K_Backspace', 'K_Insert', 'K_Suppr', 'K_Home', 'K_End', 'K_PageUp', 'K_PageDown',
+		'K_Up', 'K_Down', 'K_Left', 'K_Right',
+		'K_Escape',
+		'K_F1', 'K_F2', 'K_F3', 'K_F4', 'K_F5', 'K_F6', 'K_F7', 'K_F8', 'K_F9', 'K_F10', 'K_F11', 'K_F12',
+		'K_PrintScreen', 'K_ScrollLock', 'K_Pause', 'K_NumLock', 'K_Return',
+		'K_0', 'K_1', 'K_2', 'K_3', 'K_4', 'K_5', 'K_6', 'K_7', 'K_8', 'K_9',
+		'K_Numpad0', 'K_Numpad1', 'K_Numpad2', 'K_Numpad3', 'K_Numpad4', 'K_Numpad5', 'K_Numpad6', 'K_Numpad7', 'K_Numpad8', 'K_Numpad9',
+		'K_Add', 'K_Sub', 'K_Mul', 'K_Div', 'K_Enter',
+		'K_A', 'K_B', 'K_C', 'K_D', 'K_E', 'K_F', 'K_G', 'K_H', 'K_I', 'K_J', 'K_K', 'K_L', 'K_M', 'K_N', 'K_O', 'K_P', 'K_Q', 'K_R', 'K_S', 'K_T', 'K_U', 'K_V', 'K_W', 'K_X', 'K_Y', 'K_Z',
+		'K_Plus', 'K_Comma', 'K_Minus', 'K_Period',
+		'K_OEM1', 'K_OEM2', 'K_OEM3', 'K_OEM4', 'K_OEM5', 'K_OEM6', 'K_OEM7', 'K_OEM8',
+		'K_BrowserBack', 'K_BrowserForward', 'K_BrowserRefresh', 'K_BrowserStop', 'K_BrowserSearch', 'K_BrowserFavorites', 'K_BrowserHome', 'K_VolumeMute', 'K_VolumeDown', 'K_VolumeUp',
+		'K_MediaNextTrack', 'K_MediaPrevTrack', 'K_MediaStop', 'K_MediaPlayPause', 'K_LaunchMail', 'K_LaunchMediaSelect', 'K_LaunchApp1', 'K_LaunchApp2',
+		'K_Last'
 	])
 
-	gen.bind_named_enum('hg::Button', [
-		'Button0', 'Button1', 'Button2', 'Button3', 'Button4', 'Button5', 'Button6', 'Button7', 'Button8', 'Button9', 'Button10',
-		'Button11', 'Button12', 'Button13', 'Button14', 'Button15', 'Button16', 'Button17', 'Button18', 'Button19', 'Button20',
-		'Button21', 'Button22', 'Button23', 'Button24', 'Button25', 'Button26', 'Button27', 'Button28', 'Button29', 'Button30',
-		'Button31', 'Button32', 'Button33', 'Button34', 'Button35', 'Button36', 'Button37', 'Button38', 'Button39', 'Button40',
-		'Button41', 'Button42', 'Button43', 'Button44', 'Button45', 'Button46', 'Button47', 'Button48', 'Button49', 'Button50',
-		'Button51', 'Button52', 'Button53', 'Button54', 'Button55', 'Button56', 'Button57', 'Button58', 'Button59', 'Button60',
-		'Button61', 'Button62', 'Button63', 'Button64', 'Button65', 'Button66', 'Button67', 'Button68', 'Button69', 'Button70',
-		'Button71', 'Button72', 'Button73', 'Button74', 'Button75', 'Button76', 'Button77', 'Button78', 'Button79', 'Button80',
-		'Button81', 'Button82', 'Button83', 'Button84', 'Button85', 'Button86', 'Button87', 'Button88', 'Button89', 'Button90',
-		'Button91', 'Button92', 'Button93', 'Button94', 'Button95', 'Button96', 'Button97', 'Button98', 'Button99', 'Button100',
-		'Button101', 'Button102', 'Button103', 'Button104', 'Button105', 'Button106', 'Button107', 'Button108', 'Button109',
-		'Button110', 'Button111', 'Button112', 'Button113', 'Button114', 'Button115', 'Button116', 'Button117', 'Button118',
-		'Button119', 'Button120', 'Button121', 'Button122', 'Button123', 'Button124', 'Button125', 'Button126', 'Button127',
-		'ButtonBack', 'ButtonStart', 'ButtonSelect', 'ButtonL1', 'ButtonL2', 'ButtonL3', 'ButtonR1', 'ButtonR2', 'ButtonR3',
-		'ButtonCrossUp', 'ButtonCrossDown', 'ButtonCrossLeft', 'ButtonCrossRight',
-		'ButtonLast'
+	gen.insert_binding_code('''
+static bool _KeyboardState_Key(hg::KeyboardState *s, hg::Key key) { return s->key[key]; }
+''')
+
+	keyboard_state = gen.begin_class('hg::KeyboardState')
+	gen.bind_method(keyboard_state, 'Key', 'bool', ['hg::Key key'], {'route': route_lambda('_KeyboardState_Key')})
+	gen.end_class(keyboard_state)
+
+	gen.bind_function('hg::ReadKeyboard', 'hg::KeyboardState', ['?const char *name'])
+	gen.bind_function('hg::GetKeyName', 'const char *', ['hg::Key key', '?const char *name'])
+	gen.bind_function('hg::GetKeyboardNames', 'std::vector<std::string>', [])
+
+	keyboard = gen.begin_class('hg::Keyboard')
+	gen.bind_constructor(keyboard, ['?const char *name'])
+
+	gen.bind_method(keyboard, 'Down', 'bool', ['hg::Key key'])
+	gen.bind_method(keyboard, 'Pressed', 'bool', ['hg::Key key'])
+	gen.bind_method(keyboard, 'Released', 'bool', ['hg::Key key'])
+
+	gen.bind_method(keyboard, 'Update', 'void', [])
+
+	gen.bind_method(keyboard, 'GetState', 'hg::KeyboardState', []) 
+	gen.bind_method(keyboard, 'GetOldState', 'hg::KeyboardState', []) 
+
+	gen.end_class(keyboard)
+
+	bind_signal_T(gen, 'TextInputSignal', 'void', ['const char*'], 'TextInputCallback')
+	gen.bind_variable('const hg::Signal<void(const char *)> hg::on_text_input', bound_name='OnTextInput')
+
+	# gamepad
+	gen.bind_named_enum('hg::GamepadAxes', ['GA_LeftX', 'GA_LeftY', 'GA_RightX', 'GA_RightY', 'GA_LeftTrigger', 'GA_RightTrigger', 'GA_Count'])
+	gen.bind_named_enum('hg::GamepadButton', [
+		'GB_ButtonA', 'GB_ButtonB', 'GB_ButtonX', 'GB_ButtonY', 'GB_LeftBumper', 'GB_RightBumper', 'GB_Back', 'GB_Start',
+		'GB_Guide', 'GB_LeftThumb', 'GB_RightThumb', 'GB_DPadUp', 'GB_DPadRight', 'GB_DPadDown', 'GB_DPadLeft', 'GB_Count'
 	])
 
-	gen.bind_named_enum('hg::AnalogInput', [
-		'InputAxisX', 'InputAxisY', 'InputAxisZ', 'InputAxisS', 'InputAxisT', 'InputAxisR',
-		'InputRotX', 'InputRotY', 'InputRotZ', 'InputRotS', 'InputRotT', 'InputRotR',
-		'InputButton0', 'InputButton1', 'InputButton2', 'InputButton3', 'InputButton4', 'InputButton5', 'InputButton6', 'InputButton7', 'InputButton8', 'InputButton9', 'InputButton10', 'InputButton11', 'InputButton12', 'InputButton13', 'InputButton14', 'InputButton15',
-		'InputLast'
+	gen.insert_binding_code('''
+static bool _GamepadState_IsConnected(hg::GamepadState *s) { return s->connected; }
+static float _GamepadState_Axes(hg::GamepadState *s, hg::GamepadAxes idx) { return idx < 6 ? s->axes[idx] : 0.f; }
+static bool _GamepadState_Button(hg::GamepadState *s, hg::GamepadButton btn) { return btn < 15 ? s->button[btn] : false; }
+''')
+
+	gamepad_state = gen.begin_class('hg::GamepadState')
+	gen.bind_method(gamepad_state, 'IsConnected', 'bool', [], {'route': route_lambda('_GamepadState_IsConnected')})
+	gen.bind_method(gamepad_state, 'Axes', 'float', ['hg::GamepadAxes idx'], {'route': route_lambda('_GamepadState_Axes')})
+	gen.bind_method(gamepad_state, 'Button', 'bool', ['hg::GamepadButton btn'], {'route': route_lambda('_GamepadState_Button')})
+	gen.end_class(gamepad_state)
+
+	gen.bind_function('hg::ReadGamepad', 'hg::GamepadState', ['?const char *name'])
+	gen.bind_function('hg::GetGamepadNames', 'std::vector<std::string>', [])
+
+	gamepad = gen.begin_class('hg::Gamepad')
+	gen.bind_constructor(gamepad, ['?const char *name'])
+
+	gen.bind_method(gamepad, 'IsConnected', 'bool', [])
+	gen.bind_method(gamepad, 'Connected', 'bool', [])
+	gen.bind_method(gamepad, 'Disconnected', 'bool', [])
+
+	gen.bind_method(gamepad, 'Axes', 'float', ['hg::GamepadAxes axis'])
+	gen.bind_method(gamepad, 'DtAxes', 'float', ['hg::GamepadAxes axis'])
+
+	gen.bind_method(gamepad, 'Down', 'bool', ['hg::GamepadButton btn'])
+	gen.bind_method(gamepad, 'Pressed', 'bool', ['hg::GamepadButton btn'])
+	gen.bind_method(gamepad, 'Released', 'bool', ['hg::GamepadButton btn'])
+
+	gen.bind_method(gamepad, 'Update', 'void', [])
+
+	gen.end_class(gamepad)
+	
+	# Joystick
+
+	gen.insert_binding_code('''
+static bool _JoystickState_IsConnected(hg::JoystickState *s) { return s->connected; }
+static float _JoystickState_Axes(hg::JoystickState *s, int idx) { return idx < s->nbAxes ? s->axes[idx] : 0.f; }
+static bool _JoystickState_Button(hg::JoystickState *s, int btn) { return btn < s->nbButtons ? s->buttons[btn] : false; }
+''')
+
+	Joystick_state = gen.begin_class('hg::JoystickState')
+	gen.bind_method(Joystick_state, 'IsConnected', 'bool', [], {'route': route_lambda('_JoystickState_IsConnected')})
+	gen.bind_method(Joystick_state, 'Axes', 'float', ['int idx'], {'route': route_lambda('_JoystickState_Axes')})
+	gen.bind_method(Joystick_state, 'Button', 'bool', ['int btn'], {'route': route_lambda('_JoystickState_Button')})
+	gen.end_class(Joystick_state)
+
+	gen.bind_function('hg::ReadJoystick', 'hg::JoystickState', ['?const char *name'])
+	gen.bind_function('hg::GetJoystickNames', 'std::vector<std::string>', [])
+	gen.bind_function('hg::GetJoystickDeviceNames', 'std::vector<std::string>', [])
+
+	Joystick = gen.begin_class('hg::Joystick')
+	gen.bind_constructor(Joystick, ['?const char *name'])
+
+	gen.bind_method(Joystick, 'IsConnected', 'bool', [])
+	gen.bind_method(Joystick, 'Connected', 'bool', [])
+	gen.bind_method(Joystick, 'Disconnected', 'bool', [])
+	
+	gen.bind_method(Joystick, 'AxesCount', 'int', [])
+	gen.bind_method(Joystick, 'Axes', 'float', ['int axis'])
+	gen.bind_method(Joystick, 'DtAxes', 'float', ['int axis'])
+	
+	gen.bind_method(Joystick, 'ButtonsCount', 'int', [])
+	gen.bind_method(Joystick, 'Down', 'bool', ['int btn'])
+	gen.bind_method(Joystick, 'Pressed', 'bool', ['int btn'])
+	gen.bind_method(Joystick, 'Released', 'bool', ['int btn'])
+
+	gen.bind_method(Joystick, 'Update', 'void', [])
+	gen.bind_method(Joystick, 'GetDeviceName', 'std::string', [])	
+
+	gen.end_class(Joystick)
+
+	# VR controller
+	gen.bind_named_enum('hg::VRControllerButton', [
+		'VRCB_DPad_Up', 'VRCB_DPad_Down', 'VRCB_DPad_Left', 'VRCB_DPad_Right', 'VRCB_System', 'VRCB_AppMenu', 'VRCB_Grip', 'VRCB_A',
+		'VRCB_ProximitySensor', 'VRCB_Axis0', 'VRCB_Axis1', 'VRCB_Axis2', 'VRCB_Axis3', 'VRCB_Axis4', 'VRCB_Count'
 	])
 
-	gen.bind_named_enum('hg::InputDeviceEffect', ['InputDeviceVibrate', 'InputDeviceVibrateLeft', 'InputDeviceVibrateRight', 'InputDeviceConstantForce'])
-	gen.bind_named_enum('hg::InputDeviceMatrix', ['InputDeviceMatrixHead'])
+	gen.insert_binding_code('''
+static bool _VRControllerState_IsConnected(hg::VRControllerState *s) { return s->connected; }
+static hg::Mat4 _VRControllerState_World(hg::VRControllerState *s) { return s->world; }
+static bool _VRControllerState_Pressed(hg::VRControllerState *s, hg::VRControllerButton btn) { return s->pressed[btn]; }
+static bool _VRControllerState_Touched(hg::VRControllerState *s, hg::VRControllerButton btn) { return s->touched[btn]; }
+static hg::tVec2<float> _VRControllerState_Surface(hg::VRControllerState *s, int idx) { return idx < 5 ? s->surface[idx] : hg::tVec2<float>{}; }
+''')
 
-	# hg::InputDevice
-	input_device = gen.begin_class('hg::InputDevice', bound_name='InputDevice_nobind', noncopyable=True, nobind=True)
-	gen.end_class(input_device)
+	vr_controller_state = gen.begin_class('hg::VRControllerState')
+	gen.bind_method(vr_controller_state, 'IsConnected', 'bool', [], {'route': route_lambda('_VRControllerState_IsConnected')})
+	gen.bind_method(vr_controller_state, 'World', 'hg::Mat4', [], {'route': route_lambda('_VRControllerState_World')})
+	gen.bind_method(vr_controller_state, 'Pressed', 'bool', ['hg::VRControllerButton btn'], {'route': route_lambda('_VRControllerState_Pressed')})
+	gen.bind_method(vr_controller_state, 'Touched', 'bool', ['hg::VRControllerButton btn'], {'route': route_lambda('_VRControllerState_Touched')})
+	gen.bind_method(vr_controller_state, 'Surface', 'hg::tVec2<float>', ['int idx'], {'route': route_lambda('_VRControllerState_Surface')})
+	gen.end_class(vr_controller_state)
 
-	shared_input_device = gen.begin_class('std::shared_ptr<hg::InputDevice>', bound_name='InputDevice', features={'proxy': lib.stl.SharedPtrProxyFeature(input_device)})
+	gen.bind_function('hg::ReadVRController', 'hg::VRControllerState', ['?const char *name'])
+	gen.bind_function('hg::SendVRControllerHapticPulse', 'void', ['hg::time_ns duration', '?const char *name'])
 
-	gen.bind_method(shared_input_device, 'GetType', 'hg::InputDeviceType', [], ['proxy'])
+	gen.bind_function('hg::GetVRControllerNames', 'std::vector<std::string>', [])
 
-	gen.bind_method(shared_input_device, 'Update', 'void', [], ['proxy'])
+	vr_controller = gen.begin_class('hg::VRController')
+	gen.bind_constructor(vr_controller, ['?const char *name'])
 
-	gen.bind_method(shared_input_device, 'IsDown', 'bool', ['hg::Key key'], ['proxy'])
-	gen.bind_method(shared_input_device, 'WasDown', 'bool', ['hg::Key key'], ['proxy'])
-	gen.bind_method(shared_input_device, 'WasPressed', 'bool', ['hg::Key key'], ['proxy'])
-	gen.bind_method(shared_input_device, 'WasReleased', 'bool', ['hg::Key key'], ['proxy'])
+	gen.bind_method(vr_controller, 'IsConnected', 'bool', [])
+	gen.bind_method(vr_controller, 'Connected', 'bool', [])
+	gen.bind_method(vr_controller, 'Disconnected', 'bool', [])
 
-	gen.bind_method(shared_input_device, 'IsButtonDown', 'bool', ['hg::Button button'], ['proxy'])
-	gen.bind_method(shared_input_device, 'WasButtonDown', 'bool', ['hg::Button button'], ['proxy'])
-	gen.bind_method(shared_input_device, 'WasButtonPressed', 'bool', ['hg::Button button'], ['proxy'])
-	gen.bind_method(shared_input_device, 'WasButtonReleased', 'bool', ['hg::Button button'], ['proxy'])
+	gen.bind_method(vr_controller, 'World', 'hg::Mat4', [])
 
-	gen.bind_method(shared_input_device, 'GetValue', 'float', ['hg::AnalogInput input'], ['proxy'])
-	gen.bind_method(shared_input_device, 'GetLastValue', 'float', ['hg::AnalogInput input'], ['proxy'])
-	gen.bind_method(shared_input_device, 'GetValueRange', 'bool', ['hg::AnalogInput input', 'float &min', 'float &max'], {'proxy': None, 'arg_out': ['min', 'max']})
-	gen.bind_method(shared_input_device, 'GetDelta', 'float', ['hg::AnalogInput input'], ['proxy'])
+	gen.bind_method(vr_controller, 'Down', 'bool', ['hg::VRControllerButton btn'])
+	gen.bind_method(vr_controller, 'Pressed', 'bool', ['hg::VRControllerButton btn'])
+	gen.bind_method(vr_controller, 'Released', 'bool', ['hg::VRControllerButton btn'])
 
-	gen.bind_method(shared_input_device, 'GetMatrix', 'hg::Matrix4', ['hg::InputDeviceMatrix mtx'], ['proxy'])
+	gen.bind_method(vr_controller, 'Touch', 'bool', ['hg::VRControllerButton btn'])
+	gen.bind_method(vr_controller, 'TouchStart', 'bool', ['hg::VRControllerButton btn'])
+	gen.bind_method(vr_controller, 'TouchEnd', 'bool', ['hg::VRControllerButton btn'])
 
-	gen.bind_method(shared_input_device, 'SetValue', 'bool', ['hg::AnalogInput input', 'float value'], ['proxy'])
-	gen.bind_method(shared_input_device, 'SetEffect', 'bool', ['hg::InputDeviceEffect effect', 'float value'], ['proxy'])
+	gen.bind_method(vr_controller, 'Surface', 'hg::tVec2<float>', ['int idx'])
+	gen.bind_method(vr_controller, 'DtSurface', 'hg::tVec2<float>', ['int idx'])
 
-	gen.bind_method(shared_input_device, 'IsConnected', 'bool', [], ['proxy'])
+	gen.bind_method(vr_controller, 'SendHapticPulse', 'void', ['hg::time_ns duration'])
 
-	gen.end_class(shared_input_device)
+	gen.bind_method(vr_controller, 'Update', 'void', [])
 
-	# hg::InputSystem
-	input_system = gen.begin_class('hg::InputSystem', noncopyable=True)
+	gen.end_class(vr_controller)
 
-	gen.bind_method(input_system, 'Update', 'void', [])
+	# VR generic tracker
+	gen.insert_binding_code('''
+static bool _VRGenericTrackerState_IsConnected(hg::VRGenericTrackerState *s) { return s->connected; }
+static hg::Mat4 _VRGenericTrackerState_World(hg::VRGenericTrackerState *s) { return s->world; }
+''')
 
-	gen.bind_method(input_system, 'GetDevices', 'std::vector<std::string>', [])
-	gen.bind_method(input_system, 'GetDevice', 'std::shared_ptr<hg::InputDevice>', ['const std::string &name'], {'check_rval': check_bool_rval_lambda(gen, 'Device not found')})
+	vr_generic_tracker_state = gen.begin_class('hg::VRGenericTrackerState')
+	gen.bind_method(vr_generic_tracker_state, 'IsConnected', 'bool', [], {'route': route_lambda('_VRGenericTrackerState_IsConnected')})
+	gen.bind_method(vr_generic_tracker_state, 'World', 'hg::Mat4', [], {'route': route_lambda('_VRGenericTrackerState_World')})
+	gen.end_class(vr_generic_tracker_state)
 
-	gen.end_class(input_system)
+	gen.bind_function('hg::ReadVRGenericTracker', 'hg::VRGenericTrackerState', ['?const char *name'])
 
-	gen.insert_binding_code('static hg::InputSystem &GetInputSystem() { return hg::g_input_system.get(); }\n\n')
-	gen.bind_function('GetInputSystem', 'hg::InputSystem &', [])
+	gen.bind_function('hg::GetVRGenericTrackerNames', 'std::vector<std::string>', [])
+
+	vr_generic_tracker = gen.begin_class('hg::VRGenericTracker')
+	gen.bind_constructor(vr_generic_tracker, ['?const char *name'])
+
+	gen.bind_method(vr_generic_tracker, 'IsConnected', 'bool', [])
+	gen.bind_method(vr_generic_tracker, 'World', 'hg::Mat4', [])
+
+	gen.bind_method(vr_generic_tracker, 'Update', 'void', [])
+
+	gen.end_class(vr_generic_tracker)
+
+
+def bind_openvr(gen):
+	gen.add_include('engine/openvr_api.h')
+
+	gen.bind_function('hg::OpenVRInit', 'bool', [])
+	gen.bind_function('hg::OpenVRShutdown', 'void', [])
+
+	openvr_eye = gen.begin_class('hg::OpenVREye')
+	gen.bind_members(openvr_eye, ['hg::Mat4 offset', 'hg::Mat44 projection'])
+	gen.end_class(openvr_eye)
+
+	gen.insert_binding_code('''
+static bgfx::FrameBufferHandle _OpenVREyeFrameBuffer_GetHandle(hg::OpenVREyeFrameBuffer *s) { return s->fb; }
+''')
+
+	openvr_eye_fb = gen.begin_class('hg::OpenVREyeFrameBuffer')
+	gen.bind_method(openvr_eye_fb, 'GetHandle', 'bgfx::FrameBufferHandle', [], {'route': route_lambda('_OpenVREyeFrameBuffer_GetHandle')})
+	gen.end_class(openvr_eye_fb)
+
+	gen.bind_named_enum('hg::OpenVRAA', ['OVRAA_None', 'OVRAA_MSAA2x', 'OVRAA_MSAA4x', 'OVRAA_MSAA8x', 'OVRAA_MSAA16x'])
+
+	gen.bind_function('hg::OpenVRCreateEyeFrameBuffer', 'hg::OpenVREyeFrameBuffer', ['?hg::OpenVRAA aa'])
+	gen.bind_function('hg::OpenVRDestroyEyeFrameBuffer', 'void', ['hg::OpenVREyeFrameBuffer &eye_fb'])
+
+	openvr_state = gen.begin_class('hg::OpenVRState')
+	gen.bind_members(openvr_state, ['hg::Mat4 body', 'hg::Mat4 head', 'hg::Mat4 inv_head', 'hg::OpenVREye left', 'hg::OpenVREye right', 'uint32_t width', 'uint32_t height'])
+	gen.end_class(openvr_state)
+
+	gen.bind_function('hg::OpenVRGetState', 'hg::OpenVRState', ['const hg::Mat4 &body', 'float znear', 'float zfar'])
+	gen.bind_function('hg::OpenVRStateToViewState', 'void', ['const hg::OpenVRState &state', 'hg::ViewState &left', 'hg::ViewState &right'], {'arg_out': ['left', 'right']})
+
+	gen.bind_function('hg::OpenVRSubmitFrame', 'void', ['const hg::OpenVREyeFrameBuffer &left', 'const hg::OpenVREyeFrameBuffer &right'])
+	gen.bind_function('hg::OpenVRPostPresentHandoff', 'void', [])
+
+	gen.bind_function('hg::OpenVRGetColorTexture', 'hg::Texture', ['const hg::OpenVREyeFrameBuffer &eye'])
+	gen.bind_function('hg::OpenVRGetDepthTexture', 'hg::Texture', ['const hg::OpenVREyeFrameBuffer &eye'])
+
+	gen.bind_function('hg::OpenVRGetFrameBufferSize', 'hg::tVec2<int>', [])
+
+	gen.bind_function('hg::OpenVRIsHMDMounted', 'bool', []);
+
+
+def bind_openxr(gen):
+	gen.add_include('engine/openxr_api.h')
+	
+	gen.bind_named_enum('hg::OpenXRExtensions', ['OXRExtensions_None', 'OXRExtensions_EyeGaze', 'OXRExtensions_Tracker', 'OXRExtensions_PassThrough', 'OXRExtensions_HandTracking', 'OXRExtensions_VARJO_QUADVIEWS', 'OXRExtensions_COMPOSITION_LAYER_DEPTH'])
+	gen.typedef('OpenXRExtensionsFlags', 'uint16_t')
+
+	gen.bind_function('hg::OpenXRInit', 'bool', ['?OpenXRExtensionsFlags ExtensionsFlagsEnable'])
+	gen.bind_function('hg::OpenXRShutdown', 'void', [])
+	
+	gen.insert_binding_code('''
+static bgfx::FrameBufferHandle _OpenXREyeFrameBuffer_GetHandle(hg::OpenXREyeFrameBuffer *s) { return s->fb; }
+''')
+
+	openxr_eye_fb = gen.begin_class('hg::OpenXREyeFrameBuffer')
+	gen.end_class(openxr_eye_fb)	
+	bind_std_vector(gen, openxr_eye_fb)
+	
+	openxr_frame_info = gen.begin_class('hg::OpenXRFrameInfo')
+	gen.bind_members(openxr_frame_info, ['std::vector<int> id_fbs'])
+	gen.end_class(openxr_frame_info)	
+	
+	gen.bind_named_enum('hg::OpenXRAA', ['OXRAA_None', 'OXRAA_MSAA2x', 'OXRAA_MSAA4x', 'OXRAA_MSAA8x', 'OXRAA_MSAA16x'])
+
+	gen.bind_function('hg::OpenXRCreateEyeFrameBuffer', 'std::vector<hg::OpenXREyeFrameBuffer>', ['?hg::OpenXRAA aa'])
+	gen.bind_function('hg::OpenXRDestroyEyeFrameBuffer', 'void', ['hg::OpenXREyeFrameBuffer &eye_fb'])
+	
+	gen.bind_function('hg::OpenXRGetInstanceInfo', 'std::string', [])
+	gen.bind_function('hg::OpenXRGetEyeGaze', 'bool', ['hg::Mat4 &eye_gaze'], {'arg_out': ['eye_gaze']})
+	gen.bind_function('hg::OpenXRGetHeadPose', 'bool', ['hg::Mat4 &head_pose'], {'arg_out': ['head_pose']})
+	
+	lib.stl.bind_function_T(gen, 'std::function<void(hg::Mat4*)>', 'update_controllersCallback')
+	lib.stl.bind_function_T(gen, 'std::function<uint16_t(hg::Rect<int>*, hg::ViewState*, uint16_t*, bgfx::FrameBufferHandle*)>', 'draw_sceneCallback')
+	gen.bind_function('hg::OpenXRSubmitSceneToForwardPipeline', 'hg::OpenXRFrameInfo', ['const hg::Mat4 &cam_offset', 'std::function<void(hg::Mat4*)> update_controllers', 'std::function<uint16_t(hg::Rect<int>*, hg::ViewState *, uint16_t* , bgfx::FrameBufferHandle*)> draw_scene', 'uint16_t& view_id', 'float z_near', 'float z_far'], {'arg_in_out': ['view_id']})
+	gen.bind_function('hg::OpenXRFinishSubmitFrameBuffer', 'void', ['const hg::OpenXRFrameInfo &frameInfo'])
+	
+	gen.bind_function('hg::OpenXRGetColorTexture', 'hg::Texture', ['const hg::OpenXREyeFrameBuffer &eye'])
+	gen.bind_function('hg::OpenXRGetDepthTexture', 'hg::Texture', ['const hg::OpenXREyeFrameBuffer &eye'])
+	
+	gen.bind_function('hg::OpenXRGetColorTextureFromId', 'hg::Texture', ['const std::vector<hg::OpenXREyeFrameBuffer> &eyes', 'const hg::OpenXRFrameInfo &frame_info', 'const int &index'])
+	gen.bind_function('hg::OpenXRGetDepthTextureFromId', 'hg::Texture', ['const std::vector<hg::OpenXREyeFrameBuffer> &eyes', 'const hg::OpenXRFrameInfo &frame_info', 'const int &index'])
+	
+	# hand joints	
+	gen.bind_named_enum('hg::HandsSide', ['LEFT', 'RIGHT', 'COUNT'])
+	
+	gen.bind_named_enum('hg::XrHandJoint', [		
+    'HAND_JOINT_PALM',
+    'HAND_JOINT_WRIST',
+    'HAND_JOINT_THUMB_METACARPAL',
+    'HAND_JOINT_THUMB_PROXIMAL',
+    'HAND_JOINT_THUMB_DISTAL',
+    'HAND_JOINT_THUMB_TIP',
+    'HAND_JOINT_INDEX_METACARPAL',
+    'HAND_JOINT_INDEX_PROXIMAL',
+    'HAND_JOINT_INDEX_INTERMEDIATE',
+    'HAND_JOINT_INDEX_DISTAL',
+    'HAND_JOINT_INDEX_TIP',
+    'HAND_JOINT_MIDDLE_METACARPAL',
+    'HAND_JOINT_MIDDLE_PROXIMAL',
+    'HAND_JOINT_MIDDLE_INTERMEDIATE',
+    'HAND_JOINT_MIDDLE_DISTAL',
+    'HAND_JOINT_MIDDLE_TIP',
+    'HAND_JOINT_RING_METACARPAL',
+    'HAND_JOINT_RING_PROXIMAL',
+    'HAND_JOINT_RING_INTERMEDIATE',
+    'HAND_JOINT_RING_DISTAL',
+    'HAND_JOINT_RING_TIP',
+    'HAND_JOINT_LITTLE_METACARPAL',
+    'HAND_JOINT_LITTLE_PROXIMAL',
+    'HAND_JOINT_LITTLE_INTERMEDIATE',
+    'HAND_JOINT_LITTLE_DISTAL',
+    'HAND_JOINT_LITTLE_TIP',
+	], prefix='XRHJ_')
+
+
+	gen.bind_function('hg::IsHandJointActive', 'bool', ['hg::HandsSide hand'])
+	gen.bind_function('hg::GetHandJointPose', 'hg::Mat4', ['hg::HandsSide hand', 'hg::XrHandJoint handJoint'])
+	gen.bind_function('hg::GetHandJointRadius', 'float', ['hg::HandsSide hand', 'hg::XrHandJoint handJoint'])
+	gen.bind_function('hg::GetHandJointLinearVelocity', 'hg::Vec3', ['hg::HandsSide hand', 'hg::XrHandJoint handJoint'])
+	gen.bind_function('hg::GetHandJointAngularVelocity', 'hg::Vec3', ['hg::HandsSide hand', 'hg::XrHandJoint handJoint'])
+		
+
+def bind_sranipal(gen):
+	gen.add_include('engine/sranipal_api.h')
+
+	gen.bind_function('hg::SRanipalInit', 'bool', [])
+	gen.bind_function('hg::SRanipalShutdown', 'void', [])
+	gen.bind_function('hg::SRanipalLaunchEyeCalibration', 'void', [])
+	gen.bind_function('hg::SRanipalIsViveProEye', 'bool', [])
+	
+	sranipal_eye_state = gen.begin_class('hg::SRanipalEyeState')
+	gen.bind_members(sranipal_eye_state, ['bool pupil_diameter_valid', 'hg::Vec3 gaze_origin_mm', 'hg::Vec3 gaze_direction_normalized', 'float pupil_diameter_mm', 'float eye_openness'])
+	gen.end_class(sranipal_eye_state)
+
+	sranipal_state = gen.begin_class('hg::SRanipalState')
+	gen.bind_members(sranipal_state, ['hg::SRanipalEyeState right_eye', 'hg::SRanipalEyeState left_eye'])
+	gen.end_class(sranipal_state)
+	gen.bind_function('hg::SRanipalGetState', 'hg::SRanipalState', [])
+
+
+def bind_recast_detour(gen):
+	gen.add_include('engine/recast_detour.h')
+	gen.add_include('DetourNavMesh.h')
+
+	# dtNavMesh	
+	nav_mesh = gen.bind_ptr('dtNavMesh *', bound_name='NavMesh')
+
+	# dtNavMeshQuery
+	nav_mesh_query = gen.bind_ptr('dtNavMeshQuery *', bound_name='NavMeshQuery')
+	gen.bind_function('hg::CreateNavMeshQuery', 'dtNavMeshQuery *', ['const dtNavMesh *mesh'])
+	
+	gen.bind_function('hg::LoadNavMeshFromFile', 'dtNavMesh *', ['const char *path'])
+	gen.bind_function('hg::LoadNavMeshFromAssets', 'dtNavMesh *', ['const char *name'])
+	gen.bind_function('hg::DestroyNavMesh', 'void', ['dtNavMesh *mesh'])
+	gen.bind_function('hg::DestroyNavMeshQuery', 'void', ['dtNavMeshQuery *mesh'])
+	gen.bind_function('hg::DrawNavMesh', 'void', ['const dtNavMesh *mesh', 'bgfx::ViewId view_id', 'const bgfx::VertexLayout &vtx_decl', 'bgfx::ProgramHandle prg', 'const std::vector<hg::UniformSetValue> &values', 'const std::vector<hg::UniformSetTexture> &textures', 'hg::RenderState state'])
+	gen.bind_function('hg::FindNavigationPathTo', 'std::vector<hg::Vec3>', ['const dtNavMeshQuery *query', 'const hg::Vec3 &from', 'const hg::Vec3 &to'])
+
+	# DetourCrowd	
+	gen.add_include('DetourCrowd.h')
+	
+	dt_crowd_agent_params = gen.begin_class('dtCrowdAgentParams', bound_name='CrowdAgentParams')
+	gen.end_class(dt_crowd_agent_params)
+
+	gen.insert_binding_code('''
+// FIXME bind type and flags once they are bound to a proper type
+static dtCrowdAgentParams _ConfigureCrowdAgent(float radius, float height, float max_acceleration, float max_speed, float collision_query_range, float path_optimization_range, float separation_weight) { //, unsigned char update_flags, unsigned char obstacle_avoidance_type, unsigned char query_filter_type)
+	dtCrowdAgentParams params;
+
+	params.radius = radius;
+	params.height = height;
+	params.maxAcceleration = max_acceleration;
+	params.maxSpeed = max_speed;
+	params.collisionQueryRange = collision_query_range;
+	params.pathOptimizationRange = path_optimization_range;
+	params.separationWeight = separation_weight;
+
+	return params;
+}
+''')
+
+	gen.bind_function('ConfigureCrowdAgent', 'dtCrowdAgentParams', ['float radius', 'float height', 'float max_acceleration', 'float max_speed', 'float collision_query_range', 'float path_optimization_range', 'float separation_weight'], {'route': route_lambda('_ConfigureCrowdAgent')})
+
+	# dtCrowdAgent
+	gen.insert_binding_code('''
+static void _dt_crowd_agent_SetPos(dtCrowdAgent *dt_crowd_agent, const hg::Vec3 &p) {
+	dt_crowd_agent->npos[0] = p.x; dt_crowd_agent->npos[1] = p.y; dt_crowd_agent->npos[2] = p.z;
+	dt_crowd_agent->vel[0] = 0.f; dt_crowd_agent->vel[1] = 0.f; dt_crowd_agent->vel[2] = 0.f;
+	dt_crowd_agent->dvel[0] = 0.f; dt_crowd_agent->dvel[1] = 0.f; dt_crowd_agent->dvel[2] = 0.f;
+}
+
+static hg::Vec3 _dt_crowd_agent_GetPos(dtCrowdAgent *dt_crowd_agent) { return {dt_crowd_agent->npos[0], dt_crowd_agent->npos[1], dt_crowd_agent->npos[2]}; }
+static hg::Vec3 _dt_crowd_agent_GetVel(dtCrowdAgent *dt_crowd_agent) { return {dt_crowd_agent->vel[0], dt_crowd_agent->vel[1], dt_crowd_agent->vel[2]}; }
+''')
+
+	dt_crowd_agent = gen.begin_class('dtCrowdAgent', bound_name='CrowdAgent', noncopyable=True)
+	gen.bind_method(dt_crowd_agent, 'SetPos', 'void', ['const hg::Vec3 &pos'], {'route': route_lambda('_dt_crowd_agent_SetPos')})
+	gen.bind_method(dt_crowd_agent, 'GetPos', 'hg::Vec3', [], {'route': route_lambda('_dt_crowd_agent_GetPos')})
+	gen.bind_method(dt_crowd_agent, 'GetVel', 'hg::Vec3', [], {'route': route_lambda('_dt_crowd_agent_GetVel')})
+	gen.end_class(dt_crowd_agent)
+	
+	# dtCrowd
+	gen.insert_binding_code('''
+static bool _dtCrowd_init(dtCrowd *dt_crowd, const int maxAgent, const float maxAgentRadius, dtNavMesh *nav) { return dt_crowd->init(maxAgent, maxAgentRadius, nav); }
+static void _dtCrowd_update(dtCrowd *dt_crowd, const float dt) { dt_crowd->update(dt, nullptr); }
+
+static int _dtCrowd_addAgent(dtCrowd *dt_crowd, const hg::Vec3 &pos, const dtCrowdAgentParams *params) {
+	float p[3] = {pos.x, pos.y, pos.z};
+	return dt_crowd->addAgent(p, params);
+}
+
+static bool _dtCrowd_requestMoveTarget(dtCrowd *dt_crowd, const int idx, const hg::Vec3 &pos, dtNavMeshQuery *navmesh_query) {
+	dtQueryFilter filter;
+	filter.setIncludeFlags(0xffff);
+	filter.setExcludeFlags(0);
+
+	static const float m_polyPickExt[3] = {2, 4, 2}; // XYZ bounding box to pick nearby polygon
+	dtPolyRef polyRef = 0;
+	float p[3] = {pos.x, pos.y, pos.z};
+	navmesh_query->findNearestPoly(p, m_polyPickExt, &filter, &polyRef, 0);
+
+	return dt_crowd->requestMoveTarget(idx, polyRef, p);
+}
+''')
+
+	dt_crowd = gen.begin_class('dtCrowd', bound_name='Crowd', noncopyable=True)
+	gen.bind_constructor(dt_crowd, [])
+	gen.bind_method(dt_crowd, 'init', 'bool', ['const int max_agent', 'const float maxAgentRadius', 'dtNavMesh *mesh'], {'route': route_lambda('_dtCrowd_init')}, bound_name='Init')
+	gen.bind_method(dt_crowd, 'update', 'void', ['const float dt'], {'route': route_lambda('_dtCrowd_update')}, bound_name='Update')
+	gen.bind_method(dt_crowd, 'addAgent', 'int', ['const hg::Vec3 &pos', 'const dtCrowdAgentParams *params'], {'route': route_lambda('_dtCrowd_addAgent')}, bound_name='AddAgent')
+	gen.bind_method(dt_crowd, 'removeAgent', 'void', ['const int idx'], bound_name='RemoveAgent')
+	gen.bind_method(dt_crowd, 'getEditableAgent', 'dtCrowdAgent *', ['const int idx'], bound_name='GetEditableAgent')	
+	gen.bind_method(dt_crowd, 'requestMoveTarget', 'bool', ['const int idx', 'const hg::Vec3 &pos', 'dtNavMeshQuery *query'], {'route': route_lambda('_dtCrowd_requestMoveTarget')}, bound_name='RequestMoveTarget')
+	gen.end_class(dt_crowd)
 
 
 def bind_platform(gen):
 	gen.add_include('platform/platform.h')
 	
+	# hg::FileFilter
+	file_filter = gen.begin_class('hg::FileFilter')
+	gen.bind_constructor(file_filter, [])
+	gen.bind_members(file_filter, ['std::string name', 'std::string pattern'])
+	gen.end_class(file_filter)
+
+	bind_std_vector(gen, file_filter)
+
 	gen.bind_function('hg::OpenFolderDialog', 'bool', ['const std::string &title', 'std::string &folder_name', '?const std::string &initial_dir'], {'arg_in_out': ['folder_name']})
-	gen.bind_function('hg::OpenFileDialog', 'bool', ['const std::string &title', 'const std::string &filter', 'std::string &file_name', '?const std::string &initial_dir'], {'arg_in_out': ['file_name']})
-	gen.bind_function('hg::SaveFileDialog', 'bool', ['const std::string &title', 'const std::string &filter', 'std::string &file_name', '?const std::string &initial_dir'], {'arg_in_out': ['file_name']})
+	gen.bind_function('hg::OpenFileDialog', 'bool', ['const std::string &title', 'const std::vector<hg::FileFilter> &filters', 'std::string &file', '?const std::string &initial_dir'], {'arg_in_out': ['file']})
+	gen.bind_function('hg::SaveFileDialog', 'bool', ['const std::string &title', 'const std::vector<hg::FileFilter> &filters', 'std::string &file', '?const std::string &initial_dir'], {'arg_in_out': ['file']})
 
 
 def bind_engine(gen):
@@ -335,13 +708,39 @@ def bind_engine(gen):
 
 	gen.bind_function('hg::_DebugHalt', 'void', [])
 
+
+def bind_projection(gen):
 	gen.add_include('foundation/projection.h')
 
 	gen.bind_function('hg::ZoomFactorToFov', 'float', ['float zoom_factor'])
 	gen.bind_function('hg::FovToZoomFactor', 'float', ['float fov'])
 
-	gen.bind_function('hg::ComputeOrthographicProjectionMatrix', 'hg::Matrix44', ['float znear', 'float zfar', 'float size', 'const hg::tVector2<float> &aspect_ratio'])
-	gen.bind_function('hg::ComputePerspectiveProjectionMatrix', 'hg::Matrix44', ['float znear', 'float zfar', 'float zoom_factor', 'const hg::tVector2<float> &aspect_ratio'])
+	gen.bind_function('hg::ComputeOrthographicProjectionMatrix', 'hg::Mat44', ['float znear', 'float zfar', 'float size', 'const hg::tVec2<float> &aspect_ratio', '?const hg::tVec2<float> &offset'])
+	gen.bind_function('hg::ComputePerspectiveProjectionMatrix', 'hg::Mat44', ['float znear', 'float zfar', 'float zoom_factor', 'const hg::tVec2<float> &aspect_ratio', '?const hg::tVec2<float> &offset'])
+
+	gen.bind_function('hg::ComputeAspectRatioX', 'hg::tVec2<float>', ['float width', 'float height'])
+	gen.bind_function('hg::ComputeAspectRatioY', 'hg::tVec2<float>', ['float width', 'float height'])
+	gen.bind_function('hg::Compute2DProjectionMatrix', 'hg::Mat44', ['float znear', 'float zfar', 'float res_x', 'float res_y', 'bool y_up'])
+
+	gen.bind_function('hg::ExtractZoomFactorFromProjectionMatrix', 'float', ['const hg::Mat44 &m', 'const hg::tVec2<float> &aspect_ratio'])
+	gen.bind_function('hg::ExtractZRangeFromPerspectiveProjectionMatrix', 'void', ['const hg::Mat44 &m', 'float &znear', 'float &zfar'], {'arg_out': ['znear', 'zfar']})
+	gen.bind_function('hg::ExtractZRangeFromOrthographicProjectionMatrix', 'void', ['const hg::Mat44 &m', 'float &znear', 'float &zfar'], {'arg_out': ['znear', 'zfar']})
+	gen.bind_function('hg::ExtractZRangeFromProjectionMatrix', 'void', ['const hg::Mat44 &m', 'float &znear', 'float &zfar'], {'arg_out': ['znear', 'zfar']})
+
+	gen.bind_function('hg::ProjectToClipSpace', 'bool', ['const hg::Mat44 &proj', 'const hg::Vec3 &view', 'hg::Vec3 &clip'], {'arg_out': ['clip']})
+	gen.bind_function('hg::ProjectOrthoToClipSpace', 'bool', ['const hg::Mat44 &proj', 'const hg::Vec3 &view', 'hg::Vec3 &clip'], {'arg_out': ['clip']})
+	gen.bind_function('hg::UnprojectFromClipSpace', 'bool', ['const hg::Mat44 &inv_proj', 'const hg::Vec3 &clip', 'hg::Vec3 &view'], {'arg_out': ['view']})
+	gen.bind_function('hg::UnprojectOrthoFromClipSpace', 'bool', ['const hg::Mat44 &inv_proj', 'const hg::Vec3 &clip', 'hg::Vec3 &view'], {'arg_out': ['view']})
+
+	gen.bind_function('hg::ClipSpaceToScreenSpace', 'hg::Vec3', ['const hg::Vec3 &clip', 'const hg::tVec2<float> &resolution'])
+	gen.bind_function('hg::ScreenSpaceToClipSpace', 'hg::Vec3', ['const hg::Vec3 &screen', 'const hg::tVec2<float> &resolution'])
+
+	gen.bind_function('hg::ProjectToScreenSpace', 'bool', ['const hg::Mat44 &proj', 'const hg::Vec3 &view', 'const hg::tVec2<float> &resolution', 'hg::Vec3 &screen'], {'arg_out': ['screen']})
+	gen.bind_function('hg::ProjectOrthoToScreenSpace', 'bool', ['const hg::Mat44 &proj', 'const hg::Vec3 &view', 'const hg::tVec2<float> &resolution', 'hg::Vec3 &screen'], {'arg_out': ['screen']})
+	gen.bind_function('hg::UnprojectFromScreenSpace', 'bool', ['const hg::Mat44 &inv_proj', 'const hg::Vec3 &screen', 'const hg::tVec2<float> &resolution', 'hg::Vec3 &view'], {'arg_out': ['view']})
+	gen.bind_function('hg::UnprojectOrthoFromScreenSpace', 'bool', ['const hg::Mat44 &inv_proj', 'const hg::Vec3 &screen', 'const hg::tVec2<float> &resolution', 'hg::Vec3 &view'], {'arg_out': ['view']})
+
+	gen.bind_function('hg::ProjectZToClipSpace', 'float', ['float z', 'const hg::Mat44 &proj'])
 
 
 def bind_plugins(gen):
@@ -352,3314 +751,2145 @@ def bind_plugins(gen):
 def bind_window_system(gen):
 	gen.add_include('platform/window_system.h')
 
-	# hg::Surface
-	surface = gen.begin_class('hg::Surface')
-	gen.end_class(surface)
+	gen.bind_function('hg::WindowSystemInit', 'void', [])
+	gen.bind_function('hg::WindowSystemShutdown', 'void', [])
 
+	# hg::MonitorRotation
+	gen.bind_named_enum('hg::MonitorRotation', ['MR_0', 'MR_90', 'MR_180', 'MR_270'], storage_type='uint8_t')
+
+	# hg:MonitorMode
+	monitor_mode = gen.begin_class('hg::MonitorMode')
+	gen.bind_members(monitor_mode, ['std::string name', 'hg::Rect<int> rect', 'int frequency', 'hg::MonitorRotation rotation', 'uint8_t supported_rotations'])
+	gen.end_class(monitor_mode)
+	bind_std_vector(gen, monitor_mode)
+	
 	# hg::Monitor
-	monitor = gen.begin_class('hg::Monitor')
-	gen.end_class(monitor)
+	monitor = gen.bind_ptr('hg::Monitor *', bound_name='Monitor')
 	bind_std_vector(gen, monitor)
 
-	gen.bind_function('hg::GetMonitorRect', 'hg::Rect<int>', ['const hg::Monitor &monitor'])
-	gen.bind_function('hg::IsPrimaryMonitor', 'bool', ['const hg::Monitor &monitor'])
-
-	gen.bind_function('hg::GetMonitors', 'std::vector<hg::Monitor>', [])
+	gen.bind_function('hg::GetMonitors', 'std::vector<hg::Monitor*>', [])
+	gen.bind_function('hg::GetMonitorRect', 'hg::Rect<int>', ['const hg::Monitor * monitor'])
+	gen.bind_function('hg::IsPrimaryMonitor', 'bool', ['const hg::Monitor *monitor'])
+	gen.bind_function('hg::IsMonitorConnected', 'bool', ['const hg::Monitor *monitor'])
+	gen.bind_function('hg::GetMonitorName', 'std::string', ['const hg::Monitor *monitor'])
+	gen.bind_function('hg::GetMonitorSizeMM', 'hg::tVec2<int>', ['const hg::Monitor *monitor'])
+	gen.bind_function('hg::GetMonitorModes', 'bool', ['const hg::Monitor *monitor', 'std::vector<hg::MonitorMode> &modes'], features={'arg_out': ['modes']})
 
 	# hg::Window
-	gen.bind_named_enum('hg::Window::Visibility', ['Windowed', 'Undecorated', 'Fullscreen', 'Hidden', 'FullscreenMonitor1', 'FullscreenMonitor2', 'FullscreenMonitor3'])
+	gen.bind_named_enum('hg::WindowVisibility', ['WV_Windowed', 'WV_Undecorated', 'WV_Fullscreen', 'WV_Hidden', 'WV_FullscreenMonitor1', 'WV_FullscreenMonitor2', 'WV_FullscreenMonitor3'])
 
-	window = gen.begin_class('hg::Window')
-	gen.end_class(window)
+	window = gen.bind_ptr('hg::Window *', bound_name='Window')
 
 	gen.bind_function_overloads('hg::NewWindow', [
-		('hg::Window', ['int width', 'int height'], []),
-		('hg::Window', ['int width', 'int height', 'int bpp'], []),
-		('hg::Window', ['int width', 'int height', 'int bpp', 'hg::Window::Visibility visibility'], [])
+		('hg::Window *', ['int width', 'int height', '?int bpp', '?hg::WindowVisibility visibility'], []),
+		('hg::Window *', ['const char *title', 'int width', 'int height', '?int bpp', '?hg::WindowVisibility visibility'], [])
 	])
-	gen.bind_function('hg::NewWindowFrom', 'hg::Window', ['void *handle'])
+	gen.bind_function_overloads('hg::NewFullscreenWindow', [
+		('hg::Window *', ['const hg::Monitor *monitor', 'int mode_index', '?hg::MonitorRotation rotation'], []),
+		('hg::Window *', ['const char *title', 'const hg::Monitor *monitor', 'int mode_index', '?hg::MonitorRotation rotation'], [])
+	])
+	gen.bind_function('hg::NewWindowFrom', 'hg::Window *', ['void *handle'])
 
-	gen.bind_function('hg::GetWindowHandle', 'void *', ['const hg::Window &window'])
-	gen.bind_function('hg::UpdateWindow', 'bool', ['const hg::Window &window'])
-	gen.bind_function('hg::DestroyWindow', 'bool', ['const hg::Window &window'])
+	gen.bind_function('hg::GetWindowHandle', 'void *', ['const hg::Window *window'])
+	gen.bind_function('hg::UpdateWindow', 'bool', ['const hg::Window *window'])
+	gen.bind_function('hg::DestroyWindow', 'bool', ['const hg::Window *window'])
 
-	gen.bind_function('hg::GetWindowClientSize', 'bool', ['const hg::Window &window', 'int &width', 'int &height'], features={'arg_out': ['width', 'height']})
-	gen.bind_function('hg::SetWindowClientSize', 'bool', ['const hg::Window &window', 'int width', 'int height'])
+	gen.bind_function('hg::GetWindowClientSize', 'bool', ['const hg::Window *window', 'int &width', 'int &height'], features={'arg_out': ['width', 'height']})
+	gen.bind_function('hg::SetWindowClientSize', 'bool', ['hg::Window *window', 'int width', 'int height'])
 
-	gen.bind_function('hg::GetWindowTitle', 'bool', ['const hg::Window &window', 'std::string &title'], features={'arg_out': ['title']})
-	gen.bind_function('hg::SetWindowTitle', 'bool', ['const hg::Window &window', 'const std::string &title'])
+	gen.bind_function('hg::GetWindowContentScale', 'hg::tVec2<float>', ['const hg::Window *window'])
 
-	gen.bind_function('hg::WindowHasFocus', 'bool', ['const hg::Window &window'])
-	gen.bind_function('hg::GetWindowInFocus', 'hg::Window', [])
+	gen.bind_function('hg::GetWindowTitle', 'bool', ['const hg::Window *window', 'std::string &title'], features={'arg_out': ['title']})
+	gen.bind_function('hg::SetWindowTitle', 'bool', ['hg::Window *window', 'const std::string &title'])
 
-	gen.bind_function('hg::GetWindowPos', 'hg::tVector2<int>', ['const hg::Window &window'])
-	gen.bind_function('hg::SetWindowPos', 'bool', ['const hg::Window &window', 'const hg::tVector2<int> position'])
+	gen.bind_function('hg::WindowHasFocus', 'bool', ['const hg::Window *window'])
+	gen.bind_function('hg::GetWindowInFocus', 'hg::Window*', [])
 
-	gen.bind_function('hg::IsWindowOpen', 'bool', ['const hg::Window &window'])
+	gen.bind_function('hg::GetWindowPos', 'hg::tVec2<int>', ['const hg::Window *window'])
+	gen.bind_function('hg::SetWindowPos', 'bool', ['hg::Window *window', 'const hg::tVec2<int> position'])
 
-	lib.stl.bind_future_T(gen, 'hg::Window', 'FutureWindow')
-	lib.stl.bind_future_T(gen, 'hg::Surface', 'FutureSurface')
+	gen.bind_function('hg::IsWindowOpen', 'bool', ['const hg::Window *window'])
+
+	gen.bind_function('hg::ShowCursor', 'void', [])
+	gen.bind_function('hg::HideCursor', 'void', [])
+	gen.bind_function('hg::DisableCursor', 'void', [])
+
+#
+def decl_get_set_method(gen, conv, type, method_suffix, var_name, features=[]):
+	gen.bind_method(conv, 'Get' + method_suffix, 'const %s' % type, [], features)
+	gen.bind_method(conv, 'Set' + method_suffix, 'void', ['const %s &%s' % (type, var_name)], features)
 
 
-def bind_type_value(gen):
-	gen.add_include('foundation/reflection.h')
-	gen.add_include('foundation/base_type_reflection.h')
+def decl_comp_get_set_method(gen, conv, comp_type, comp_var_name, type, method_suffix, var_name, features=[]):
+	gen.bind_method(conv, 'Get' + method_suffix, 'const %s &' % type, ['const %s *%s' % (comp_type, comp_var_name)], features)
+	gen.bind_method(conv, 'Set' + method_suffix, 'void', ['%s *%s' % (comp_type, comp_var_name), 'const %s &%s' % (type, var_name)], features)
 
-	bool_conv = gen.get_conv('bool')
-	int_conv = gen.get_conv('int')
-	float_conv = gen.get_conv('float')
-	string_conv = gen.get_conv('std::string')
 
-	if gen.get_language() == 'CPython':
-		class PythonTypeValueConverter(lang.cpython.PythonTypeConverterCommon):
+def bind_LuaObject(gen):
+	gen.add_include('script/lua_vm.h')
+	gen.add_include('engine/lua_object.h')
+
+	if gen.get_language() == 'Lua':
+		class LuaObjectConverter(lang.lua.LuaTypeConverterCommon):
 			def get_type_glue(self, gen, module_name):
 				check = '''\
-bool %s(PyObject *o) {
-	using namespace hg;
-	return true;
-}
+inline bool %s(lua_State *L, int idx) { return true; }
 ''' % self.check_func
 
 				to_c = '''\
-void %s(PyObject *o, void *obj) {
-	using namespace hg;
-
-	TypeValue &value = *(TypeValue *)obj;
-
-	if (%s(o)) {
-		bool v;
-		%s(o, &v);
-		value = MakeTypeValue(v);
-	} else if (%s(o)) {
-		int v;
-		%s(o, &v);
-		value = MakeTypeValue(v);
-	} else if (%s(o)) {
-		float v;
-		%s(o, &v);
-		value = MakeTypeValue(v);
-	} else if (%s(o)) {
-		std::string v;
-		%s(o, &v);
-		value = MakeTypeValue(v);
-	} else if (wrapped_Object *w = cast_to_wrapped_Object_safe(o)) {
-		auto info = %s(w->type_tag);
-		if (!info) {
-			PyErr_SetString(PyExc_RuntimeError, "unsupported type (from CPython)");
-			return;
-		}
-
-		auto obj_type = g_type_registry.get().GetType(info->c_type);
-		if (!obj_type) {
-			PyErr_SetString(PyExc_RuntimeError, "type unknown to reflection system (from CPython)");
-			return;
-		}
-
-		void *obj;
-		info->to_c(o, &obj);
-		value.Set(obj_type, obj);
-	}
-}
-''' % (	self.to_c_func,
-		bool_conv.check_func, bool_conv.to_c_func,
-		int_conv.check_func, int_conv.to_c_func,
-		float_conv.check_func, float_conv.to_c_func,
-		string_conv.check_func, string_conv.to_c_func,
-		gen.apply_api_prefix('get_bound_type_info'))
-
-				from_c = '''\
-PyObject *%s(void *obj, OwnershipPolicy policy) {
-	using namespace hg;
-
-	TypeValue &value = *(TypeValue *)obj;
-
-	static Type *bool_type = g_type_registry.get().GetType("Bool");
-	static Type *int_type = g_type_registry.get().GetType("Int");
-	static Type *float_type = g_type_registry.get().GetType("Float");
-	static Type *string_type = g_type_registry.get().GetType("String");
-
-	const Type *type = value.GetType();
-
-	if (type == bool_type) {
-		return %s(value.GetData(), policy);
-	} else if (type == int_type) {
-		return %s(value.GetData(), policy);
-	} else if (type == float_type) {
-		return %s(value.GetData(), policy);
-	} else if (type == string_type) {
-		return %s(value.GetData(), policy);
-	} else if (auto info = %s(type->GetCppName().data())) {
-		return info->from_c(value.GetData(), Copy);
-	} else {
-		PyErr_SetString(PyExc_RuntimeError, "unsupported type (to CPython)");
-	}
-	return NULL;
-}
-''' % (	self.from_c_func,
-		bool_conv.from_c_func,
-		int_conv.from_c_func,
-		float_conv.from_c_func,
-		string_conv.from_c_func,
-		gen.apply_api_prefix('get_c_type_info'))
-
-				return check + to_c + from_c
-
-		type_value = gen.bind_type(PythonTypeValueConverter('hg::TypeValue'))
-		
-	elif gen.get_language() == 'Lua':
-		class LuaTypeValueConverter(lang.lua.LuaTypeConverterCommon):
-			def get_type_glue(self, gen, module_name):
-				check = '''\
-bool %s(lua_State *L, int idx) {
-	using namespace hg;
-	return true;
-}
-''' % self.check_func
-
-				to_c = '''\
-void %s(lua_State *L, int idx, void *obj) {
-	using namespace hg;
-
-	TypeValue &value = *(TypeValue *)obj;
-
-	static Type
-		*none_type = g_type_registry.get().GetType<none>(),
-		*bool_type = g_type_registry.get().GetType<bool>(),
-		*int_type = g_type_registry.get().GetType<int>(),
-		*float_type = g_type_registry.get().GetType<float>(),	
-		*string_type = g_type_registry.get().GetType<std::string>();
-
-	if (lua_isnil(L, idx)) {
-		none v;
-		value.Set(none_type, &v);
-	} else if (lua_isboolean(L, idx)) {
-		bool v = lua_toboolean(L, idx);
-		value.Set(bool_type, &v);
-	} else if (lua_isinteger(L, idx)) {
-		int v = (int)lua_tointeger(L, idx);
-		value.Set(int_type, &v);
-	} else if (lua_isnumber(L, idx)) {
-		float v = (float)lua_tonumber(L, idx);
-		value.Set(float_type, &v);
-	} else if (lua_isstring(L, idx)) {
-		std::string v(lua_tostring(L, idx));
-		value.Set(string_type, &v);
-	} else if (auto type_tag = %s(L, idx)) {
-		auto info = %s(type_tag);
-		if (!info) {
-			luaL_error(L, "Unsupported type (from Lua)");
-			return;
-		}
-
-		auto obj_type = g_type_registry.get().GetType(info->c_type);
-		if (!obj_type) {
-			luaL_error(L, "Type unknown to reflection system (from Lua)");
-			return;
-		}
-
-		void *obj;
-		info->to_c(L, idx, &obj);
-		value.Set(obj_type, obj);
-	} else {
-		__ASSERT_ALWAYS__("Unsupported value type (from Lua)");
-	}
-}
-''' % (self.to_c_func, gen.apply_api_prefix('get_wrapped_object_type_tag'), gen.apply_api_prefix('get_bound_type_info'))
-
-				from_c = '''\
-int %s(lua_State *L, void *obj, OwnershipPolicy) {
-	using namespace hg;
-
-	TypeValue &value = *(TypeValue *)obj;
-
-	static Type
-		*none_type = g_type_registry.get().GetType<none>(),
-		*bool_type = g_type_registry.get().GetType<bool>(),
-		*int_type = g_type_registry.get().GetType<int>(),
-		*float_type = g_type_registry.get().GetType<float>(),	
-		*string_type = g_type_registry.get().GetType<std::string>();
-
-	const Type *type = value.GetType();
-
-	if (type == nullptr) {
-		return 0;
-	} else if (type == none_type) {
-		lua_pushnil(L);
-	} else if (type == bool_type) {
-		lua_pushboolean(L, value.Cast<bool>());
-	} else if (type == int_type) {
-		lua_pushinteger(L, value.Cast<int>());
-	} else if (type == float_type) {
-		lua_pushnumber(L, value.Cast<float>());
-	} else if (type == string_type) {
-		lua_pushstring(L, value.Cast<std::string>().data());
-	} else if (auto info = %s(type->GetCppName().data())) {
-		return info->from_c(L, value.GetData(), Copy);
-	} else {
-		__ASSERT_ALWAYS__("Unsupported value type (to Lua)");
-		return 0;
-	}
-	return 1;
-}
-''' % (self.from_c_func, gen.apply_api_prefix('get_c_type_info'))
-
-				return check + to_c + from_c
-
-		type_value = gen.bind_type(LuaTypeValueConverter('hg::TypeValue'))
-	else:
-		type_value = gen.begin_class('hg::TypeValue')
-		gen.end_class(type_value)
-
-	bind_std_vector(gen, type_value)
-
-
-def bind_core(gen):
-	# hg::Shader
-	gen.add_include('engine/shader.h')
-
-	gen.bind_named_enum('hg::ShaderType', ['ShaderNoType', 'ShaderInt', 'ShaderUInt', 'ShaderFloat', 'ShaderVector2', 'ShaderVector3', 'ShaderVector4', 'ShaderMatrix3', 'ShaderMatrix4', 'ShaderTexture2D', 'ShaderTexture3D', 'ShaderTextureCube', 'ShaderTextureShadow', 'ShaderTextureExternal'], storage_type='uint8_t')
-	gen.bind_named_enum('hg::ShaderTypePrecision', ['ShaderDefaultPrecision', 'ShaderLowPrecision', 'ShaderMediumPrecision', 'ShaderHighPrecision'], storage_type='uint8_t')
-
-	gen.bind_named_enum('hg::VertexAttribute::Semantic', ['Position', 'Normal', 'UV0', 'UV1', 'UV2', 'UV3', 'Color0', 'Color1', 'Color2', 'Color3', 'Tangent', 'Bitangent', 'BoneIndex', 'BoneWeight', 'InstanceModelMatrix', 'InstancePreviousModelMatrix', 'InstancePickingId'], storage_type='uint8_t', prefix='Vertex', bound_name='VertexSemantic')
-
-	gen.bind_named_enum('hg::TextureUV', ['TextureUVClamp', 'TextureUVRepeat', 'TextureUVMirror', 'TextureUVCount'], storage_type='uint8_t')
-	gen.bind_named_enum('hg::TextureFilter', ['TextureFilterNearest', 'TextureFilterLinear', 'TextureFilterTrilinear', 'TextureFilterAnisotropic', 'TextureFilterCount'], storage_type='uint8_t')
-
-	shader = gen.begin_class('hg::Shader', bound_name='Shader_nobind', noncopyable=True, nobind=True)
-	gen.end_class(shader)
-
-	shared_shader = gen.begin_class('std::shared_ptr<hg::Shader>', bound_name='Shader', features={'proxy': lib.stl.SharedPtrProxyFeature(shader)})
-	gen.bind_members(shared_shader, ['std::string name', 'uint8_t surface_attributes', 'uint8_t surface_draw_state', 'uint8_t alpha_threshold'], ['proxy'])
-	gen.end_class(shared_shader)
-
-	gen.bind_named_enum('hg::ShaderVariable::Semantic', [
-		'Clock', 'Viewport', 'TechniqueIsForward', 'FxScale', 'InverseInternalResolution', 'InverseViewportSize', 'AmbientColor', 'FogColor', 'FogState', 'DepthBuffer', 'FrameBuffer', 'GBuffer0', 'GBuffer1', 'GBuffer2', 'GBuffer3',
-		'ViewVector', 'ViewPosition', 'ViewState',
-		'ModelMatrix', 'InverseModelMatrix', 'NormalMatrix', 'PreviousModelMatrix', 'ViewMatrix', 'InverseViewMatrix', 'ModelViewMatrix', 'NormalViewMatrix', 'ProjectionMatrix', 'ViewProjectionMatrix', 'ModelViewProjectionMatrix', 'InverseViewProjectionMatrix', 'InverseViewProjectionMatrixAtOrigin',
-		'LightState', 'LightDiffuseColor', 'LightSpecularColor', 'LightShadowColor', 'LightViewPosition', 'LightViewDirection', 'LightShadowMatrix', 'InverseShadowMapSize', 'LightShadowMap', 'LightPSSMSliceDistance', 'ViewToLightMatrix', 'LightProjectionMap',
-		'BoneMatrix', 'PreviousBoneMatrix',
-		'PickingId',
-		'TerrainHeightmap', 'TerrainHeightmapSize', 'TerrainSize', 'TerrainPatchOrigin', 'TerrainPatchSize'
-	], storage_type='uint8_t', prefix='Shader', bound_name='ShaderSemantic')
-
-	shader_variable = gen.begin_class('hg::ShaderVariable')
-	gen.bind_members(shader_variable, ['std::string name', 'std::string hint', 'hg::ShaderType type', 'hg::ShaderTypePrecision precision', 'uint8_t array_size'])
-	gen.end_class(shader_variable)
-
-	# hg::TextureUnitConfig
-	tex_unit_cfg = gen.begin_class('hg::TextureUnitConfig')
-	gen.bind_constructor_overloads(tex_unit_cfg, [
-		([], []),
-		(['hg::TextureUV wrap_u', 'hg::TextureUV wrap_v', 'hg::TextureFilter min_filter', 'hg::TextureFilter mag_filter'], []),
-	])
-	gen.bind_comparison_op(tex_unit_cfg, '==', ['const hg::TextureUnitConfig &config'])
-	gen.bind_members(tex_unit_cfg, ['hg::TextureUV wrap_u:', 'hg::TextureUV wrap_v:', 'hg::TextureFilter min_filter:', 'hg::TextureFilter mag_filter:'])
-	gen.end_class(tex_unit_cfg)
-
-	# hg::ShaderValue
-	shader_value = gen.begin_class('hg::ShaderValue')
-	gen.bind_members(shader_value, ['std::string path', 'hg::TextureUnitConfig tex_unit_cfg'])
-
-	gen.insert_binding_code('''
-static float _ShaderValue_GetFloat(hg::ShaderValue *m) { return  m->fv[0]; }
-static void _ShaderValue_SetFloat(hg::ShaderValue *m, float v) { m->fv[0] = v; }
-static void _ShaderValue_GetFloat2(hg::ShaderValue *m, float &v0, float &v1) { v0 = m->fv[0]; v1 = m->fv[1]; }
-static void _ShaderValue_SetFloat2(hg::ShaderValue *m, float v0, float v1) { m->fv[0] = v0; m->fv[1] = v1; }
-static void _ShaderValue_GetFloat3(hg::ShaderValue *m, float &v0, float &v1, float &v2) { v0 = m->fv[0]; v1 = m->fv[1]; v2 = m->fv[2]; }
-static void _ShaderValue_SetFloat3(hg::ShaderValue *m, float v0, float v1, float v2) { m->fv[0] = v0; m->fv[1] = v1; m->fv[2] = v2; }
-static void _ShaderValue_GetFloat4(hg::ShaderValue *m, float &v0, float &v1, float &v2, float &v3) { v0 = m->fv[0]; v1 = m->fv[1]; v2 = m->fv[2]; v3 = m->fv[3]; }
-static void _ShaderValue_SetFloat4(hg::ShaderValue *m, float v0, float v1, float v2, float v3) { m->fv[0] = v0; m->fv[1] = v1; m->fv[2] = v2; m->fv[3] = v3; }
-
-static int32_t _ShaderValue_GetInt(hg::ShaderValue *m) { return  m->iv[0]; }
-static void _ShaderValue_SetInt(hg::ShaderValue *m, int32_t v) { m->iv[0] = v; }
-static void _ShaderValue_GetInt2(hg::ShaderValue *m, int32_t &v0, int32_t &v1) { v0 = m->iv[0]; v1 = m->iv[1]; }
-static void _ShaderValue_SetInt2(hg::ShaderValue *m, int32_t v0, int32_t v1) { m->iv[0] = v0; m->iv[1] = v1; }
-static void _ShaderValue_GetInt3(hg::ShaderValue *m, int32_t &v0, int32_t &v1, int32_t &v2) { v0 = m->iv[0]; v1 = m->iv[1]; v2 = m->iv[2]; }
-static void _ShaderValue_SetInt3(hg::ShaderValue *m, int32_t v0, int32_t v1, int32_t v2) { m->iv[0] = v0; m->iv[1] = v1; m->iv[2] = v2; }
-static void _ShaderValue_GetInt4(hg::ShaderValue *m, int32_t &v0, int32_t &v1, int32_t &v2, int32_t &v3) { v0 = m->iv[0]; v1 = m->iv[1]; v2 = m->iv[2]; v3 = m->iv[3]; }
-static void _ShaderValue_SetInt4(hg::ShaderValue *m, int32_t v0, int32_t v1, int32_t v2, int32_t v3) { m->iv[0] = v0; m->iv[1] = v1; m->iv[2] = v2; m->iv[3] = v3; }
-
-static uint32_t _ShaderValue_GetUnsigned(hg::ShaderValue *m) { return  m->uv[0]; }
-static void _ShaderValue_SetUnsigned(hg::ShaderValue *m, uint32_t v) { m->uv[0] = v; }
-static void _ShaderValue_GetUnsigned2(hg::ShaderValue *m, uint32_t &v0, uint32_t &v1) { v0 = m->uv[0]; v1 = m->uv[1]; }
-static void _ShaderValue_SetUnsigned2(hg::ShaderValue *m, uint32_t v0, uint32_t v1) { m->uv[0] = v0; m->uv[1] = v1; }
-static void _ShaderValue_GetUnsigned3(hg::ShaderValue *m, uint32_t &v0, uint32_t &v1, uint32_t &v2) { v0 = m->uv[0]; v1 = m->uv[1]; v2 = m->uv[2]; }
-static void _ShaderValue_SetUnsigned3(hg::ShaderValue *m, uint32_t v0, uint32_t v1, uint32_t v2) { m->uv[0] = v0; m->uv[1] = v1; m->uv[2] = v2; }
-static void _ShaderValue_GetUnsigned4(hg::ShaderValue *m, uint32_t &v0, uint32_t &v1, uint32_t &v2, uint32_t &v3) { v0 = m->uv[0]; v1 = m->uv[1]; v2 = m->uv[2]; v3 = m->uv[3]; }
-static void _ShaderValue_SetUnsigned4(hg::ShaderValue *m, uint32_t v0, uint32_t v1, uint32_t v2, uint32_t v3) { m->uv[0] = v0; m->uv[1] = v1; m->uv[2] = v2; m->uv[3] = v3; }
-''')
-
-	gen.bind_method(shader_value, 'GetFloat', 'float', [], {'route': route_lambda('_ShaderValue_GetFloat')})
-	gen.bind_method(shader_value, 'SetFloat', 'void', ['float v'], {'route': route_lambda('_ShaderValue_SetFloat')})
-	gen.bind_method(shader_value, 'GetFloat2', 'void', ['float &v0', 'float &v1'], {'arg_out': ['v0', 'v1'], 'route':  route_lambda('_ShaderValue_GetFloat2')})
-	gen.bind_method(shader_value, 'SetFloat2', 'void', ['float v0', 'float v1'], {'route': route_lambda('_ShaderValue_SetFloat2')})
-	gen.bind_method(shader_value, 'GetFloat3', 'void', ['float &v0', 'float &v1', 'float &v2'], {'arg_out': ['v0', 'v1', 'v2'], 'route':  route_lambda('_ShaderValue_GetFloat3')})
-	gen.bind_method(shader_value, 'SetFloat3', 'void', ['float v0', 'float v1', 'float v2'], {'route': route_lambda('_ShaderValue_SetFloat3')})
-	gen.bind_method(shader_value, 'GetFloat4', 'void', ['float &v0', 'float &v1', 'float &v2', 'float &v3'], {'arg_out': ['v0', 'v1', 'v2', 'v3'], 'route':  route_lambda('_ShaderValue_GetFloat4')})
-	gen.bind_method(shader_value, 'SetFloat4', 'void', ['float v0', 'float v1', 'float v2', 'float v3'], {'route': route_lambda('_ShaderValue_SetFloat4')})
-
-	gen.bind_method(shader_value, 'GetInt', 'int32_t', [], {'route': route_lambda('_ShaderValue_GetInt')})
-	gen.bind_method(shader_value, 'SetInt', 'void', ['int32_t v'], {'route': route_lambda('_ShaderValue_SetInt')})
-	gen.bind_method(shader_value, 'GetInt2', 'void', ['int32_t &v0', 'int32_t &v1'], {'arg_out': ['v0', 'v1'], 'route':  route_lambda('_ShaderValue_GetInt2')})
-	gen.bind_method(shader_value, 'SetInt2', 'void', ['int32_t v0', 'int32_t v1'], {'route': route_lambda('_ShaderValue_SetInt2')})
-	gen.bind_method(shader_value, 'GetInt3', 'void', ['int32_t &v0', 'int32_t &v1', 'int32_t &v2'], {'arg_out': ['v0', 'v1', 'v2'], 'route':  route_lambda('_ShaderValue_GetInt3')})
-	gen.bind_method(shader_value, 'SetInt3', 'void', ['int32_t v0', 'int32_t v1', 'int32_t v2'], {'route': route_lambda('_ShaderValue_SetInt3')})
-	gen.bind_method(shader_value, 'GetInt4', 'void', ['int32_t &v0', 'int32_t &v1', 'int32_t &v2', 'int32_t &v3'], {'arg_out': ['v0', 'v1', 'v2', 'v3'], 'route':  route_lambda('_ShaderValue_GetInt4')})
-	gen.bind_method(shader_value, 'SetInt4', 'void', ['int32_t v0', 'int32_t v1', 'int32_t v2', 'int32_t v3'], {'route': route_lambda('_ShaderValue_SetInt4')})
-
-	gen.bind_method(shader_value, 'GetUnsigned', 'uint32_t', [], {'route': route_lambda('_ShaderValue_GetUnsigned')})
-	gen.bind_method(shader_value, 'SetUnsigned', 'void', ['uint32_t v'], {'route': route_lambda('_ShaderValue_SetUnsigned')})
-	gen.bind_method(shader_value, 'GetUnsigned2', 'void', ['uint32_t &v0', 'uint32_t &v1'], {'arg_out': ['v0', 'v1'], 'route':  route_lambda('_ShaderValue_GetUnsigned2')})
-	gen.bind_method(shader_value, 'SetUnsigned2', 'void', ['uint32_t v0', 'uint32_t v1'], {'route': route_lambda('_ShaderValue_SetUnsigned2')})
-	gen.bind_method(shader_value, 'GetUnsigned3', 'void', ['uint32_t &v0', 'uint32_t &v1', 'uint32_t &v2'], {'arg_out': ['v0', 'v1', 'v2'], 'route':  route_lambda('_ShaderValue_GetUnsigned3')})
-	gen.bind_method(shader_value, 'SetUnsigned3', 'void', ['uint32_t v0', 'uint32_t v1', 'uint32_t v2'], {'route': route_lambda('_ShaderValue_SetUnsigned3')})
-	gen.bind_method(shader_value, 'GetUnsigned4', 'void', ['uint32_t &v0', 'uint32_t &v1', 'uint32_t &v2', 'uint32_t &v3'], {'arg_out': ['v0', 'v1', 'v2', 'v3'], 'route':  route_lambda('_ShaderValue_GetUnsigned4')})
-	gen.bind_method(shader_value, 'SetUnsigned4', 'void', ['uint32_t v0', 'uint32_t v1', 'uint32_t v2', 'uint32_t v3'], {'route': route_lambda('_ShaderValue_SetUnsigned4')})
-
-	gen.end_class(shader_value)
-
-	# hg::MaterialValue
-	gen.add_include('engine/material.h')
-
-	material_value = gen.begin_class('hg::MaterialValue')
-	gen.bind_members(material_value, ['std::string name', 'hg::ShaderType type', 'std::string path', 'hg::TextureUnitConfig tex_unit_cfg'])
-	gen.add_base(material_value, shader_value)
-	gen.end_class(material_value)
-
-	# hg::Material
-	material = gen.begin_class('hg::Material', bound_name='Material_nobind', noncopyable=True, nobind=True)
-	gen.end_class(material)
-
-	shared_material = gen.begin_class('std::shared_ptr<hg::Material>', bound_name='Material', features={'proxy': lib.stl.SharedPtrProxyFeature(material)})
-	gen.bind_constructor(shared_material, [], ['proxy'])
-	gen.bind_members(shared_material, ['std::string name', 'std::string shader'], ['proxy'])
-	gen.bind_method(shared_material, 'GetValue', 'hg::MaterialValue *', ['const std::string &name'], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'Value not found')})
-	gen.bind_method(shared_material, 'AddValue', 'hg::MaterialValue *', ['const std::string &name', 'hg::ShaderType type'], ['proxy'])
-	gen.end_class(shared_material)
-	
-	#
-	gen.add_include('engine/material_serialization.h')
-	gen.bind_function('hg::LoadMaterial', 'bool', ['hg::Material &mat', 'const std::string &path'])
-	gen.bind_function('hg::SaveMaterial', 'bool', ['const std::shared_ptr<hg::Material> &material', 'const std::string &path', '?hg::DocumentFormat format'])
-	
-	# hg::Geometry
-	gen.add_include('engine/geometry.h')
-
-	geometry = gen.begin_class('hg::Geometry', bound_name='Geometry_nobind', noncopyable=True, nobind=True)
-	gen.end_class(geometry)
-
-	shared_geometry = gen.begin_class('std::shared_ptr<hg::Geometry>', bound_name='Geometry', features={'proxy': lib.stl.SharedPtrProxyFeature(geometry)})
-	gen.bind_constructor(shared_geometry, [], ['proxy'])
-
-	gen.bind_members(shared_geometry, ['std::string lod_proxy', 'float lod_distance', 'std::string shadow_proxy'], ['proxy'])
-
-	gen.bind_method(shared_geometry, 'SetName', 'void', ['const std::string &name'], ['proxy'])
-	gen.insert_binding_code('static std::string _Geometry_GetName(hg::Geometry *geometry) { return geometry->name; }')
-	gen.bind_method(shared_geometry, 'GetName', 'const std::string &', [], {'proxy':None, 'route': route_lambda('_Geometry_GetName')})
-	
-	gen.bind_method(shared_geometry, 'GetTriangleCount', 'size_t', [], ['proxy'])
-
-	gen.bind_method(shared_geometry, 'ComputeLocalMinMax', 'hg::MinMax', [], ['proxy'])
-	#gen.bind_method(shared_geometry, 'ComputeLocalBoneMinMax', 'bool', [''], ['proxy'])
-
-	gen.bind_method(shared_geometry, 'AllocateVertex', 'void', ['uint32_t count'], ['proxy'])
-	gen.bind_method(shared_geometry, 'AllocatePolygon', 'void', ['uint32_t count'], ['proxy'])
-
-	gen.bind_method(shared_geometry, 'AllocatePolygonBinding', 'bool', [], ['proxy'])
-	gen.bind_method(shared_geometry, 'ComputePolygonBindingCount', 'size_t', [], ['proxy'])
-
-	gen.bind_method(shared_geometry, 'AllocateVertexNormal', 'void', ['uint32_t count'], ['proxy'])
-	gen.bind_method(shared_geometry, 'AllocateVertexTangent', 'void', ['uint32_t count'], ['proxy'])
-	gen.bind_method(shared_geometry, 'AllocateRgb', 'void', ['uint32_t count'], ['proxy'])
-	gen.bind_method(shared_geometry, 'AllocateMaterialTable', 'void', ['uint32_t count'], ['proxy'])
-	gen.bind_method(shared_geometry, 'AllocateUVChannels', 'bool', ['uint32_t channel_count', 'uint32_t uv_per_channel'], ['proxy'])
-
-	gen.bind_method(shared_geometry, 'GetVertexCount', 'size_t', [], ['proxy'])
-	gen.bind_method(shared_geometry, 'GetPolygonCount', 'size_t', [], ['proxy'])
-	gen.bind_method(shared_geometry, 'GetVertexNormalCount', 'size_t', [], ['proxy'])
-	gen.bind_method(shared_geometry, 'GetVertexTangentCount', 'size_t', [], ['proxy'])
-	gen.bind_method(shared_geometry, 'GetRgbCount', 'size_t', [], ['proxy'])
-	gen.bind_method(shared_geometry, 'GetUVCount', 'int', [], ['proxy'])
-
-	gen.bind_method(shared_geometry, 'GetVertex', 'hg::Vector3', ['uint32_t index'], ['proxy'])
-	gen.bind_method(shared_geometry, 'SetVertex', 'bool', ['uint32_t index', 'const hg::Vector3 &vertex'], ['proxy'])
-	gen.bind_method(shared_geometry, 'GetVertexNormal', 'hg::Vector3', ['uint32_t index'], ['proxy'])
-	gen.bind_method(shared_geometry, 'SetVertexNormal', 'bool', ['uint32_t index', 'const hg::Vector3 &vertex'], ['proxy'])
-
-	gen.bind_method(shared_geometry, 'GetRgb', 'hg::Color', ['uint32_t index'], ['proxy'])
-	protos = [('bool', ['uint32_t poly_index', 'const std::vector<hg::Color> &colors'], ['proxy'])]
-	gen.bind_method_overloads(shared_geometry, 'SetRgb', expand_std_vector_proto(gen, protos))
-
-	gen.bind_method(shared_geometry, 'GetUV', 'hg::tVector2<float>', ['uint32_t channel', 'uint32_t index'], ['proxy'])
-	protos = [('bool', ['uint32_t channel', 'uint32_t poly_index', 'const std::vector<hg::tVector2<float>> &uvs'], ['proxy'])]
-	gen.bind_method_overloads(shared_geometry, 'SetUV', expand_std_vector_proto(gen, protos))
-
-	gen.bind_method(shared_geometry, 'SetPolygonVertexCount', 'bool', ['uint32_t index', 'uint8_t vtx_count'], ['proxy'])
-	gen.bind_method(shared_geometry, 'SetPolygonMaterialIndex', 'bool', ['uint32_t index', 'uint8_t material'], ['proxy'])
-	gen.bind_method(shared_geometry, 'SetPolygon', 'bool', ['uint32_t index', 'uint8_t vtx_count', 'uint8_t material'], ['proxy'])
-	gen.bind_method(shared_geometry, 'GetPolygonVertexCount', 'int', ['uint32_t index'], ['proxy'])
-	gen.bind_method(shared_geometry, 'GetPolygonMaterialIndex', 'int', ['uint32_t index'], ['proxy'])
-
-	protos = [('bool', ['uint32_t index', 'const std::vector<int> &idx'], ['proxy'])]
-	gen.bind_method_overloads(shared_geometry, 'SetPolygonBinding', expand_std_vector_proto(gen, protos))
-
-	gen.bind_method(shared_geometry, 'ComputePolygonArea', 'float', ['uint32_t index'], ['proxy'])
-	gen.bind_method(shared_geometry, 'Validate', 'bool', [], ['proxy'])
-
-	gen.bind_method(shared_geometry, 'ComputePolygonNormal', 'bool', ['?bool force'], ['proxy'])
-	gen.bind_method(shared_geometry, 'ComputePolygonTangent', 'bool', ['?uint32_t uv_index', '?bool force'], ['proxy'])
-
-	gen.bind_method(shared_geometry, 'ComputeVertexNormal', 'bool', ['?float max_smoothing_angle', '?bool force'], ['proxy'])
-	gen.bind_method(shared_geometry, 'ComputeVertexTangent', 'bool', ['?bool reverse_T', '?bool reverse_B', '?bool force'], ['proxy'])
-
-	gen.bind_method(shared_geometry, 'ReverseTangentFrame', 'void', ['bool reverse_T', 'bool reverse_B'], ['proxy'])
-	gen.bind_method(shared_geometry, 'SmoothRGB', 'void', ['uint32_t pass_count', 'float max_smoothing_angle'], ['proxy'])
-
-	gen.bind_method(shared_geometry, 'MergeDuplicateMaterials', 'size_t', [], ['proxy'])
-
-	gen.insert_binding_code('''
-static bool _Geometry_SetMaterial(hg::Geometry *geo, size_t idx, const std::string &path) {
-	if (idx >= geo->materials.size())
-		return false;
-	geo->materials[idx] = path;
-	return true;
-}
-''')
-	gen.bind_method(shared_geometry, 'SetMaterial', 'bool', ['size_t index', 'const std::string &path'], {'proxy': None, 'route': route_lambda('_Geometry_SetMaterial')})
-
-	gen.insert_binding_code('''static std::string _Geometry_GetMaterial(hg::Geometry *geo, size_t idx) { 
-	if (idx < 0 || idx >= geo->materials.size())
-		return "";
-	return geo->materials[idx];
-}
-''')
-	gen.bind_method(shared_geometry, 'GetMaterial', 'const std::string &', ['size_t index'], {'proxy':None, 'route': route_lambda('_Geometry_GetMaterial')})
-
-	gen.insert_binding_code('''static size_t _Geometry_GetMaterialCount(hg::Geometry *geo) { return geo->materials.size(); }''')
-	gen.bind_method(shared_geometry, 'GetMaterialCount', 'size_t', [], {'proxy':None, 'route': route_lambda('_Geometry_GetMaterialCount')})
-
-	gen.end_class(shared_geometry)
-	
-	#
-	gen.add_include('engine/geometry_serialization.h')	
-	gen.bind_function('hg::LoadGeometry', 'bool', ['hg::Geometry &geo', 'const std::string &path'])
-	gen.bind_function('hg::SaveGeometry', 'bool', ['const std::shared_ptr<hg::Geometry> &geo', 'const std::string &path', '?hg::DocumentFormat format'])
-
-	# hg::VertexLayout
-	gen.add_include('engine/vertex_layout.h')
-	
-	gen.bind_named_enum('hg::IndexType', ['IndexUByte', 'IndexUShort', 'IndexUInt'], storage_type='uint8_t')
-	gen.bind_named_enum('hg::VertexType', ['VertexByte', 'VertexUByte', 'VertexShort', 'VertexUShort', 'VertexInt', 'VertexUInt', 'VertexFloat', 'VertexHalfFloat'], storage_type='uint8_t')
-
-	gen.insert_binding_code('''
-static hg::VertexAttribute::Semantic _VertexLayoutAttribute_GetSemantic(hg::VertexLayout::Attribute *vtxLayoutAttr) { return vtxLayoutAttr->semantic; }
-static void _VertexLayoutAttribute_SetSemantic(hg::VertexLayout::Attribute *vtxLayoutAttr, hg::VertexAttribute::Semantic semantic) { vtxLayoutAttr->semantic = semantic; }
-static uint8_t _VertexLayoutAttribute_GetCount(hg::VertexLayout::Attribute *vtxLayoutAttr) { return vtxLayoutAttr->count; }
-static void _VertexLayoutAttribute_SetCount(hg::VertexLayout::Attribute *vtxLayoutAttr, uint8_t count) { vtxLayoutAttr->count = count; }
-static hg::VertexType _VertexLayoutAttribute_GetType(hg::VertexLayout::Attribute *vtxLayoutAttr) { return vtxLayoutAttr->type; }
-static void _VertexLayoutAttribute_SetType(hg::VertexLayout::Attribute *vtxLayoutAttr, hg::VertexType type) { vtxLayoutAttr->type = type; }
-static bool _VertexLayoutAttribute_GetIsNormalized(hg::VertexLayout::Attribute *vtxLayoutAttr) { return vtxLayoutAttr->is_normalized; }
-static void _VertexLayoutAttribute_SetIsNormalized(hg::VertexLayout::Attribute *vtxLayoutAttr, bool is_normalized) { vtxLayoutAttr->is_normalized = is_normalized; }
-''')
-	vtx_layout_attr = gen.begin_class('hg::VertexLayout::Attribute', bound_name='VertexLayoutAttribute')
-	gen.bind_constructor(vtx_layout_attr, [])
-	gen.bind_method(vtx_layout_attr, 'GetSemantic', 'hg::VertexAttribute::Semantic', [], {'route': route_lambda('_VertexLayoutAttribute_GetSemantic')})
-	gen.bind_method(vtx_layout_attr, 'SetSemantic', 'void', ['hg::VertexAttribute::Semantic semantic'], {'route': route_lambda('_VertexLayoutAttribute_SetSemantic')})
-	gen.bind_method(vtx_layout_attr, 'GetCount', 'uint8_t', [], {'route': route_lambda('_VertexLayoutAttribute_GetCount')})
-	gen.bind_method(vtx_layout_attr, 'SetCount', 'void', ['uint8_t count'], {'route': route_lambda('_VertexLayoutAttribute_SetCount')})
-	gen.bind_method(vtx_layout_attr, 'GetType', 'hg::VertexType', [], {'route': route_lambda('_VertexLayoutAttribute_GetType')})
-	gen.bind_method(vtx_layout_attr, 'SetType', 'void', ['hg::VertexType type'], {'route': route_lambda('_VertexLayoutAttribute_SetType')})
-	gen.bind_method_overloads(vtx_layout_attr, 'IsNormalized', [
-		('bool', [], {'route': route_lambda('_VertexLayoutAttribute_GetIsNormalized')}),
-		('void', ['bool is_normalized'], {'route': route_lambda('_VertexLayoutAttribute_SetIsNormalized')})
-	])
-	gen.end_class(vtx_layout_attr)
-
-	vtx_layout = gen.begin_class('hg::VertexLayout')
-	gen.bind_constructor(vtx_layout, [])
-	gen.typedef('hg::VertexLayout::Stride', 'uint8_t')
-	gen.bind_member(vtx_layout, 'hg::VertexLayout::Stride stride')
-	gen.bind_static_member(vtx_layout, 'const int max_attribute')
-	gen.bind_method(vtx_layout, 'Clear', 'void', [])
-	gen.bind_method(vtx_layout, 'AddAttribute', 'bool', ['hg::VertexAttribute::Semantic semantic', 'uint8_t count', 'hg::VertexType type', '?bool is_normalized'])
-	gen.bind_method(vtx_layout, 'End', 'void', [])
-	gen.bind_method(vtx_layout, 'GetAttribute', 'const hg::VertexLayout::Attribute*', ['hg::VertexAttribute::Semantic semantic'], {'check_rval': check_bool_rval_lambda(gen, 'GetAttribute failed')})
-	gen.bind_comparison_ops(vtx_layout, ['==', '!='], ['const hg::VertexLayout &layout'])
-	gen.end_class(vtx_layout)
-
-
-def bind_create_geometry(gen):
-	gen.add_include('engine/create_geometry.h')
-
-	gen.bind_function_overloads('hg::CreateCapsule', [
-		('std::shared_ptr<hg::Geometry>', [], []),
-		('std::shared_ptr<hg::Geometry>', ['float radius'], []),
-		('std::shared_ptr<hg::Geometry>', ['float radius', 'float height'], []),
-		('std::shared_ptr<hg::Geometry>', ['float radius', 'float height', 'int subdiv_x', 'int subdiv_y'], []),
-		('std::shared_ptr<hg::Geometry>', ['float radius', 'float height', 'int subdiv_x', 'int subdiv_y', 'const std::string &material_path'], []),
-		('std::shared_ptr<hg::Geometry>', ['float radius', 'float height', 'int subdiv_x', 'int subdiv_y', 'const std::string &material_path', 'const std::string &name'], [])
-	])
-	gen.bind_function_overloads('hg::CreateCone', [
-		('std::shared_ptr<hg::Geometry>', [], []),
-		('std::shared_ptr<hg::Geometry>', ['float radius'], []),
-		('std::shared_ptr<hg::Geometry>', ['float radius', 'float height'], []),
-		('std::shared_ptr<hg::Geometry>', ['float radius', 'float height', 'int subdiv_x'], []),
-		('std::shared_ptr<hg::Geometry>', ['float radius', 'float height', 'int subdiv_x', 'const std::string &material_path'], []),
-		('std::shared_ptr<hg::Geometry>', ['float radius', 'float height', 'int subdiv_x', 'const std::string &material_path', 'const std::string &name'], [])
-	])
-	gen.bind_function_overloads('hg::CreateCube', [
-		('std::shared_ptr<hg::Geometry>', [], []),
-		('std::shared_ptr<hg::Geometry>', ['float width'], []),
-		('std::shared_ptr<hg::Geometry>', ['float width', 'float height'], []),
-		('std::shared_ptr<hg::Geometry>', ['float width', 'float height', 'float length'], []),
-		('std::shared_ptr<hg::Geometry>', ['float width', 'float height', 'float length', 'const std::string &material_path'], []),
-		('std::shared_ptr<hg::Geometry>', ['float width', 'float height', 'float length', 'const std::string &material_path', 'const std::string &name'], [])
-	])
-	gen.bind_function_overloads('hg::CreateCylinder', [
-		('std::shared_ptr<hg::Geometry>', [], []),
-		('std::shared_ptr<hg::Geometry>', ['float radius'], []),
-		('std::shared_ptr<hg::Geometry>', ['float radius', 'float height'], []),
-		('std::shared_ptr<hg::Geometry>', ['float radius', 'float height', 'int subdiv_x'], []),
-		('std::shared_ptr<hg::Geometry>', ['float radius', 'float height', 'int subdiv_x', 'const std::string &material_path'], []),
-		('std::shared_ptr<hg::Geometry>', ['float radius', 'float height', 'int subdiv_x', 'const std::string &material_path', 'const std::string &name'], [])
-	])
-	gen.bind_function_overloads('hg::CreatePlane', [
-		('std::shared_ptr<hg::Geometry>', [], []),
-		('std::shared_ptr<hg::Geometry>', ['float width'], []),
-		('std::shared_ptr<hg::Geometry>', ['float width', 'float length'], []),
-		('std::shared_ptr<hg::Geometry>', ['float width', 'float length', 'int subdiv_x'], []),
-		('std::shared_ptr<hg::Geometry>', ['float width', 'float length', 'int subdiv_x', 'const std::string &material_path'], []),
-		('std::shared_ptr<hg::Geometry>', ['float width', 'float length', 'int subdiv_x', 'const std::string &material_path', 'const std::string &name'], [])
-	])
-	gen.bind_function_overloads('hg::CreateSphere', [
-		('std::shared_ptr<hg::Geometry>', [], []),
-		('std::shared_ptr<hg::Geometry>', ['float radius'], []),
-		('std::shared_ptr<hg::Geometry>', ['float radius', 'int subdiv_x', 'int subdiv_y'], []),
-		('std::shared_ptr<hg::Geometry>', ['float radius', 'int subdiv_x', 'int subdiv_y', 'const std::string &material_path'], []),
-		('std::shared_ptr<hg::Geometry>', ['float radius', 'int subdiv_x', 'int subdiv_y', 'const std::string &material_path', 'const std::string &name'], [])
-	])
-
-
-def bind_frame_renderer(gen):
-	frame_renderer = gen.begin_class('hg::FrameRenderer', bound_name='FrameRenderer_nobind', noncopyable=True, nobind=True)
-	gen.end_class(frame_renderer)
-
-	shared_frame_renderer = gen.begin_class('std::shared_ptr<hg::FrameRenderer>', bound_name='FrameRenderer', features={'proxy': lib.stl.SharedPtrProxyFeature(frame_renderer)})
-	
-	gen.bind_method(shared_frame_renderer, 'Initialize', 'bool', ["hg::RenderSystem &render_system"], ['proxy'])
-	gen.bind_method(shared_frame_renderer, 'Shutdown', 'void', ["hg::RenderSystem &render_system"], ['proxy'])
-
-	gen.end_class(shared_frame_renderer)
-
-	#
-	gen.insert_binding_code('static const std::shared_ptr<hg::FrameRenderer> NullFrameRenderer;\n')
-	gen.bind_variable('const std::shared_ptr<hg::FrameRenderer> NullFrameRenderer')
-
-	#
-	gen.insert_binding_code('''static std::shared_ptr<hg::FrameRenderer> CreateFrameRenderer(const std::string &name) { return hg::g_frame_renderer_factory.get().Instantiate(name); }
-static std::shared_ptr<hg::FrameRenderer> CreateFrameRenderer() { return hg::g_frame_renderer_factory.get().Instantiate(); }
-	''', 'Frame renderer custom API')
-
-	gen.bind_function('CreateFrameRenderer', 'std::shared_ptr<hg::FrameRenderer>', ['?const std::string &name'], {'check_rval': check_bool_rval_lambda(gen, 'CreateFrameRenderer failed')}, 'GetFrameRenderer')
-
-
-def bind_scene(gen):
-	gen.add_include('engine/scene.h')
-	gen.add_include('engine/scene_reflection.h')
-	gen.add_include('engine/node.h')
-
-	# forward declarations
-	node = gen.begin_class('hg::Node', bound_name='Node_nobind', noncopyable=True, nobind=True)
-	gen.end_class(node)
-
-	shared_node = gen.begin_class('std::shared_ptr<hg::Node>', bound_name='Node', features={'proxy': lib.stl.SharedPtrProxyFeature(node)})
-
-	scene = gen.begin_class('hg::Scene', bound_name='Scene_nobind', noncopyable=True, nobind=True)
-	gen.end_class(scene)
-
-	shared_scene = gen.begin_class('std::shared_ptr<hg::Scene>', bound_name='Scene', features={'proxy': lib.stl.SharedPtrProxyFeature(scene)})
-
-	scene_system = gen.begin_class('hg::SceneSystem', bound_name='SceneSystem_nobind', noncopyable=True, nobind=True)
-	gen.end_class(scene_system)
-
-	shared_scene_system = gen.begin_class('std::shared_ptr<hg::SceneSystem>', bound_name='SceneSystem', features={'proxy': lib.stl.SharedPtrProxyFeature(scene_system)})
-
-	gen.bind_named_enum('hg::ComponentState', ['NotReady', 'Ready', 'Failed'], storage_type='uint8_t')
-
-	#
-	gen.insert_binding_code('static const std::shared_ptr<hg::Node> NullNode;\n')
-	gen.bind_variable('const std::shared_ptr<hg::Node> NullNode')
-
-	#
-	def decl_get_set_method(conv, type, method_suffix, var_name, features=[]):
-		gen.bind_method(conv, 'Get' + method_suffix, 'const %s' % type, [], features)
-		gen.bind_method(conv, 'Set' + method_suffix, 'void', ['const %s &%s' % (type, var_name)], features)
-
-	def decl_comp_get_set_method(conv, comp_type, comp_var_name, type, method_suffix, var_name, features=[]):
-		gen.bind_method(conv, 'Get' + method_suffix, 'const %s &' % type, ['const %s *%s' % (comp_type, comp_var_name)], features)
-		gen.bind_method(conv, 'Set' + method_suffix, 'void', ['%s *%s' % (comp_type, comp_var_name), 'const %s &%s' % (type, var_name)], features)
-
-	# hg::Component
-	gen.add_include('engine/component.h')
-
-	gen.bind_named_enum('hg::ComponentState', ['NotReady', 'Ready', 'Failed'], storage_type='uint8_t')
-
-	component = gen.begin_class('hg::Component', bound_name='Component_nobind', noncopyable=True, nobind=True)
-	gen.end_class(component)
-
-	shared_component = gen.begin_class('std::shared_ptr<hg::Component>', bound_name='Component', features={'proxy': lib.stl.SharedPtrProxyFeature(component)})
-
-	gen.bind_method(shared_component, 'GetSceneSystem', 'std::shared_ptr<hg::SceneSystem>', [], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'Component is not registered in a SceneSystem')})
-	gen.bind_method(shared_component, 'GetScene', 'std::shared_ptr<hg::Scene>', [], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'Component is not registered in a Scene')})
-	gen.bind_method(shared_component, 'GetNode', 'std::shared_ptr<hg::Node>', [], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'Component is not registered in a Node')})
-
-	gen.bind_method(shared_component, 'IsAssigned', 'bool', [], ['proxy'])
-
-	gen.bind_method(shared_component, 'GetEnabled', 'bool', [], ['proxy'])
-	gen.bind_method(shared_component, 'SetEnabled', 'void', ['bool enable'], ['proxy'])
-
-	gen.bind_method(shared_component, 'GetState', 'hg::ComponentState', [], ['proxy'])
-
-	gen.bind_method(shared_component, 'GetAspect', 'const std::string &', [], ['proxy'])
-
-	gen.bind_method(shared_component, 'GetDoNotSerialize', 'bool', [], ['proxy'])
-	gen.bind_method(shared_component, 'SetDoNotSerialize', 'void', ['bool do_not_serialize'], ['proxy'])
-
-	gen.bind_method(shared_component, 'GetShowInEditor', 'bool', [], ['proxy'])
-	gen.bind_method(shared_component, 'SetShowInEditor', 'void', ['bool shown_in_editor'], ['proxy'])
-
-	gen.bind_method(shared_component, 'GetRegisteredInScene', 'std::shared_ptr<hg::Scene>', [], ['proxy'])
-
-	gen.end_class(shared_component)
-
-	bind_std_vector(gen, shared_component)
-
-	# hg::Instance
-	gen.add_include('engine/instance.h')
-
-	instance = gen.begin_class('hg::Instance', bound_name='Instance_nobind', noncopyable=True, nobind=True)
-	gen.end_class(instance)
-
-	shared_instance = gen.begin_class('std::shared_ptr<hg::Instance>', bound_name='Instance', features={'proxy': lib.stl.SharedPtrProxyFeature(instance)})
-	gen.add_base(shared_instance, shared_component)
-
-	gen.bind_constructor(shared_instance, [], ['proxy'])
-	decl_get_set_method(shared_instance, 'std::string', 'Path', 'path', ['proxy'])
-	gen.bind_method(shared_instance, 'GetState', 'hg::ComponentState', [], ['proxy'])
-
-	gen.end_class(shared_instance)
-
-	# hg::Target
-	gen.add_include('engine/target.h')
-
-	target = gen.begin_class('hg::Target', bound_name='Target_nobind', noncopyable=True, nobind=True)
-	gen.end_class(target)
-
-	shared_target = gen.begin_class('std::shared_ptr<hg::Target>', bound_name='Target', features={'proxy': lib.stl.SharedPtrProxyFeature(target)})
-	gen.add_base(shared_target, shared_component)
-
-	gen.bind_constructor(shared_target, [], ['proxy'])
-	decl_get_set_method(shared_target, 'std::shared_ptr<hg::Node>', 'Target', 'target', ['proxy'])
-
-	gen.end_class(shared_target)
-
-	# hg::Environment
-	gen.add_include('engine/environment.h')
-
-	environment = gen.begin_class('hg::Environment', bound_name='Environment_nobind', noncopyable=True, nobind=True)
-	gen.end_class(environment)
-
-	shared_environment = gen.begin_class('std::shared_ptr<hg::Environment>', bound_name='Environment', features={'proxy': lib.stl.SharedPtrProxyFeature(environment)})
-	gen.add_base(shared_environment, shared_component)
-
-	gen.bind_constructor(shared_environment, [], ['proxy'])
-
-	decl_get_set_method(shared_environment, 'float', 'TimeOfDay', 'time_of_day', ['proxy'])
-
-	decl_get_set_method(shared_environment, 'bool', 'ClearBackgroundColor', 'clear_bg_color', ['proxy'])
-	decl_get_set_method(shared_environment, 'bool', 'ClearBackgroundDepth', 'clear_bg_depth', ['proxy'])
-	decl_get_set_method(shared_environment, 'hg::Color', 'BackgroundColor', 'background_color', ['proxy'])
-
-	decl_get_set_method(shared_environment, 'float', 'AmbientIntensity', 'ambient_intensity', ['proxy'])
-	decl_get_set_method(shared_environment, 'hg::Color', 'AmbientColor', 'ambient_color', ['proxy'])
-
-	decl_get_set_method(shared_environment, 'hg::Color', 'FogColor', 'fog_color', ['proxy'])
-	decl_get_set_method(shared_environment, 'float', 'FogNear', 'fog_near', ['proxy'])
-	decl_get_set_method(shared_environment, 'float', 'FogFar', 'fog_far', ['proxy'])
-
-	gen.end_class(shared_environment)
-
-	# hg::SimpleGraphicSceneOverlay
-	gen.add_include('engine/simple_graphic_scene_overlay.h')
-
-	simple_graphic_scene_overlay = gen.begin_class('hg::SimpleGraphicSceneOverlay', bound_name='SimpleGraphicSceneOverlay_nobind', noncopyable=True, nobind=True)
-	gen.end_class(simple_graphic_scene_overlay)
-
-	shared_simple_graphic_scene_overlay = gen.begin_class('std::shared_ptr<hg::SimpleGraphicSceneOverlay>', bound_name='SimpleGraphicSceneOverlay', features={'proxy': lib.stl.SharedPtrProxyFeature(simple_graphic_scene_overlay)})
-	gen.add_base(shared_simple_graphic_scene_overlay, shared_component)
-
-	gen.bind_constructor_overloads(shared_simple_graphic_scene_overlay, [
-		([], ['proxy']),
-		(['bool is_2d_overlay'], ['proxy'])
-	])
-
-	gen.bind_method(shared_simple_graphic_scene_overlay, 'SetSnapGlyphToGrid', 'void', ['bool snap'], ['proxy'])
-	gen.bind_method(shared_simple_graphic_scene_overlay, 'GetSnapGlyphToGrid', 'bool', [], ['proxy'])
-
-	gen.bind_method(shared_simple_graphic_scene_overlay, 'SetBlendMode', 'void', ['hg::BlendMode mode'], ['proxy'])
-	gen.bind_method(shared_simple_graphic_scene_overlay, 'GetBlendMode', 'hg::BlendMode', [], ['proxy'])
-	gen.bind_method(shared_simple_graphic_scene_overlay, 'SetCullMode', 'void', ['hg::CullMode mode'], ['proxy'])
-	gen.bind_method(shared_simple_graphic_scene_overlay, 'GetCullMode', 'hg::CullMode', [], ['proxy'])
-
-	gen.bind_method(shared_simple_graphic_scene_overlay, 'SetDepthWrite', 'void', ['bool enable'], ['proxy'])
-	gen.bind_method(shared_simple_graphic_scene_overlay, 'GetDepthWrite', 'bool', [], ['proxy'])
-	gen.bind_method(shared_simple_graphic_scene_overlay, 'SetDepthTest', 'void', ['bool enable'], ['proxy'])
-	gen.bind_method(shared_simple_graphic_scene_overlay, 'GetDepthTest', 'bool', [], ['proxy'])
-
-	gen.bind_method(shared_simple_graphic_scene_overlay, 'Line', 'void', ['float sx', 'float sy', 'float sz', 'float ex', 'float ey', 'float ez', 'const hg::Color &start_color', 'const hg::Color &end_color'], ['proxy'])
-	gen.bind_method(shared_simple_graphic_scene_overlay, 'Triangle', 'void', ['float ax', 'float ay', 'float az', 'float bx', 'float by', 'float bz', 'float cx', 'float cy', 'float cz', 'const hg::Color &a_color', 'const hg::Color &b_color', 'const hg::Color &c_color'], ['proxy'])
-	gen.bind_method_overloads(shared_simple_graphic_scene_overlay, 'Text', [
-		('void', ['float x', 'float y', 'float z', 'const std::string &text', 'const hg::Color &color', 'std::shared_ptr<hg::RasterFont> font', 'float scale'], ['proxy']),
-		('void', ['const hg::Matrix4 &mat', 'const std::string &text', 'const hg::Color &color', 'std::shared_ptr<hg::RasterFont> font', 'float scale'], ['proxy'])
-	])
-
-	gen.insert_binding_code('''
-static void _SimpleGraphicSceneOverlay_Quad(hg::SimpleGraphicSceneOverlay *overlay, float ax, float ay, float az, float bx, float by, float bz, float cx, float cy, float cz, float dx, float dy, float dz, const hg::Color &a_color, const hg::Color &b_color, const hg::Color &c_color, const hg::Color &d_color) {
-	overlay->Quad(ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz, 0, 0, 1, 1, nullptr, a_color, b_color, c_color, d_color);
-}
-''')
-	gen.bind_method_overloads(shared_simple_graphic_scene_overlay, 'Quad', [
-		('void', ['float ax', 'float ay', 'float az', 'float bx', 'float by', 'float bz', 'float cx', 'float cy', 'float cz', 'float dx', 'float dy', 'float dz', 'const hg::Color &a_color', 'const hg::Color &b_color', 'const hg::Color &c_color', 'const hg::Color &d_color'], {'proxy': None, 'route': route_lambda('_SimpleGraphicSceneOverlay_Quad')}),
-		('void', ['float ax', 'float ay', 'float az', 'float bx', 'float by', 'float bz', 'float cx', 'float cy', 'float cz', 'float dx', 'float dy', 'float dz', 'float uv_sx', 'float uv_sy', 'float uv_ex', 'float uv_ey', 'std::shared_ptr<hg::Texture> texture', 'const hg::Color &a_color', 'const hg::Color &b_color', 'const hg::Color &c_color', 'const hg::Color &d_color'], ['proxy'])
-	])
-	gen.bind_method(shared_simple_graphic_scene_overlay, 'Geometry', 'void', ['float x', 'float y', 'float z', 'float ex', 'float ey', 'float ez', 'float sx', 'float sy', 'float sz', 'std::shared_ptr<hg::RenderGeometry> geometry'], ['proxy'])
-
-	gen.end_class(shared_simple_graphic_scene_overlay)
-
-	# hg::Transform
-	gen.add_include('engine/transform.h')
-
-	transform = gen.begin_class('hg::Transform', bound_name='Transform_nobind', noncopyable=True, nobind=True)
-	gen.end_class(transform)
-
-	shared_transform = gen.begin_class('std::shared_ptr<hg::Transform>', bound_name='Transform', features={'proxy': lib.stl.SharedPtrProxyFeature(transform)})
-	gen.add_base(shared_transform, shared_component)
-
-	gen.bind_constructor_overloads(shared_transform, [
-		([], ['proxy']),
-		(['const hg::Vector3 &pos', '?const hg::Vector3 &rot', '?const hg::Vector3 &scl'], ['proxy'])
-	])
-
-	gen.bind_method(shared_transform, 'GetParent', 'std::shared_ptr<hg::Node>', [], ['proxy'])
-	gen.bind_method(shared_transform, 'SetParent', 'void', ['std::shared_ptr<hg::Node> parent'], ['proxy'])
-
-	gen.bind_method(shared_transform, 'GetPreviousWorld', 'hg::Matrix4', [], ['proxy'])
-	gen.bind_method(shared_transform, 'GetWorld', 'hg::Matrix4', [], ['proxy'])
-
-	decl_get_set_method(shared_transform, 'hg::Vector3', 'Position', 'position', ['proxy'])
-	decl_get_set_method(shared_transform, 'hg::Vector3', 'Rotation', 'rotation', ['proxy'])
-	decl_get_set_method(shared_transform, 'hg::Vector3', 'Scale', 'scale', ['proxy'])
-
-	gen.bind_method(shared_transform, 'SetRotationMatrix', 'void', ['const hg::Matrix3 &rotation'], ['proxy'])
-
-	gen.bind_method(shared_transform, 'SetLocal', 'void', ['hg::Matrix4 &local'], ['proxy'])
-	gen.bind_method(shared_transform, 'SetWorld', 'void', ['hg::Matrix4 &world'], ['proxy'])
-	gen.bind_method(shared_transform, 'OffsetWorld', 'void', ['hg::Matrix4 &offset'], ['proxy'])
-
-	gen.bind_method(shared_transform, 'TransformLocalPoint', 'hg::Vector3', ['const hg::Vector3 &local_point'], ['proxy'])
-	gen.end_class(shared_transform)
-
-	# hg::Camera
-	gen.add_include('engine/camera.h')
-
-	cam = gen.begin_class('hg::Camera', bound_name='Camera_nobind', noncopyable=True, nobind=True)
-	gen.end_class(cam)
-
-	shared_cam = gen.begin_class('std::shared_ptr<hg::Camera>', bound_name='Camera', features={'proxy': lib.stl.SharedPtrProxyFeature(cam)})
-	gen.add_base(shared_cam, shared_component)
-
-	gen.bind_constructor(shared_cam, [], ['proxy'])
-
-	decl_get_set_method(shared_cam, 'float', 'ZoomFactor', 'zoom_factor', ['proxy'])
-	decl_get_set_method(shared_cam, 'float', 'ZNear', 'z_near', ['proxy'])
-	decl_get_set_method(shared_cam, 'float', 'ZFar', 'z_far', ['proxy'])
-
-	decl_get_set_method(shared_cam, 'bool', 'Orthographic', 'is_orthographic', ['proxy'])
-	decl_get_set_method(shared_cam, 'float', 'OrthographicSize', 'orthographic_size', ['proxy'])
-
-	gen.bind_method(shared_cam, 'GetProjectionMatrix', 'hg::Matrix44', ['const hg::tVector2<float> &aspect_ratio'], ['proxy'])
-	gen.end_class(shared_cam)
-
-	gen.bind_function('hg::Project', 'bool', ['const hg::Matrix4 &camera_world', 'float zoom_factor', 'const hg::tVector2<float> &aspect_ratio', 'const hg::Vector3 &position', 'hg::Vector3 &out'], {'arg_out': ['out']})
-	gen.bind_function('hg::Unproject', 'bool', ['const hg::Matrix4 &camera_world', 'float zoom_factor', 'const hg::tVector2<float> &aspect_ratio', 'const hg::Vector3 &position', 'hg::Vector3 &out'], {'arg_out': ['out']})
-
-	gen.bind_function('hg::ExtractZoomFactorFromProjectionMatrix', 'float', ['const hg::Matrix44 &projection_matrix'])
-	gen.bind_function('hg::ExtractZRangeFromProjectionMatrix', 'void', ['const hg::Matrix44 &projection_matrix', 'float &znear', 'float &zfar'], {'arg_out': ['znear', 'zfar']})
-
-	# hg::Object
-	gen.add_include('engine/object.h')
-
-	obj = gen.begin_class('hg::Object', bound_name='Object_nobind', noncopyable=True, nobind=True)
-	gen.end_class(obj)
-
-	shared_obj = gen.begin_class('std::shared_ptr<hg::Object>', bound_name='Object', features={'proxy': lib.stl.SharedPtrProxyFeature(obj)})
-	gen.add_base(shared_obj, shared_component)
-
-	gen.bind_constructor(shared_obj, [], ['proxy'])
-
-	gen.bind_method(shared_obj, 'GetState', 'hg::ComponentState', [], ['proxy'])
-
-	decl_get_set_method(shared_obj, 'std::shared_ptr<hg::RenderGeometry>', 'Geometry', 'geometry', ['proxy'])
-
-	gen.bind_method(shared_obj, 'GetLocalMinMax', 'hg::MinMax', [], ['proxy'])
-
-	gen.bind_method(shared_obj, 'GetBindMatrix', 'bool', ['uint32_t index', 'hg::Matrix4 &bind_matrix'], ['proxy'])
-	gen.bind_method(shared_obj, 'HasSkeleton', 'bool', [], ['proxy'])
-	gen.bind_method(shared_obj, 'IsSkinBound', 'bool', [], ['proxy'])
-
-	gen.bind_method(shared_obj, 'GetBoneCount', 'uint32_t', [], ['proxy'])
-	gen.bind_method(shared_obj, 'GetBone', 'const std::shared_ptr<hg::Node> &', ['uint32_t index'], ['proxy'])
-	gen.end_class(shared_obj)
-
-	# hg::Light
-	gen.add_include('engine/light.h')
-
-	gen.bind_named_enum('hg::Light::Model', ['ModelPoint', 'ModelLinear', 'ModelSpot', 'ModelLast'], prefix='Light')
-	gen.bind_named_enum('hg::Light::Shadow', ['ShadowNone', 'ShadowProjectionMap', 'ShadowMap'], prefix='Light')
-
-	light = gen.begin_class('hg::Light', bound_name='Light_nobind', noncopyable=True, nobind=True)
-	gen.end_class(light)
-
-	shared_light = gen.begin_class('std::shared_ptr<hg::Light>', bound_name='Light', features={'proxy': lib.stl.SharedPtrProxyFeature(light)})
-	gen.add_base(shared_light, shared_component)
-
-	gen.bind_constructor(shared_light, [], ['proxy'])
-
-	decl_get_set_method(shared_light, 'hg::Light::Model', 'Model', ' model', ['proxy'])
-	decl_get_set_method(shared_light, 'hg::Light::Shadow', 'Shadow', ' shadow', ['proxy'])
-	decl_get_set_method(shared_light, 'bool', 'ShadowCastAll', ' shadow_cast_all', ['proxy'])
-	decl_get_set_method(shared_light, 'float', 'ShadowRange', ' shadow_range', ['proxy'])
-	decl_get_set_method(shared_light, 'float', 'ShadowBias', ' shadow_bias', ['proxy'])
-	decl_get_set_method(shared_light, 'hg::Vector4', 'ShadowSplit', ' shadow_split', ['proxy'])
-	decl_get_set_method(shared_light, 'float', 'ZNear', ' z_near', ['proxy'])
-
-	decl_get_set_method(shared_light, 'float', 'Range', ' range', ['proxy'])
-	decl_get_set_method(shared_light, 'float', 'ClipDistance', ' clip_distance', ['proxy'])
-
-	decl_get_set_method(shared_light, 'hg::Color', 'DiffuseColor', ' diffuse_color', ['proxy'])
-	decl_get_set_method(shared_light, 'hg::Color', 'SpecularColor', ' specular_color', ['proxy'])
-	decl_get_set_method(shared_light, 'hg::Color', 'ShadowColor', ' shadow_color', ['proxy'])
-
-	decl_get_set_method(shared_light, 'float', 'DiffuseIntensity', ' diffuse_intensity', ['proxy'])
-	decl_get_set_method(shared_light, 'float', 'SpecularIntensity', ' specular_intensity', ['proxy'])
-	decl_get_set_method(shared_light, 'float', 'ConeAngle', ' cone_angle', ['proxy'])
-	decl_get_set_method(shared_light, 'float', 'EdgeAngle', ' edge_angle', ['proxy'])
-
-	decl_get_set_method(shared_light, 'std::shared_ptr<hg::Texture>', 'ProjectionTexture', ' projection_texture', ['proxy'])
-
-	gen.end_class(shared_light)
-
-	# hg::RigidBody
-	gen.add_include('engine/rigid_body.h')
-
-	gen.bind_named_enum('hg::RigidBodyType', ['RigidBodyDynamic', 'RigidBodyKinematic', 'RigidBodyStatic'])
-
-	rigid_body = gen.begin_class('hg::RigidBody', bound_name='RigidBody_nobind', noncopyable=True, nobind=True)
-	gen.end_class(rigid_body)
-
-	shared_rigid_body = gen.begin_class('std::shared_ptr<hg::RigidBody>', bound_name='RigidBody', features={'proxy': lib.stl.SharedPtrProxyFeature(rigid_body)})
-	gen.add_base(shared_rigid_body, shared_component)
-
-	gen.bind_constructor(shared_rigid_body, [], ['proxy'])
-
-	decl_get_set_method(shared_rigid_body, 'bool', 'IsSleeping', 'is_sleeping', ['proxy'])
-
-	gen.bind_method(shared_rigid_body, 'GetVelocity', 'const hg::Vector3', ['const hg::Vector3 &position'], ['proxy'])
-	gen.bind_method(shared_rigid_body, 'SetVelocity', 'void', ['const hg::Vector3 &V', 'const hg::Vector3 &position'], ['proxy'])
-
-	decl_get_set_method(shared_rigid_body, 'hg::Vector3', 'LinearVelocity', 'V', ['proxy'])
-	decl_get_set_method(shared_rigid_body, 'hg::Vector3', 'AngularVelocity', 'W', ['proxy'])
-
-	decl_get_set_method(shared_rigid_body, 'float', 'LinearDamping', 'damping', ['proxy'])
-	decl_get_set_method(shared_rigid_body, 'float', 'AngularDamping', 'damping', ['proxy'])
-
-	decl_get_set_method(shared_rigid_body, 'float', 'StaticFriction', 'sF', ['proxy'])
-	decl_get_set_method(shared_rigid_body, 'float', 'DynamicFriction', 'dF', ['proxy'])
-
-	decl_get_set_method(shared_rigid_body, 'float', 'Restitution', 'restitution', ['proxy'])
-
-	decl_get_set_method(shared_rigid_body, 'hg::RigidBodyType', 'Type', 'type', ['proxy'])
-
-	decl_get_set_method(shared_rigid_body, 'int', 'AxisLock', 'axis_lock', ['proxy'])
-	decl_get_set_method(shared_rigid_body, 'int', 'CollisionLayer', 'layer', ['proxy'])
-
-	gen.bind_method(shared_rigid_body, 'ApplyLinearImpulse', 'void', ['const hg::Vector3 &I'], ['proxy'])
-	gen.bind_method(shared_rigid_body, 'ApplyLinearForce', 'void', ['const hg::Vector3 &F'], ['proxy'])
-	gen.bind_method(shared_rigid_body, 'ApplyImpulse', 'void', ['const hg::Vector3 &I', 'const hg::Vector3 &position'], ['proxy'])
-	gen.bind_method(shared_rigid_body, 'ApplyForce', 'void', ['const hg::Vector3 &F', 'const hg::Vector3 &position'], ['proxy'])
-	gen.bind_method(shared_rigid_body, 'ApplyTorque', 'void', ['const hg::Vector3 &T'], ['proxy'])
-
-	gen.bind_method(shared_rigid_body, 'ResetWorld', 'void', ['const hg::Matrix4 &m'], ['proxy'])
-
-	gen.end_class(shared_rigid_body)
-
-	# hg::Collision
-	gen.add_include('engine/collision.h')
-
-	collision = gen.begin_class('hg::Collision', bound_name='Collision_nobind', noncopyable=True, nobind=True)
-	gen.end_class(collision)
-
-	shared_collision = gen.begin_class('std::shared_ptr<hg::Collision>', bound_name='Collision', features={'proxy': lib.stl.SharedPtrProxyFeature(collision)})
-	gen.add_base(shared_collision, shared_component)
-	decl_get_set_method(shared_collision, 'float', 'Mass', 'mass', ['proxy'])
-	decl_get_set_method(shared_collision, 'hg::Matrix4', 'Matrix', 'matrix', ['proxy'])
-	gen.end_class(shared_collision)	
-
-	# hg::BoxCollision
-	gen.add_include('engine/box_collision.h')
-
-	box_collision = gen.begin_class('hg::BoxCollision', bound_name='BoxCollision_nobind', noncopyable=True, nobind=True)
-	gen.end_class(box_collision)
-
-	shared_box_collision = gen.begin_class('std::shared_ptr<hg::BoxCollision>', bound_name='BoxCollision', features={'proxy': lib.stl.SharedPtrProxyFeature(box_collision)})
-	gen.add_bases(shared_box_collision, [shared_component, shared_collision])
-	gen.bind_constructor(shared_box_collision, [], ['proxy'])
-	decl_get_set_method(shared_box_collision, 'hg::Vector3', 'Dimensions', 'dimensions', ['proxy'])
-	gen.end_class(shared_box_collision)	
-
-	# hg::MeshCollision
-	gen.add_include('engine/mesh_collision.h')
-
-	mesh_collision = gen.begin_class('hg::MeshCollision', bound_name='MeshCollision_nobind', noncopyable=True, nobind=True)
-	gen.end_class(mesh_collision)
-
-	shared_mesh_collision = gen.begin_class('std::shared_ptr<hg::MeshCollision>', bound_name='MeshCollision', features={'proxy': lib.stl.SharedPtrProxyFeature(mesh_collision)})
-	gen.add_bases(shared_mesh_collision, [shared_component, shared_collision])
-	gen.bind_constructor(shared_mesh_collision, [], ['proxy'])
-	decl_get_set_method(shared_mesh_collision, 'std::shared_ptr<hg::Geometry>', 'Geometry', 'geometry', ['proxy'])
-	gen.end_class(shared_mesh_collision)	
-
-	# hg::SphereCollision
-	gen.add_include('engine/sphere_collision.h')
-
-	sphere_collision = gen.begin_class('hg::SphereCollision', bound_name='SphereCollision_nobind', noncopyable=True, nobind=True)
-	gen.end_class(sphere_collision)
-
-	shared_sphere_collision = gen.begin_class('std::shared_ptr<hg::SphereCollision>', bound_name='SphereCollision', features={'proxy': lib.stl.SharedPtrProxyFeature(sphere_collision)})
-	gen.add_bases(shared_sphere_collision, [shared_component, shared_collision])
-	gen.bind_constructor(shared_sphere_collision, [], ['proxy'])
-	decl_get_set_method(shared_sphere_collision, 'float', 'Radius', 'radius', ['proxy'])
-	gen.end_class(shared_sphere_collision)	
-
-	# hg::CapsuleCollision
-	gen.add_include('engine/capsule_collision.h')
-
-	capsule_collision = gen.begin_class('hg::CapsuleCollision', bound_name='CapsuleCollision_nobind', noncopyable=True, nobind=True)
-	gen.end_class(capsule_collision)
-
-	shared_capsule_collision = gen.begin_class('std::shared_ptr<hg::CapsuleCollision>', bound_name='CapsuleCollision', features={'proxy': lib.stl.SharedPtrProxyFeature(capsule_collision)})
-	gen.add_bases(shared_capsule_collision, [shared_component, shared_collision])
-	gen.bind_constructor(shared_capsule_collision, [], ['proxy'])
-	decl_get_set_method(shared_capsule_collision, 'float', 'Length', 'length', ['proxy'])
-	decl_get_set_method(shared_capsule_collision, 'float', 'Radius', 'radius', ['proxy'])
-	gen.end_class(shared_capsule_collision)	
-
-	# hg::ConvexCollision
-	gen.add_include('engine/convex_collision.h')
-
-	convex_collision = gen.begin_class('hg::ConvexCollision', bound_name='ConvexCollision_nobind', noncopyable=True, nobind=True)
-	gen.end_class(convex_collision)
-
-	shared_convex_collision = gen.begin_class('std::shared_ptr<hg::ConvexCollision>', bound_name='ConvexCollision', features={'proxy': lib.stl.SharedPtrProxyFeature(convex_collision)})
-	gen.add_bases(shared_convex_collision, [shared_component, shared_collision])
-	gen.bind_constructor(shared_convex_collision, [], ['proxy'])
-	decl_get_set_method(shared_convex_collision, 'std::shared_ptr<hg::Geometry>', 'Geometry', 'geometry', ['proxy'])
-	gen.end_class(shared_convex_collision)	
-	
-	# hg::JointLimit
-	gen.add_include('engine/joint.h')
-
-	join_limit = gen.begin_class('hg::JointLimit')
-	gen.bind_constructor_overloads(join_limit, [
-		([], []),
-		(['float smin', 'float smax'], [])
-	])
-	gen.bind_comparison_op(join_limit, '==', ['const hg::JointLimit &o'])
-	gen.bind_members(join_limit, ['float min', 'float max'])
-	gen.end_class(join_limit)
-
-	# hg::Joint
-	joint = gen.begin_class('hg::Joint', bound_name='Joint_nobind', noncopyable=True, nobind=True)
-	gen.end_class(joint)
-
-	shared_joint = gen.begin_class('std::shared_ptr<hg::Joint>', bound_name='Joint', features={'proxy': lib.stl.SharedPtrProxyFeature(joint)})
-	gen.add_bases(shared_joint, [shared_component])
-	decl_get_set_method(shared_joint, 'hg::Vector3', 'Pivot', 'pivot', ['proxy'])
-	decl_get_set_method(shared_joint, 'std::shared_ptr<hg::Node>', 'OtherBody', 'other_body', ['proxy'])
-	decl_get_set_method(shared_joint, 'hg::Vector3', 'OtherPivot', 'other_pivot', ['proxy'])
-	gen.end_class(shared_joint)
-
-	#hg::SphericalJoint
-	gen.add_include('engine/spherical_joint.h')
-	
-	spherical_joint = gen.begin_class('hg::SphericalJoint', bound_name='SphericalJoint_nobind', noncopyable=True, nobind=True)
-	gen.end_class(spherical_joint)
-
-	shared_spherical_joint = gen.begin_class('std::shared_ptr<hg::SphericalJoint>', bound_name='SphericalJoint', features={'proxy': lib.stl.SharedPtrProxyFeature(spherical_joint)})
-	gen.add_bases(shared_spherical_joint, [shared_component, shared_joint])
-	gen.bind_constructor(shared_spherical_joint, [], ['proxy'])
-	gen.end_class(shared_spherical_joint)
-
-	#hg::D6Joint
-	gen.add_include('engine/d6_joint.h')
-	
-	d6_joint = gen.begin_class('hg::D6Joint', bound_name='D6Joint_nobind', noncopyable=True, nobind=True)
-	gen.end_class(d6_joint)
-
-	shared_d6_joint = gen.begin_class('std::shared_ptr<hg::D6Joint>', bound_name='D6Joint', features={'proxy': lib.stl.SharedPtrProxyFeature(d6_joint)})
-	gen.add_bases(shared_d6_joint, [shared_component, shared_joint])
-	gen.bind_constructor(shared_d6_joint, [], ['proxy'])
-	decl_get_set_method(shared_d6_joint, 'uint8_t', 'AxisLock', 'axis_lock', ['proxy'])
-	decl_get_set_method(shared_d6_joint, 'hg::JointLimit', 'XAxisLimit', 'x_axis_limit', ['proxy'])
-	decl_get_set_method(shared_d6_joint, 'hg::JointLimit', 'YAxisLimit', 'y_axis_limit', ['proxy'])
-	decl_get_set_method(shared_d6_joint, 'hg::JointLimit', 'ZAxisLimit', 'z_axis_limit', ['proxy'])
-	decl_get_set_method(shared_d6_joint, 'hg::JointLimit', 'RotXAxisLimit', 'rot_x_axis_limit', ['proxy'])
-	decl_get_set_method(shared_d6_joint, 'hg::JointLimit', 'RotYAxisLimit', 'rot_y_axis_limit', ['proxy'])
-	decl_get_set_method(shared_d6_joint, 'hg::JointLimit', 'RotZAxisLimit', 'rot_z_axis_limit', ['proxy'])
-	gen.end_class(shared_d6_joint)
-
-	# hg::Terrain
-	gen.add_include('engine/terrain.h')
-
-	terrain = gen.begin_class('hg::Terrain', bound_name='Terrain_nobind', noncopyable=True, nobind=True)
-	gen.end_class(terrain)
-
-	shared_terrain = gen.begin_class('std::shared_ptr<hg::Terrain>', bound_name='Terrain', features={'proxy': lib.stl.SharedPtrProxyFeature(terrain)})
-	gen.add_base(shared_terrain, shared_component)
-
-	gen.bind_constructor(shared_terrain, [], ['proxy'])
-
-	decl_get_set_method(shared_terrain, 'std::string', 'Heightmap', 'heightmap', ['proxy'])
-	decl_get_set_method(shared_terrain, 'hg::tVector2<int>', 'HeightmapResolution', 'heightmap_resolution', ['proxy'])
-	decl_get_set_method(shared_terrain, 'uint32_t', 'HeightmapBpp', 'heightmap_bpp', ['proxy'])
-
-	decl_get_set_method(shared_terrain, 'hg::Vector3', 'Size', 'size', ['proxy'])
-
-	decl_get_set_method(shared_terrain, 'std::string', 'SurfaceShader', 'surface_shader', ['proxy'])
-
-	decl_get_set_method(shared_terrain, 'int', 'PatchSubdivisionThreshold', 'patch_subdv_threshold', ['proxy'])
-	decl_get_set_method(shared_terrain, 'int', 'MaxRecursion', 'max_recursion', ['proxy'])
-	decl_get_set_method(shared_terrain, 'float', 'MinPrecision', 'min_precision', ['proxy'])
-
-	decl_get_set_method(shared_terrain, 'bool', 'Wireframe', 'wireframe', ['proxy'])
-
-	gen.end_class(shared_terrain)
-
-	# hg::ScriptEngineEnv
-	gen.add_include('engine/script_system.h')
-
-	script_env = gen.begin_class('hg::ScriptEngineEnv', bound_name='ScriptEnv_nobind', noncopyable=True, nobind=True)
-	gen.end_class(script_env)
-
-	shared_script_env = gen.begin_class('std::shared_ptr<hg::ScriptEngineEnv>', bound_name='ScriptEnv', features={'proxy': lib.stl.SharedPtrProxyFeature(script_env)})
-	gen.bind_constructor(shared_script_env, ['std::shared_ptr<hg::RenderSystemAsync> render_system_async', 'std::shared_ptr<hg::RendererAsync> renderer_async', 'std::shared_ptr<hg::MixerAsync> mixer'], ['proxy'])
-	gen.bind_member(shared_script_env, 'float dt', ['proxy'])
-	gen.end_class(shared_script_env)
-
-	# hg::ScriptObject
-	if gen.get_language() == 'CPython':
-		# unsupported (no CPython embedded)
-		pass
-	elif gen.get_language() == 'Lua':
-		gen.add_include('engine/lua_vm.h')
-
-		class LuaScriptObjectConverter(lang.lua.LuaTypeConverterCommon):
-			def get_type_glue(self, gen, module_name):
-				check = '''\
-bool %s(lua_State *L, int idx) {
-	using namespace hg;
-	return true;
-}
-''' % self.check_func
-
-				to_c = '''\
-void %s(lua_State *L, int idx, void *obj) {
-	reinterpret_cast<hg::ScriptObject *>(obj)->impl = std::make_shared<hg::LuaObjectImpl>(L, luaL_ref(L, LUA_REGISTRYINDEX));
+inline void %s(lua_State *L, int idx, void *obj) {
+	lua_pushvalue(L, idx);
+	*reinterpret_cast<hg::LuaObject *>(obj) = hg::LuaObject(L, luaL_ref(L, LUA_REGISTRYINDEX));
 }
 ''' % self.to_c_func
 
 				from_c = '''\
-int %s(lua_State *L, void *obj, OwnershipPolicy) {
-	lua_rawgeti(L, LUA_REGISTRYINDEX, static_cast<const hg::LuaObjectImpl *>(reinterpret_cast<hg::ScriptObject *>(obj)->impl.get())->Get());
-	return 1;
+inline int %s(lua_State *L, void *obj, OwnershipPolicy) {
+	return hg::PushForeign(L, *reinterpret_cast<hg::LuaObject *>(obj)); // PushForeign can unpack/repack certain types coming from a different VM
 }
 ''' % self.from_c_func
 				return check + to_c + from_c
 
-		type_value = gen.bind_type(LuaScriptObjectConverter('hg::ScriptObject'))
+		lua_object = gen.bind_type(LuaObjectConverter('hg::LuaObject'))
+		lua_object._inline = True
+
+		bind_std_vector(gen, lua_object)
+	else:
+		lua_object = gen.begin_class('hg::LuaObject')
+		gen.end_class(lua_object)
+
+		bind_std_vector(gen, lua_object)
+
+
+def bind_signal_T(gen, name, rtype, args, cb_name):
+	sig = '%s(%s)' % (rtype, ','.join(args))
+
+	lib.stl.bind_function_T(gen, 'std::function<%s>' % sig, cb_name)
+
+	cnx = gen.begin_class('hg::Signal<%s>::Connection' % sig, bound_name='%sConnection' % cb_name)
+	gen.end_class(cnx)
+
+	signal_T = gen.begin_class('hg::Signal<%s>' % sig, noncopyable=True)
+	gen.bind_method(signal_T, 'Connect', 'hg::Signal<%s>::Connection' % sig, ['std::function<%s> listener' % sig])
+	gen.bind_method(signal_T, 'Disconnect', 'void', ['hg::Signal<%s>::Connection connection' % sig])
+	gen.bind_method(signal_T, 'DisconnectAll', 'void', [])
+
+	named_args = []
+	for i in range(len(args)):
+		named_args.append(args[i] + ' arg%d' % i)
+
+	gen.bind_method(signal_T, 'Emit', 'void', named_args)
+	gen.bind_method(signal_T, 'GetListenerCount', 'size_t', [])
+	gen.end_class(signal_T)
+
+
+def bind_scene(gen):
+	gen.add_include('engine/scene.h')
+
+	# hg::SceneAnimRef
+	gen.bind_named_enum('hg::AnimLoopMode', ['ALM_Once', 'ALM_Infinite', 'ALM_Loop'])
+
+	scene_anim_ref = gen.begin_class('hg::SceneAnimRef')
+	scene_anim_ref._inline = True
+	gen.bind_comparison_ops(scene_anim_ref, ['==', '!='], ['const hg::SceneAnimRef &ref'])
+	gen.end_class(scene_anim_ref)
+
+	gen.bind_variable("const hg::SceneAnimRef hg::InvalidSceneAnimRef")
+	bind_std_vector(gen, scene_anim_ref)
+
+	scene_play_anim_ref = gen.begin_class('hg::ScenePlayAnimRef')
+	scene_play_anim_ref._inline = True
+	gen.bind_comparison_ops(scene_play_anim_ref, ['==', '!='], ['const hg::ScenePlayAnimRef &ref'])
+	gen.end_class(scene_play_anim_ref)
+
+	bind_std_vector(gen, scene_play_anim_ref)
+
+	gen.bind_variable("const hg::time_ns hg::UnspecifiedAnimTime")
+
+	# hg::Easing
+	gen.bind_named_enum('hg::Easing', [
+		'E_Linear', 'E_Step', 'E_SmoothStep', 'E_InQuad', 'E_OutQuad', 'E_InOutQuad', 'E_OutInQuad', 'E_InCubic', 'E_OutCubic', 'E_InOutCubic', 'E_OutInCubic',
+		'E_InQuart', 'E_OutQuart', 'E_InOutQuart', 'E_OutInQuart', 'E_InQuint', 'E_OutQuint', 'E_InOutQuint', 'E_OutInQuint', 'E_InSine', 'E_OutSine', 'E_InOutSine',
+		'E_OutInSine', 'E_InExpo', 'E_OutExpo', 'E_InOutExpo', 'E_OutInExpo', 'E_InCirc', 'E_OutCirc', 'E_InOutCirc', 'E_OutInCirc', 'E_InElastic', 'E_OutElastic',
+		'E_InOutElastic', 'E_OutInElastic', 'E_InBack', 'E_OutBack', 'E_InOutBack', 'E_OutInBack', 'E_InBounce', 'E_OutBounce', 'E_InOutBounce', 'E_OutInBounce'
+	], 'unsigned char')
+
+	# hg::CollisionMesh
+#	collision_mesh = gen.begin_class('hg::CollisionMesh')
+#	gen.bind_comparison_ops(collision_mesh, ['==', '!='], ['const hg::CollisionMesh &c'])
+#	gen.end_class(collision_mesh)
+#	gen.bind_variable("const hg::CollisionMesh hg::InvalidCollisionMeshRef")
+
+	#
+	scene = gen.begin_class('hg::Scene', noncopyable=True)
+	scene_view = gen.begin_class('hg::SceneView')
+
+	node = gen.begin_class('hg::Node')
+	node._inline = True
+
+	# hg::Transform
+	TRS = gen.begin_class('hg::TransformTRS')
+	gen.bind_constructor(TRS, [])
+	gen.bind_members(TRS, ['hg::Vec3 pos', 'hg::Vec3 rot', 'hg::Vec3 scl'])
+	gen.end_class(TRS)
+
+	transform = gen.begin_class('hg::Transform')
+
+	gen.bind_method(transform, 'IsValid', 'bool', [])
+	gen.bind_comparison_op(transform, '==', ['const hg::Transform &t'])
+
+	gen.bind_method(transform, 'GetPos', 'hg::Vec3', [])
+	gen.bind_method(transform, 'SetPos', 'void', ['const hg::Vec3 &T'])
+	gen.bind_method(transform, 'GetRot', 'hg::Vec3', [])
+	gen.bind_method(transform, 'SetRot', 'void', ['const hg::Vec3 &R'])
+	gen.bind_method(transform, 'GetScale', 'hg::Vec3', [])
+	gen.bind_method(transform, 'SetScale', 'void', ['const hg::Vec3 &S'])
+	gen.bind_method(transform, 'GetTRS', 'hg::TransformTRS', [])
+	gen.bind_method(transform, 'SetTRS', 'void', ['const hg::TransformTRS &TRS'])
+
+	gen.bind_method(transform, 'GetPosRot', 'void', ['hg::Vec3 &pos', 'hg::Vec3 &rot'], {'arg_out': ['pos', 'rot']})
+	gen.bind_method(transform, 'SetPosRot', 'void', ['const hg::Vec3 &pos', 'const hg::Vec3 &rot'])
+
+	gen.insert_binding_code('static void _NodeClearParent(hg::Transform *trs) { trs->SetParentNode(hg::NullNode); }')
+
+	gen.bind_method(transform, 'GetParentNode', 'hg::Node', [], bound_name='GetParent')
+	gen.bind_method(transform, 'SetParentNode', 'void', ['const hg::Node &n'], bound_name='SetParent')
+	gen.bind_method(transform, 'ClearParent', 'void', [], {'route': route_lambda('_NodeClearParent')})
+
+	gen.bind_method(transform, 'GetWorld', 'hg::Mat4', [])
+	gen.bind_method(transform, 'SetWorld', 'void', ['const hg::Mat4 &world'])
+	gen.bind_method(transform, 'SetLocal', 'void', ['const hg::Mat4 &local'])
+
+	gen.end_class(transform)
+
+	# hg::Camera
+	zrange = gen.begin_class('hg::CameraZRange')
+	gen.bind_constructor(zrange, [])
+	gen.bind_members(zrange, ['float znear', 'float zfar'])
+	gen.end_class(zrange)
+
+	camera = gen.begin_class('hg::Camera')
+
+	gen.bind_method(camera, 'IsValid', 'bool', [])
+	gen.bind_comparison_op(camera, '==', ['const hg::Camera &c'])
+
+	gen.bind_method(camera, 'GetZNear', 'float', [])
+	gen.bind_method(camera, 'SetZNear', 'void', ['float v'])
+	gen.bind_method(camera, 'GetZFar', 'float', [])
+	gen.bind_method(camera, 'SetZFar', 'void', ['float v'])
+	gen.bind_method(camera, 'GetZRange', 'hg::CameraZRange', [])
+	gen.bind_method(camera, 'SetZRange', 'void', ['const hg::CameraZRange &z'])
+	gen.bind_method(camera, 'GetFov', 'float', [])
+	gen.bind_method(camera, 'SetFov', 'void', ['float v'])
+	gen.bind_method(camera, 'GetIsOrthographic', 'bool', [])
+	gen.bind_method(camera, 'SetIsOrthographic', 'void', ['bool v'])
+	gen.bind_method(camera, 'GetSize', 'float', [])
+	gen.bind_method(camera, 'SetSize', 'void', ['float v'])
+
+	gen.end_class(camera)
+
+	# hg::Object
+	object = gen.begin_class('hg::Object')
+
+	gen.bind_method(object, 'IsValid', 'bool', [])
+	gen.bind_comparison_op(object, '==', ['const hg::Object &o'])
+
+	gen.bind_method(object, 'GetModelRef', 'hg::ModelRef', [])
+	gen.bind_method(object, 'SetModelRef', 'void', ['const hg::ModelRef &r'])
+	gen.bind_method(object, 'ClearModelRef', 'void', [])
+	gen.bind_method_overloads(object, 'GetMaterial', [
+		('hg::Material &', ['size_t slot_idx'], []),
+		('hg::Material *', ['const std::string &name'], [])
+	])
+	gen.bind_method(object, 'SetMaterial', 'void', ['size_t slot_idx', 'hg::Material mat'])
+	gen.bind_method(object, 'GetMaterialCount', 'size_t', [])
+	gen.bind_method(object, 'SetMaterialCount', 'void', ['size_t count'])
+	gen.bind_method(object, 'GetMaterialName', 'std::string', ['size_t slot_idx'])
+	gen.bind_method(object, 'SetMaterialName', 'void', ['size_t slot_idx', 'const std::string &name'])
+	gen.bind_method(object, 'GetMinMax', 'bool', ['const hg::PipelineResources &resources', 'hg::MinMax &minmax'], {'arg_out': ['minmax']})
+
+	gen.bind_method(object, 'GetBoneCount', 'size_t', [])
+	gen.bind_method(object, 'SetBoneCount', 'void', ['size_t count'])
+	gen.bind_method(object, 'SetBoneNode', 'bool', ['size_t idx', 'const hg::Node &node'], bound_name='SetBone')
+	gen.bind_method(object, 'GetBoneNode', 'hg::Node', ['size_t idx'], bound_name='GetBone')
+
+	gen.end_class(object)
+
+	# hg::Light
+	gen.bind_named_enum('hg::LightType', ['LT_Point', 'LT_Spot', 'LT_Linear'])
+	gen.bind_named_enum('hg::LightShadowType', ['LST_None', 'LST_Map'])
+
+	light = gen.begin_class('hg::Light')
+
+	gen.bind_method(light, 'IsValid', 'bool', [])
+	gen.bind_comparison_op(light, '==', ['const hg::Light &l'])
+
+	gen.bind_method(light, 'GetType', 'hg::LightType', [])
+	gen.bind_method(light, 'SetType', 'void', ['hg::LightType v'])
+	gen.bind_method(light, 'GetShadowType', 'hg::LightShadowType', [])
+	gen.bind_method(light, 'SetShadowType', 'void', ['hg::LightShadowType v'])
+	gen.bind_method(light, 'GetDiffuseColor', 'hg::Color', [])
+	gen.bind_method(light, 'SetDiffuseColor', 'void', ['const hg::Color &v'])
+	gen.bind_method(light, 'GetDiffuseIntensity', 'float', [])
+	gen.bind_method(light, 'SetDiffuseIntensity', 'void', ['float v'])
+	gen.bind_method(light, 'GetSpecularColor', 'hg::Color', [])
+	gen.bind_method(light, 'SetSpecularColor', 'void', ['const hg::Color &v'])
+	gen.bind_method(light, 'GetSpecularIntensity', 'float', [])
+	gen.bind_method(light, 'SetSpecularIntensity', 'void', ['float v'])
+	gen.bind_method(light, 'GetRadius', 'float', [])
+	gen.bind_method(light, 'SetRadius', 'void', ['float v'])
+	gen.bind_method(light, 'GetInnerAngle', 'float', [])
+	gen.bind_method(light, 'SetInnerAngle', 'void', ['float v'])
+	gen.bind_method(light, 'GetOuterAngle', 'float', [])
+	gen.bind_method(light, 'SetOuterAngle', 'void', ['float v'])
+	gen.bind_method(light, 'GetPSSMSplit', 'hg::Vec4', [])
+	gen.bind_method(light, 'SetPSSMSplit', 'void', ['const hg::Vec4 &v'])
+	gen.bind_method(light, 'GetPriority', 'float', [])
+	gen.bind_method(light, 'SetPriority', 'void', ['float v'])
+
+	gen.end_class(light)
+
+	# hg::RigidBody
+	gen.add_include('engine/physics.h')
+
+	gen.bind_named_enum('hg::RigidBodyType', ['RBT_Dynamic', 'RBT_Kinematic', 'RBT_Static'], storage_type='uint8_t')
+	gen.bind_named_enum('hg::CollisionEventTrackingMode', ['CETM_EventOnly', 'CETM_EventAndContacts'], storage_type='uint8_t')
+
+	contact = gen.begin_class('hg::Contact')
+	gen.bind_members(contact, ['hg::Vec3 P', 'hg::Vec3 N'])
+	gen.bind_member(contact, 'float d')
+	gen.end_class(contact)
+
+	bind_std_vector(gen, contact)
+
+	rigid_body = gen.begin_class('hg::RigidBody')
+
+	gen.bind_method(rigid_body, 'IsValid', 'bool', [])
+	gen.bind_comparison_op(rigid_body, '==', ['const hg::RigidBody &b'])
+
+	gen.bind_method(rigid_body, 'GetType', 'hg::RigidBodyType', [])
+	gen.bind_method(rigid_body, 'SetType', 'void', ['hg::RigidBodyType type'])
+
+	gen.bind_method(rigid_body, 'GetLinearDamping', 'float', [])
+	gen.bind_method(rigid_body, 'SetLinearDamping', 'void', ['float damping'])
+	gen.bind_method(rigid_body, 'GetAngularDamping', 'float', [])
+	gen.bind_method(rigid_body, 'SetAngularDamping', 'void', ['float damping'])
+	gen.bind_method(rigid_body, 'GetRestitution', 'float', [])
+	gen.bind_method(rigid_body, 'SetRestitution', 'void', ['float restitution'])
+	gen.bind_method(rigid_body, 'GetFriction', 'float', [])
+	gen.bind_method(rigid_body, 'SetFriction', 'void', ['float friction'])
+	gen.bind_method(rigid_body, 'GetRollingFriction', 'float', [])
+	gen.bind_method(rigid_body, 'SetRollingFriction', 'void', ['float rolling_friction'])
+
+	gen.end_class(rigid_body)
+
+	# hg::Collision
+	gen.bind_named_enum('hg::CollisionType', ['CT_Sphere', 'CT_Cube', 'CT_Cone', 'CT_Capsule', 'CT_Cylinder', 'CT_Mesh'], storage_type='uint8_t')
+
+	collision = gen.begin_class('hg::Collision')
+
+	gen.bind_method(collision, 'IsValid', 'bool', [])
+	gen.bind_comparison_op(collision, '==', ['const hg::Collision &c'])
+
+	gen.bind_method(collision, 'GetType', 'hg::CollisionType', [])
+	gen.bind_method(collision, 'SetType', 'void', ['hg::CollisionType type'])
+	gen.bind_method(collision, 'GetLocalTransform', 'hg::Mat4', [])
+	gen.bind_method(collision, 'SetLocalTransform', 'void', ['hg::Mat4 m'])
+	gen.bind_method(collision, 'GetMass', 'float', [])
+	gen.bind_method(collision, 'SetMass', 'void', ['float mass'])
+	gen.bind_method(collision, 'GetRadius', 'float', [])
+	gen.bind_method(collision, 'SetRadius', 'void', ['float radius'])
+	gen.bind_method(collision, 'GetHeight', 'float', [])
+	gen.bind_method(collision, 'SetHeight', 'void', ['float height'])
+	gen.bind_method(collision, 'SetSize', 'void', ['const hg::Vec3 &size'])
+	gen.bind_method(collision, 'GetCollisionResource', 'std::string', [])
+	gen.bind_method(collision, 'SetCollisionResource', 'void', ['const std::string &path'])
+
+	gen.end_class(collision)
+
+	# hg::Instance
+	instance = gen.begin_class('hg::Instance')
+
+	gen.bind_method(instance, 'IsValid', 'bool', [])
+	gen.bind_comparison_op(instance, '==', ['const hg::Instance &i'])
+
+	gen.bind_method(instance, 'GetPath', 'std::string', [])
+	gen.bind_method(instance, 'SetPath', 'void', ['const std::string &path'])
+
+	gen.bind_method(instance, 'SetOnInstantiateAnim', 'void', ['const std::string &anim'])
+	gen.bind_method(instance, 'SetOnInstantiateAnimLoopMode', 'void', ['hg::AnimLoopMode loop_mode'])
+	gen.bind_method(instance, 'ClearOnInstantiateAnim', 'void', [])
+
+	gen.bind_method(instance, 'GetOnInstantiateAnim', 'std::string', [])
+	gen.bind_method(instance, 'GetOnInstantiateAnimLoopMode', 'hg::AnimLoopMode', [])
+	gen.bind_method(instance, 'GetOnInstantiatePlayAnimRef', 'hg::ScenePlayAnimRef', [])
+
+	gen.end_class(instance)
 
 	# hg::Script
-	gen.bind_named_enum('hg::ScriptExecutionMode', ['ScriptExecutionStandalone', 'ScriptExecutionEditor', 'ScriptExecutionAll'])
+	script = gen.begin_class('hg::Script')
 
-	script = gen.begin_class('hg::Script', bound_name='Script_nobind', noncopyable=True, nobind=True)
+	gen.bind_method(script, 'IsValid', 'bool', [])
+	gen.bind_comparison_op(script, '==', ['const hg::Script &s'])
+
+	gen.bind_method(script, 'GetPath', 'std::string', [])
+	gen.bind_method(script, 'SetPath', 'void', ['const std::string &path'])
+
 	gen.end_class(script)
 
-	shared_script = gen.begin_class('std::shared_ptr<hg::Script>', bound_name='Script', features={'proxy': lib.stl.SharedPtrProxyFeature(script)})
-	gen.add_base(shared_script, shared_component)
-
-	gen.bind_method(shared_script, 'BlockingGet', 'hg::TypeValue', ['const std::string &name'], ['proxy'])
-
-	gen.bind_method(shared_script, 'Get', 'hg::TypeValue', ['const std::string &name'], ['proxy'])
-	gen.bind_method(shared_script, 'Set', 'void', ['const std::string &name', 'const hg::TypeValue &value'], ['proxy'])
-
-	gen.bind_method(shared_script, 'Expose', 'void', ['const std::string &name', 'const hg::TypeValue &value'], ['proxy'])
-	gen.bind_method(shared_script, 'Call', 'void', ['const std::string &name', 'const std::vector<hg::TypeValue> &parms'], ['proxy'])
-
-	if gen.get_language() == 'Lua':
-		gen.bind_method(shared_script, 'GetEnv', 'hg::ScriptObject', [], ['proxy'])
-
-	gen.end_class(shared_script)
-
-	# hg::RenderScript
-	render_script = gen.begin_class('hg::RenderScript', bound_name='RenderScript_nobind', noncopyable=True, nobind=True)
-	gen.end_class(render_script)
-
-	shared_render_script = gen.begin_class('std::shared_ptr<hg::RenderScript>', bound_name='RenderScript', features={'proxy': lib.stl.SharedPtrProxyFeature(render_script)})
-	gen.add_base(shared_render_script, shared_script)
-	gen.bind_constructor(shared_render_script, ['?const std::string &path'], ['proxy'])
-	gen.end_class(shared_render_script)
-
-	# hg::LogicScript
-	logic_script = gen.begin_class('hg::LogicScript', bound_name='LogicScript_nobind', noncopyable=True, nobind=True)
-	gen.end_class(logic_script)
-
-	shared_logic_script = gen.begin_class('std::shared_ptr<hg::LogicScript>', bound_name='LogicScript', features={'proxy': lib.stl.SharedPtrProxyFeature(logic_script)})
-	gen.add_base(shared_logic_script, shared_script)
-	gen.bind_constructor(shared_logic_script, ['?const std::string &path'], ['proxy'])
-	gen.end_class(shared_logic_script)
-
-	# hg::ScriptSystem
-	script_system = gen.begin_class('hg::ScriptSystem', bound_name='ScriptSystem_nobind', noncopyable=True, nobind=True)
-	gen.end_class(script_system)
-
-	shared_script_system = gen.begin_class('std::shared_ptr<hg::ScriptSystem>', bound_name='ScriptSystem', features={'proxy': lib.stl.SharedPtrProxyFeature(script_system)})
-	gen.add_base(shared_script_system, shared_scene_system)
-
-	gen.bind_method(shared_script_system, 'GetExecutionMode', 'hg::ScriptExecutionMode', [], ['proxy'])
-	gen.bind_method(shared_script_system, 'SetExecutionMode', 'void', ['hg::ScriptExecutionMode mode'], ['proxy'])
-
-	gen.bind_method(shared_script_system, 'TestScriptIsReady', 'bool', ['const hg::Script &script'], ['proxy'])
-
-	gen.bind_method(shared_script_system, 'GetImplementationName', 'const std::string &', [], ['proxy'])
-
-	gen.bind_method(shared_script_system, 'Open', 'bool', [], ['proxy'])
-	gen.bind_method(shared_script_system, 'Close', 'void', [], ['proxy'])
-
-	gen.bind_method(shared_script_system, 'Reset', 'void', [], ['proxy'])
-
-	gen.end_class(shared_script_system)
-
-	# hg::LuaSystem
-	gen.add_include('engine/lua_system.h')
-
-	lua_system = gen.begin_class('hg::LuaSystem', bound_name='LuaSystem_nobind', noncopyable=True, nobind=True)
-	gen.end_class(lua_system)
-
-	shared_lua_system = gen.begin_class('std::shared_ptr<hg::LuaSystem>', bound_name='LuaSystem', features={'proxy': lib.stl.SharedPtrProxyFeature(lua_system)})
-	gen.add_base(shared_lua_system, shared_script_system)
-	gen.bind_constructor(shared_lua_system, ['?std::shared_ptr<hg::ScriptEngineEnv> environment'], ['proxy'])
-	gen.end_class(shared_lua_system)
+	bind_std_vector(gen, script)
 
 	# hg::Node
-	gen.bind_constructor_overloads(shared_node, [
-		([], ['proxy']),
-		(['const std::string &name'], ['proxy'])
+	gen.bind_method(node, 'IsValid', 'bool', [])
+	gen.bind_comparison_op(node, '==', ['const hg::Node &n'])
+
+	gen.bind_method(node, 'GetUid', 'uint32_t', [])
+
+	gen.bind_method(node, 'GetFlags', 'uint32_t', [])
+	gen.bind_method(node, 'SetFlags', 'void', ['uint32_t flags'])
+
+	gen.bind_method(node, 'Enable', 'void', [])
+	gen.bind_method(node, 'Disable', 'void', [])
+
+	gen.bind_method(node, 'IsEnabled', 'bool', [])
+	gen.bind_method(node, 'IsItselfEnabled', 'bool', [])
+
+	gen.bind_method(node, 'HasTransform', 'bool', [])
+	gen.bind_method(node, 'GetTransform', 'hg::Transform', [])
+	gen.bind_method(node, 'SetTransform', 'void', ['const hg::Transform &t'])
+	gen.bind_method(node, 'RemoveTransform', 'void', [])
+
+	gen.bind_method(node, 'HasCamera', 'bool', [])
+	gen.bind_method(node, 'GetCamera', 'hg::Camera', [])
+	gen.bind_method(node, 'SetCamera', 'void', ['const hg::Camera &c'])
+	gen.bind_method(node, 'RemoveCamera', 'void', [])
+
+	gen.bind_method(node, 'ComputeCameraViewState', 'hg::ViewState', ['const hg::tVec2<float> &aspect_ratio'])
+
+	gen.bind_method(node, 'HasObject', 'bool', [])
+	gen.bind_method(node, 'GetObject', 'hg::Object', [])
+	gen.bind_method(node, 'SetObject', 'void', ['const hg::Object &o'])
+	gen.bind_method(node, 'RemoveObject', 'void', [])
+
+	gen.bind_method(node, 'GetMinMax', 'bool', ['const hg::PipelineResources &resources', 'hg::MinMax &minmax'], {'arg_out': ['minmax']})
+
+	gen.bind_method(node, 'HasLight', 'bool', [])
+	gen.bind_method(node, 'GetLight', 'hg::Light', [])
+	gen.bind_method(node, 'SetLight', 'void', ['const hg::Light &l'])
+	gen.bind_method(node, 'RemoveLight', 'void', [])
+
+	gen.bind_method(node, 'HasRigidBody', 'bool', [])
+	gen.bind_method(node, 'GetRigidBody', 'hg::RigidBody', [])
+	gen.bind_method(node, 'SetRigidBody', 'void', ['const hg::RigidBody &b'])
+	gen.bind_method(node, 'RemoveRigidBody', 'void', [])
+
+	gen.bind_method(node, 'GetCollisionCount', 'size_t', [])
+	gen.bind_method(node, 'GetCollision', 'hg::Collision', ['size_t slot'])
+	gen.bind_method(node, 'SetCollision', 'void', ['size_t slot', 'const hg::Collision &c'])
+	gen.bind_method_overloads(node, 'RemoveCollision', [
+		('void', ['const hg::Collision &c'], {}),
+		('void', ['size_t slot'], {})
 	])
 
-	gen.bind_method(shared_node, 'GetScene', 'std::shared_ptr<hg::Scene>', [], ['proxy'])
-	gen.bind_method(shared_node, 'GetUid', 'uint32_t', [], ['proxy'])
+	gen.bind_method(node, 'GetName', 'std::string', [])
+	gen.bind_method(node, 'SetName', 'void', ['const std::string &name'])
 
-	gen.bind_method(shared_node, 'GetName', 'const std::string &', [], ['proxy'])
-	gen.bind_method(shared_node, 'SetName', 'void', ['const std::string &name'], ['proxy'])
-
-	gen.bind_method(shared_node, 'AddComponent', 'void', ['std::shared_ptr<hg::Component> component'], ['proxy'])
-	gen.bind_method(shared_node, 'RemoveComponent', 'void', ['const std::shared_ptr<hg::Component> &component'], ['proxy'])
-
-	gen.bind_method_overloads(shared_node, 'GetComponents', [
-		('const std::vector<std::shared_ptr<hg::Component>> &', [], ['proxy']),
-		('std::vector<std::shared_ptr<hg::Component>>', ['const std::string &aspect'], ['proxy'])
+	gen.bind_method(node, 'GetScriptCount', 'size_t', [])
+	gen.bind_method(node, 'GetScript', 'hg::Script', ['size_t idx'])
+	gen.bind_method(node, 'SetScript', 'void', ['size_t idx', 'const hg::Script &s'])
+	gen.bind_method_overloads(node, 'RemoveScript', [
+		('void', ['const hg::Script &s'], {}),
+		('void', ['size_t slot'], {})
 	])
 
-	gen.bind_method(shared_node, 'GetComponent<hg::Transform>', 'std::shared_ptr<hg::Transform>', [], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'GetTransform failed, node has no Transform component')}, bound_name='GetTransform')
-	gen.bind_method(shared_node, 'GetComponent<hg::Camera>', 'std::shared_ptr<hg::Camera>', [], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'GetCamera failed, node has no Camera component')}, bound_name='GetCamera')
-	gen.bind_method(shared_node, 'GetComponent<hg::Object>', 'std::shared_ptr<hg::Object>', [], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'GetObject failed, node has no Object component')}, bound_name='GetObject')
-	gen.bind_method(shared_node, 'GetComponent<hg::Light>', 'std::shared_ptr<hg::Light>', [], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'GetLight failed, node has no Light component')}, bound_name='GetLight')
-	gen.bind_method(shared_node, 'GetComponent<hg::Instance>', 'std::shared_ptr<hg::Instance>', [], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'GetInstance failed, node has no Instance component')}, bound_name='GetInstance')
-	gen.bind_method(shared_node, 'GetComponent<hg::Target>', 'std::shared_ptr<hg::Target>', [], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'GetTarget failed, node has no Target component')}, bound_name='GetTarget')
-	gen.bind_method(shared_node, 'GetComponent<hg::RigidBody>', 'std::shared_ptr<hg::RigidBody>', [], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'GetRigidBody failed, node has no RigidBody component')}, bound_name='GetRigidBody')
-	gen.bind_method(shared_node, 'GetComponent<hg::BoxCollision>', 'std::shared_ptr<hg::BoxCollision>', [], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'GetBoxCollision failed, node has no BoxCollision component')}, bound_name='GetBoxCollision')
-	gen.bind_method(shared_node, 'GetComponent<hg::SphereCollision>', 'std::shared_ptr<hg::SphereCollision>', [], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'GetSphereCollision failed, node has no SphereCollision component')}, bound_name='GetSphereCollision')
-	gen.bind_method(shared_node, 'GetComponent<hg::MeshCollision>', 'std::shared_ptr<hg::MeshCollision>', [], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'GetMeshCollision failed, node has no MeshCollision component')}, bound_name='GetMeshCollision')
-	gen.bind_method(shared_node, 'GetComponent<hg::CapsuleCollision>', 'std::shared_ptr<hg::CapsuleCollision>', [], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'GetCapsuleCollision failed, node has no CapsuleCollision component')}, bound_name='GetCapsuleCollision')
-	gen.bind_method(shared_node, 'GetComponent<hg::ConvexCollision>', 'std::shared_ptr<hg::ConvexCollision>', [], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'GetConvexCollision failed, node has no ConvexCollision component')}, bound_name='GetConvexCollision')
-	gen.bind_method(shared_node, 'GetComponent<hg::SphericalJoint>', 'std::shared_ptr<hg::SphericalJoint>', [], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'GetSphericalJoint failed, node has no SphericalJoint component')}, bound_name='GetSphericalJoint')
-	gen.bind_method(shared_node, 'GetComponent<hg::D6Joint>', 'std::shared_ptr<hg::D6Joint>', [], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'GetD6Joint failed, node has no D6Joint component')}, bound_name='GetD6Joint')
-	gen.bind_method(shared_node, 'GetComponent<hg::RenderScript>', 'std::shared_ptr<hg::RenderScript>', [], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'GetRenderScript failed, node has no RenderScript component')}, bound_name='GetRenderScript')
-	gen.bind_method(shared_node, 'GetComponent<hg::LogicScript>', 'std::shared_ptr<hg::LogicScript>', [], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'GetLogicScript failed, node has no LogicScript component')}, bound_name='GetLogicScript')
+	gen.bind_method(node, 'HasInstance', 'bool', [])
+	gen.bind_method(node, 'GetInstance', 'hg::Instance', [])
+	gen.bind_method(node, 'SetInstance', 'void', ['const hg::Instance &instance'])
 
-	gen.bind_method(shared_node, 'HasAspect', 'bool', ['const std::string &aspect'], ['proxy'])
-	gen.bind_method(shared_node, 'IsReady', 'bool', [], ['proxy'])
+	gen.bind_method(node, 'SetupInstanceFromFile', 'bool', ['hg::PipelineResources &resources', 'const hg::PipelineInfo &pipeline', '?uint32_t flags'], {'constants_group': {'flags': 'LoadSaveSceneFlags'}})
+	gen.bind_method(node, 'SetupInstanceFromAssets', 'bool', ['hg::PipelineResources &resources', 'const hg::PipelineInfo &pipeline', '?uint32_t flags'], {'constants_group': {'flags': 'LoadSaveSceneFlags'}})
+	gen.bind_method(node, 'DestroyInstance', 'void', [])
 
-	gen.bind_method(shared_node, 'IsInstantiated', 'bool', [], ['proxy'])
+	gen.bind_method(node, 'IsInstantiatedBy', 'hg::Node', [])
 
-	decl_get_set_method(shared_node, 'bool', 'Enabled', 'enable', features=['proxy'])
-	decl_get_set_method(shared_node, 'bool', 'IsStatic', 'is_static', features=['proxy'])
-	decl_get_set_method(shared_node, 'bool', 'DoNotSerialize', 'do_not_serialize', features=['proxy'])
-	decl_get_set_method(shared_node, 'bool', 'DoNotInstantiate', 'do_not_instantiate', features=['proxy'])
-	decl_get_set_method(shared_node, 'bool', 'UseForNavigation', 'use_for_navigation', features=['proxy'])
+	gen.bind_method(node, 'GetInstanceSceneView', 'hg::SceneView', [])
+	gen.bind_method(node, 'GetInstanceSceneAnim', 'hg::SceneAnimRef', ['const std::string &path'])
 
-	gen.bind_method_overloads(shared_node, 'GetNode', [
-		('std::shared_ptr<hg::Node>', ['uint32_t uid'], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'Node not found')}),
-		('std::shared_ptr<hg::Node>', ['const std::string &name', '?const std::shared_ptr<hg::Node> &node'], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'Node not found')})
-	])
+	gen.bind_method(node, 'StartOnInstantiateAnim', 'void', [])
+	gen.bind_method(node, 'StopOnInstantiateAnim', 'void', [])
 
-	gen.end_class(shared_node)
+	gen.bind_method(node, 'GetWorld', 'hg::Mat4', [])
+	gen.bind_method(node, 'SetWorld', 'void', ['const hg::Mat4 &world'])
+	gen.bind_method(node, 'ComputeWorld', 'hg::Mat4', [])
 
-	bind_std_vector(gen, shared_node)
+	gen.end_class(node)
 
-	# hg::SceneSystem
-	gen.bind_method(shared_scene_system, 'GetAspect', 'const std::string &', [], ['proxy'])
+	bind_std_vector(gen, node)
 
-	#inline Type *GetConcreteType() const { return concrete_type; }
+	gen.bind_variable("const hg::Node hg::NullNode")
 
-	gen.bind_method(shared_scene_system, 'Update', 'void', ['hg::time_ns dt'], ['proxy'])
-	gen.bind_method_overloads(shared_scene_system, 'WaitUpdate', [
-		('bool', [], ['proxy']),
-		('bool', ['bool blocking'], ['proxy'])
-	])
-	gen.bind_method(shared_scene_system, 'Commit', 'void', [], ['proxy'])
-	gen.bind_method_overloads(shared_scene_system, 'WaitCommit', [
-		('bool', [], ['proxy']),
-		('bool', ['bool blocking'], ['proxy'])
-	])
+	# hg::SceneView
+	gen.bind_method(scene_view, 'GetNodes', 'std::vector<hg::Node>', ['const hg::Scene &scene'])
+	gen.bind_method(scene_view, 'GetNode', 'hg::Node', ['const hg::Scene &scene', 'const std::string &name'])
 
-	gen.bind_method(shared_scene_system, 'AddComponent', 'void', ['std::shared_ptr<hg::Component> component'], ['proxy'])
-	gen.bind_method(shared_scene_system, 'RemoveComponent', 'void', ['const std::shared_ptr<hg::Component> &component'], ['proxy'])
+	gen.end_class(scene_view)
 
-	gen.bind_method(shared_scene_system, 'Cleanup', 'void', [], ['proxy'])
+	# hg::RaycastOut
+	raycast_out = gen.begin_class('hg::RaycastOut')
+	gen.bind_members(raycast_out, ['hg::Vec3 P', 'hg::Vec3 N', 'hg::Node node', 'float t'], ['copy_obj'])
+	gen.end_class(raycast_out)
 
-	gen.bind_method(shared_scene_system, 'SetDebugVisuals', 'void', ['bool enable'], ['proxy'])
-	gen.bind_method(shared_scene_system, 'GetDebugVisuals', 'bool', [], ['proxy'])
+	bind_std_vector(gen, raycast_out)
 
-	gen.bind_method(shared_scene_system, 'DrawDebugPanel', 'void', ['hg::RenderSystem &render_system'], ['proxy'])
-	gen.bind_method(shared_scene_system, 'DrawDebugVisuals', 'void', ['hg::RenderSystem &render_system'], ['proxy'])
-
-	gen.end_class(shared_scene_system)
-
-	# hg::RenderableSystem
-	gen.add_include('engine/renderable_system.h')
-
-	renderable_system = gen.begin_class('hg::RenderableSystem', bound_name='RenderableSystem_nobind', noncopyable=True, nobind=True)
-	gen.end_class(renderable_system)
-
-	shared_renderable_system = gen.begin_class('std::shared_ptr<hg::RenderableSystem>', bound_name='RenderableSystem', features={'proxy': lib.stl.SharedPtrProxyFeature(renderable_system)})
-	gen.add_base(shared_renderable_system, shared_scene_system)
-
-	gen.bind_constructor_overloads(shared_renderable_system, [
-		(['std::shared_ptr<hg::RenderSystem> render_system'], ['proxy']),
-		(['std::shared_ptr<hg::RenderSystem> render_system', 'bool async'], ['proxy'])
-	])
-	
-	gen.bind_method(shared_renderable_system, 'SetFrameRenderer', 'void', ['std::shared_ptr<hg::FrameRenderer> renderer'], ['proxy'])
-	gen.bind_method(shared_renderable_system, 'DrawGeometry', 'void', ['std::shared_ptr<hg::RenderGeometry> geometry', 'const hg::Matrix4 &world'], ['proxy'])
-	gen.bind_method(shared_renderable_system, 'SetUseCameraView', 'void', ['bool use_camera_view'], ['proxy'])
-
-	gen.end_class(shared_renderable_system)
-
-	# hg::TransformSystem
-	gen.add_include('engine/transform_system.h')
-
-	transform_system = gen.begin_class('hg::TransformSystem', bound_name='TransformSystem_nobind', noncopyable=True, nobind=True)
-	gen.end_class(transform_system)
-
-	shared_transform_system = gen.begin_class('std::shared_ptr<hg::TransformSystem>', bound_name='TransformSystem', features={'proxy': lib.stl.SharedPtrProxyFeature(transform_system)})
-	gen.add_base(shared_transform_system, shared_scene_system)
-	gen.bind_constructor(shared_transform_system, [], ['proxy'])
-
-	gen.bind_method(shared_transform_system, 'ComputeTransform', 'void', ['hg::Transform &transform'], {'proxy': None, 'arg_out': ['transform']})
-	gen.bind_method(shared_transform_system, 'CommitTransform', 'void', ['hg::Transform &transform'], ['proxy'])
-	gen.bind_method(shared_transform_system, 'ResetWorldMatrix', 'void', ['const std::shared_ptr<hg::Transform> &transform', 'const hg::Matrix4 &m'], ['proxy'])
-	gen.end_class(shared_transform_system)
-
-	# hg::PhysicTrace
-	gen.add_include('engine/physic_system.h')
-
-	physic_trace = gen.begin_class('hg::PhysicTrace')
-	gen.insert_binding_code('''\
-static hg::Vector3 PhysicTraceGetPosition(hg::PhysicTrace *trace) { return trace->p; }
-static hg::Vector3 PhysicTraceGetNormal(hg::PhysicTrace *trace) { return trace->n; }
-static std::shared_ptr<hg::Node> PhysicTraceGetNode(hg::PhysicTrace *trace) { return trace->i->shared_from_this(); }
-\n''', 'PhysicTrace extension')
-	gen.bind_method(physic_trace, 'GetPosition', 'hg::Vector3', [], {'route': route_lambda('PhysicTraceGetPosition')})
-	gen.bind_method(physic_trace, 'GetNormal', 'hg::Vector3', [], {'route': route_lambda('PhysicTraceGetNormal')})
-	gen.bind_method(physic_trace, 'GetNode', 'std::shared_ptr<hg::Node>', [], {'route': route_lambda('PhysicTraceGetNode')})
-	gen.end_class(physic_trace)
-
-	# hg::PhysicSystem
-	physic_system = gen.begin_class('hg::PhysicSystem', bound_name='PhysicSystem_nobind', noncopyable=True, nobind=True)
-	gen.end_class(physic_system)
-
-	shared_physic_system = gen.begin_class('std::shared_ptr<hg::PhysicSystem>', bound_name='PhysicSystem', features={'proxy': lib.stl.SharedPtrProxyFeature(physic_system)})
-	gen.add_base(shared_physic_system, shared_scene_system)
-
-	gen.bind_method(shared_physic_system, 'GetImplementationName', 'const std::string &', [], ['proxy'])
-
-	decl_get_set_method(shared_physic_system, 'float', 'Timestep', 'timestep', ['proxy'])
-	decl_get_set_method(shared_physic_system, 'bool', 'ForceRigidBodyToSleepOnCreation', 'force_sleep_body', ['proxy'])
-	decl_get_set_method(shared_physic_system, 'uint32_t', 'ForceRigidBodyAxisLockOnCreation', 'force_axis_lock', ['proxy'])
-
-	decl_get_set_method(shared_physic_system, 'hg::Vector3', 'Gravity', 'G', ['proxy'])
-
-	gen.bind_method_overloads(shared_physic_system, 'Raycast', [
-		('bool', ['const hg::Vector3 &start', 'const hg::Vector3 &direction', 'hg::PhysicTrace &hit'], {'proxy': None, 'arg_out': ['hit']}),
-		('bool', ['const hg::Vector3 &start', 'const hg::Vector3 &direction', 'hg::PhysicTrace &hit', 'uint8_t collision_layer_mask'], {'proxy': None, 'arg_out': ['hit']}),
-		('bool', ['const hg::Vector3 &start', 'const hg::Vector3 &direction', 'hg::PhysicTrace &hit', 'uint8_t collision_layer_mask', 'float max_distance'], {'proxy': None, 'arg_out': ['hit']})
-	])
-
-	decl_comp_get_set_method(shared_physic_system, 'hg::RigidBody', 'rigid_body', 'bool', 'RigidBodyIsSleeping', 'sleeping', ['proxy'])
-
-	decl_comp_get_set_method(shared_physic_system, 'hg::RigidBody', 'rigid_body', 'hg::Vector3', 'RigidBodyAngularVelocity', 'W', ['proxy'])
-	decl_comp_get_set_method(shared_physic_system, 'hg::RigidBody', 'rigid_body', 'hg::Vector3', 'RigidBodyLinearVelocity', 'V', ['proxy'])
-
-	decl_comp_get_set_method(shared_physic_system, 'hg::RigidBody', 'rigid_body', 'float', 'RigidBodyLinearDamping', 'k', ['proxy'])
-	decl_comp_get_set_method(shared_physic_system, 'hg::RigidBody', 'rigid_body', 'float', 'RigidBodyAngularDamping', 'k', ['proxy'])
-
-	decl_comp_get_set_method(shared_physic_system, 'hg::RigidBody', 'rigid_body', 'float', 'RigidBodyStaticFriction', 'static_friction', ['proxy'])
-	decl_comp_get_set_method(shared_physic_system, 'hg::RigidBody', 'rigid_body', 'float', 'RigidBodyDynamicFriction', 'dynamic_friction', ['proxy'])
-
-	decl_comp_get_set_method(shared_physic_system, 'hg::RigidBody', 'rigid_body', 'float', 'RigidBodyRestitution', 'restitution', ['proxy'])
-
-	#decl_comp_get_set_method(shared_physic_system, 'hg::RigidBody', 'rigid_body', 'hg::RigidBodyType', 'RigidBodyType', 'type', ['proxy'])
-
-	decl_comp_get_set_method(shared_physic_system, 'hg::RigidBody', 'rigid_body', 'uint8_t', 'RigidBodyAxisLock', 'axis_lock', ['proxy'])
-	decl_comp_get_set_method(shared_physic_system, 'hg::RigidBody', 'rigid_body', 'uint8_t', 'RigidBodyCollisionLayer', 'layer', ['proxy'])
-
-	gen.bind_method(shared_physic_system, 'GetRigidBodyVelocity', 'hg::Vector3', ['const hg::RigidBody *body', 'const hg::Vector3 &p'], ['proxy'])
-	gen.bind_method(shared_physic_system, 'SetRigidBodyVelocity', 'void', ['hg::RigidBody *body', 'const hg::Vector3 &V', 'const hg::Vector3 &p'], ['proxy'])
-
-	gen.bind_method(shared_physic_system, 'RigidBodyApplyLinearImpulse', 'void', ['hg::RigidBody *body', 'const hg::Vector3 &I'], ['proxy'])
-	gen.bind_method(shared_physic_system, 'RigidBodyApplyLinearForce', 'void', ['hg::RigidBody *body', 'const hg::Vector3 &F'], ['proxy'])
-	gen.bind_method(shared_physic_system, 'RigidBodyApplyTorque', 'void', ['hg::RigidBody *body', 'const hg::Vector3 &T'], ['proxy'])
-
-	gen.bind_method(shared_physic_system, 'RigidBodyApplyImpulse', 'void', ['hg::RigidBody *body', 'const hg::Vector3 &I', 'const hg::Vector3 &p'], ['proxy'])
-	gen.bind_method(shared_physic_system, 'RigidBodyApplyForce', 'void', ['hg::RigidBody *body', 'const hg::Vector3 &F', 'const hg::Vector3 &p'], ['proxy'])
-
-	gen.bind_method(shared_physic_system, 'RigidBodyResetWorld', 'void', ['hg::RigidBody *body', 'const hg::Matrix4 &M'], ['proxy'])
-
-	# hg::CollisionPair
-	gen.insert_binding_code('''\
-static std::shared_ptr<hg::Node> _CollisionPair_GetNodeA(hg::CollisionPair *pair) { return pair->a; }
-static std::shared_ptr<hg::Node> _CollisionPair_GetNodeB(hg::CollisionPair *pair) { return pair->b; }
-
-static uint8_t _CollisionPair_GetContactCount(hg::CollisionPair *pair) { return pair->contact_count; }
-static hg::Vector3 _CollisionPair_GetContactPosition(hg::CollisionPair *pair, uint32_t idx) { return idx < pair->contact_count ? pair->contact[idx].p : hg::Vector3::Zero; }
-static hg::Vector3 _CollisionPair_GetContactNormal(hg::CollisionPair *pair, uint32_t idx) { return idx < pair->contact_count ? pair->contact[idx].n : hg::Vector3::Zero; }
-	''')
-
-	collision_pair = gen.begin_class('hg::CollisionPair')
-	gen.bind_method(collision_pair, 'GetNodeA', 'std::shared_ptr<hg::Node>', [], {'route': route_lambda('_CollisionPair_GetNodeA')})
-	gen.bind_method(collision_pair, 'GetNodeB', 'std::shared_ptr<hg::Node>', [], {'route': route_lambda('_CollisionPair_GetNodeB')})
-	gen.bind_method(collision_pair, 'GetContactCount', 'uint8_t', [], {'route': route_lambda('_CollisionPair_GetContactCount')})
-	gen.bind_method(collision_pair, 'GetContactPosition', 'hg::Vector3', ['uint32_t idx'], {'route': route_lambda('_CollisionPair_GetContactPosition')})
-	gen.bind_method(collision_pair, 'GetContactNormal', 'hg::Vector3', ['uint32_t idx'], {'route': route_lambda('_CollisionPair_GetContactNormal')})
-	gen.end_class(collision_pair)
-
-	bind_std_vector(gen, collision_pair)
-
-	gen.bind_method_overloads(shared_physic_system, 'GetCollisionPairs', [
-		('const std::vector<hg::CollisionPair> &', [], ['proxy']),
-		('std::vector<hg::CollisionPair>', ['const std::shared_ptr<hg::Node> &node'], ['proxy'])
-	])
-
-	gen.bind_method_overloads(shared_physic_system, 'HasCollided', [
-		('bool', ['const std::shared_ptr<hg::Node> &node'], ['proxy']),
-		('bool', ['const std::shared_ptr<hg::Node> &node_a', 'const std::shared_ptr<hg::Node> &node_b'], ['proxy'])
-	])
-
-	gen.bind_method(shared_physic_system, 'SetCollisionLayerPairState', 'void', ['uint16_t layer_a', 'uint16_t layer_b', 'bool enable_collision'], ['proxy'])
-	gen.bind_method(shared_physic_system, 'GetCollisionLayerPairState', 'bool', ['uint16_t layer_a', 'uint16_t layer_b'], ['proxy'])
-
-	gen.end_class(shared_physic_system)
-
-	gen.insert_binding_code('''static std::shared_ptr<hg::PhysicSystem> CreatePhysicSystem(const std::string &name) { return hg::g_physic_system_factory.get().Instantiate(name); }
-static std::shared_ptr<hg::PhysicSystem> CreatePhysicSystem() { return hg::g_physic_system_factory.get().Instantiate(); }
-	''', 'Physic system custom API')
-
-	gen.bind_function('CreatePhysicSystem', 'std::shared_ptr<hg::PhysicSystem>', ['?const std::string &name'], {'check_rval': check_bool_rval_lambda(gen, 'CreatePhysicSystem failed, was LoadPlugins called succesfully?')})
-
-	# hg::NavigationPath
-	gen.add_include('engine/navigation_system.h')
-
-	navigation_path = gen.begin_class('hg::NavigationPath')
-	gen.bind_member(navigation_path, 'const std::vector<hg::Vector3> point')
-	gen.end_class(navigation_path)
-
-	# hg::NavigationLayer
-	navigation_layer = gen.begin_class('hg::NavigationLayer')
-	gen.bind_members(navigation_layer, ['float radius', 'float height', 'float slope'])
-	gen.bind_comparison_ops(navigation_layer, ['==', '!='], ['const hg::NavigationLayer &layer'])
-	gen.end_class(navigation_layer)
-
-	bind_std_vector(gen, navigation_layer)
-
-	# hg::NavigationConfig
-	navigation_config = gen.begin_class('hg::NavigationConfig')
-	gen.bind_member(navigation_config, 'std::vector<hg::NavigationLayer> layers')
-	gen.end_class(navigation_config)
-
-	# hg::NavigationSystem
-	navigation_system = gen.begin_class('hg::NavigationSystem', bound_name='NavigationSystem_nobind', noncopyable=True, nobind=True)
-	gen.end_class(navigation_system)
-
-	shared_navigation_system = gen.begin_class('std::shared_ptr<hg::NavigationSystem>', bound_name='NavigationSystem', features={'proxy': lib.stl.SharedPtrProxyFeature(navigation_system)})
-	gen.add_base(shared_navigation_system, shared_scene_system)
-
-	gen.bind_constructor(shared_navigation_system, [], ['proxy'])
-	gen.bind_method_overloads(shared_navigation_system, 'FindPathTo', [
-		('bool', ['const hg::Vector3 &from', 'const hg::Vector3 &to', 'hg::NavigationPath &path'], ['proxy']),
-		('bool', ['const hg::Vector3 &from', 'const hg::Vector3 &to', 'hg::NavigationPath &path', 'uint32_t layer_index'], ['proxy'])
-	])
-	gen.bind_method(shared_navigation_system, 'GetConfig', 'const hg::NavigationConfig &', [], ['proxy'])
-	gen.end_class(shared_navigation_system)
-
-	# hg::NavigationGeometry
-	navigation_geometry = gen.begin_class('hg::NavigationGeometry', bound_name='NavigationGeometry_nobind', noncopyable=True, nobind=True)
-	gen.end_class(navigation_geometry)
-
-	shared_navigation_geometry = gen.begin_class('std::shared_ptr<hg::NavigationGeometry>', bound_name='NavigationGeometry', features={'proxy': lib.stl.SharedPtrProxyFeature(navigation_geometry)})
-	gen.bind_method(shared_navigation_geometry, 'GetConfig', 'const hg::NavigationConfig &', [], ['proxy'])
-	gen.bind_method(shared_navigation_geometry, 'GetMinMax', 'const hg::MinMax &',  [], ['proxy'])
-#	gen.bind_method(navigation_geometry, 'GetLayers', 'const std::vector<Layer> &', [])
-	gen.end_class(shared_navigation_geometry)
-
-	gen.bind_function('hg::CreateNavigationGeometry', 'std::shared_ptr<hg::NavigationGeometry>', ['const hg::Geometry &geo', 'const hg::NavigationConfig &cfg'])
-
-	# hg::Navigation
-	gen.add_include('engine/navigation.h')
-	navigation = gen.begin_class('hg::Navigation', bound_name='Navigation_nobind', noncopyable=True, nobind=True)
-	gen.end_class(navigation)
-
-	shared_navigation = gen.begin_class('std::shared_ptr<hg::Navigation>', bound_name='Navigation', features={'proxy': lib.stl.SharedPtrProxyFeature(navigation)})
-	gen.add_base(shared_navigation, shared_component)
-	gen.bind_constructor(shared_navigation, [], ['proxy'])
-	decl_get_set_method(shared_navigation, 'std::shared_ptr<hg::NavigationGeometry>', 'Geometry', 'geometry', ['proxy'])
-	gen.bind_method(shared_navigation, 'FindPathTo', 'bool', ['const hg::Vector3 &from', 'const hg::Vector3 &to', 'hg::NavigationPath &path', '?uint32_t layer_index'],  {'proxy': None, 'arg_out': ['path']})
-	gen.end_class(shared_navigation)
-
-	# hg::Group
-	gen.add_include('engine/group.h')
-
-	group = gen.begin_class('hg::Group', bound_name='Group_nobind', noncopyable=True, nobind=True)
-	gen.end_class(group)
-
-	shared_group = gen.begin_class('std::shared_ptr<hg::Group>', bound_name='Group', features={'proxy': lib.stl.SharedPtrProxyFeature(group)})
-
-	std_vector_shared_group = gen.begin_class('std::vector<std::shared_ptr<hg::Group>>', bound_name='GroupList', features={'sequence': lib.std.VectorSequenceFeature(shared_group)})
-	gen.end_class(std_vector_shared_group)
-
-	gen.bind_method(shared_group, 'GetNodes', 'const std::vector<std::shared_ptr<hg::Node>> &', [], ['proxy'])
-	gen.bind_method(shared_group, 'GetGroups', 'const std::vector<std::shared_ptr<hg::Group>> &', [], ['proxy'])
-
-	gen.bind_method(shared_group, 'AddNode', 'void', ['std::shared_ptr<hg::Node> node'], ['proxy'])
-	gen.bind_method(shared_group, 'RemoveNode', 'void', ['const std::shared_ptr<hg::Node> &node'], ['proxy'])
-	gen.bind_method_overloads(shared_group, 'IsMember', [
-		('bool', ['const std::shared_ptr<hg::Node> &node'], ['proxy']),
-		('bool', ['const std::shared_ptr<hg::Group> &group'], ['proxy'])
-	])
-
-	gen.bind_method(shared_group, 'IsReady', 'bool', [], ['proxy'])
-
-	gen.bind_method_overloads(shared_group, 'GetNode', [
-		('std::shared_ptr<hg::Node>', ['uint32_t uid'], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'Node not found')}),
-		('std::shared_ptr<hg::Node>', ['const std::string &name', '?const std::shared_ptr<hg::Node> &parent'], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'Node not found')})
-	])
-
-	gen.bind_method(shared_group, 'AddGroup', 'void', ['std::shared_ptr<hg::Group> group'], ['proxy'])
-	gen.bind_method(shared_group, 'RemoveGroup', 'void', ['const std::shared_ptr<hg::Group> &group'], ['proxy'])
-
-	gen.bind_method(shared_group, 'GetGroup', 'std::shared_ptr<hg::Group>', ['const std::string &name'], ['proxy'])
-
-	gen.bind_method(shared_group, 'AppendGroup', 'void', ['const hg::Group &group'], ['proxy'])
-
-	gen.bind_method(shared_group, 'GetName', 'const std::string &', [], ['proxy'])
-	gen.bind_method(shared_group, 'SetName', 'void', ['const std::string &name'], ['proxy'])
-
-	gen.end_class(shared_group)
+	#
+	gen.bind_named_enum('hg::NodeComponentIdx', ['NCI_Transform', 'NCI_Camera', 'NCI_Object', 'NCI_Light', 'NCI_RigidBody'])
 
 	# hg::Scene
-	gen.bind_constructor(shared_scene, [], ['proxy'])
+	bind_signal_T(gen, 'TimeSignal', 'void', ['hg::time_ns'], 'TimeCallback')
 
-	gen.bind_method(shared_scene, 'GetCurrentCamera', 'const std::shared_ptr<hg::Node> &', [], ['proxy'])
-	gen.bind_method(shared_scene, 'SetCurrentCamera', 'void', ['std::shared_ptr<hg::Node> node'], ['proxy'])
+	gen.bind_constructor(scene, [])
 
-	gen.bind_method(shared_scene, 'AddGroup', 'void', ['std::shared_ptr<hg::Group> group'], ['proxy'])
-	gen.bind_method(shared_scene, 'RemoveGroup', 'void', ['const std::shared_ptr<hg::Group> &group'], ['proxy'])
-	gen.bind_method(shared_scene, 'FindGroup', 'std::shared_ptr<hg::Group>', ['const std::string &name'], ['proxy'])
+	gen.bind_method(scene, 'GetNode', 'hg::Node', ['const std::string &name'])
+	gen.bind_method(scene, 'GetNodeEx', 'hg::Node', ['const std::string &path'])
 
-	gen.bind_method(shared_scene, 'GetNodeGroupList', 'std::vector<std::shared_ptr<hg::Group>>', ['const std::shared_ptr<hg::Node> &node'], ['proxy'])
-	gen.bind_method(shared_scene, 'UnregisterNodeFromGroups', 'void', ['const std::shared_ptr<hg::Node> &node'], ['proxy'])
-	gen.bind_method(shared_scene, 'GetGroups', 'const std::vector<std::shared_ptr<hg::Group>> &', [], ['proxy'])
+	gen.bind_method(scene, 'GetNodes', 'std::vector<hg::Node>', [])
+	gen.bind_method(scene, 'GetAllNodes', 'std::vector<hg::Node>', [])
+	gen.bind_method(scene, 'GetNodesWithComponent', 'std::vector<hg::Node>', ['hg::NodeComponentIdx idx'])
+	gen.bind_method(scene, 'GetAllNodesWithComponent', 'std::vector<hg::Node>', ['hg::NodeComponentIdx idx'])
 
-	gen.bind_method(shared_scene, 'GroupMembersSetActive', 'void', ['const hg::Group &group', 'bool active'], ['proxy'])
-	gen.bind_method(shared_scene, 'DeleteGroupAndMembers', 'void', ['const std::shared_ptr<hg::Group> &group'], ['proxy'])
+	gen.bind_method(scene, 'GetNodeCount', 'size_t', [])
+	gen.bind_method(scene, 'GetAllNodeCount', 'size_t', [])
 
-	gen.bind_method(shared_scene, 'Clear', 'void', [], ['proxy'])
-	gen.bind_method(shared_scene, 'Dispose', 'void', [], ['proxy'])
-	gen.bind_method(shared_scene, 'IsReady', 'bool', [], ['proxy'])
+	gen.bind_method(scene, 'GetNodeChildren', 'std::vector<hg::Node>', ['const hg::Node &node'])
 
-	gen.bind_method(shared_scene, 'AddSystem', 'void', ['std::shared_ptr<hg::SceneSystem> system'], ['proxy'])
-	#gen.bind_method(shared_scene, 'GetSystem', 'std::shared_ptr<hg::SceneSystem>', ['const std::string &name'], ['proxy'])
-
-	gen.bind_method(shared_scene, 'GetSystem<hg::RenderableSystem>', 'std::shared_ptr<hg::RenderableSystem>', [], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'No renderable system in scene')}, bound_name='GetRenderableSystem')
-	gen.bind_method(shared_scene, 'GetSystem<hg::PhysicSystem>', 'std::shared_ptr<hg::PhysicSystem>', [], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'No physic system in scene')}, bound_name='GetPhysicSystem')
-
-	#const std::vector<std::shared_ptr<SceneSystem>> &GetSystems() const { return systems; }
-
-	gen.bind_method(shared_scene, 'AddNode', 'void', ['std::shared_ptr<hg::Node> node'], ['proxy'])
-	gen.bind_method(shared_scene, 'RemoveNode', 'void', ['const std::shared_ptr<hg::Node> &node'], ['proxy'])
-
-	gen.bind_method(shared_scene, 'AddComponentToSystems', 'void', ['std::shared_ptr<hg::Component> node'], ['proxy'])
-	gen.bind_method(shared_scene, 'RemoveComponentFromSystems', 'void', ['const std::shared_ptr<hg::Component> &component'], ['proxy'])
-
-	gen.bind_method_overloads(shared_scene, 'GetNode', [
-		('std::shared_ptr<hg::Node>', ['uint32_t uid'], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'Node not found')}),
-		('std::shared_ptr<hg::Node>', ['const std::string &name', '?const std::shared_ptr<hg::Node> &parent'], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'Node not found')})
-	])
-
-	gen.bind_method_overloads(shared_scene, 'GetNodes', [
-		('const std::vector<std::shared_ptr<hg::Node>> &', [], ['proxy']),
-		('std::vector<std::shared_ptr<hg::Node>>', ['const std::string &filter'], ['proxy'])
-	])
-	gen.bind_method(shared_scene, 'GetNodeChildren', 'std::vector<std::shared_ptr<hg::Node>>', ['const hg::Node &node'], ['proxy'])
-	gen.bind_method(shared_scene, 'GetNodesWithAspect', 'std::vector<std::shared_ptr<hg::Node>>', ['const std::string &aspect'], ['proxy'])
-
-	gen.insert_binding_code('static bool _Scene_Load(hg::Scene *scene, const std::string &path, std::shared_ptr<hg::RenderSystem> &render_system, std::vector<std::shared_ptr<hg::Node>> *nodes) { return hg::LoadScene(*scene, path, render_system, nodes); }')
-	gen.bind_method(shared_scene, 'Load', 'bool', ['const std::string &path', 'std::shared_ptr<hg::RenderSystem> &render_system', 'std::vector<std::shared_ptr<hg::Node>> *nodes'], {'proxy': None, 'route': route_lambda('_Scene_Load'), 'arg_out': ['nodes']})
-	gen.insert_binding_code('static bool _Scene_Save(hg::Scene *scene, const std::string &path, std::shared_ptr<hg::RenderSystem> &render_system) { return hg::SaveScene(*scene, path, render_system); }')
-	gen.bind_method(shared_scene, 'Save', 'bool', ['const std::string &path', 'std::shared_ptr<hg::RenderSystem> &render_system'], {'proxy': None, 'route': route_lambda('_Scene_Save')})
-
-	gen.bind_method_overloads(shared_scene, 'Update', [
-		('void', [], ['proxy']),
-		('void', ['hg::time_ns dt'], ['proxy'])
-	])
-	gen.bind_method_overloads(shared_scene, 'WaitUpdate', [
-		('bool', [], ['proxy']),
-		('bool', ['bool blocking'], ['proxy'])
-	])
-	gen.bind_method(shared_scene, 'Commit', 'void', [], ['proxy'])
-	gen.bind_method_overloads(shared_scene, 'WaitCommit', [
-		('bool', [], ['proxy']),
-		('bool', ['bool blocking'], ['proxy'])
-	])
-
-	gen.bind_method_overloads(shared_scene, 'UpdateAndCommitWaitAll', [
-		('void', [], ['proxy']),
-		('void', ['hg::time_ns dt'], ['proxy'])
-	])
-
-	#const Signal<void(SceneSerializationState &)> &GetSerializationSignal() const { return serialization_signal; }
-	#Signal<void(SceneSerializationState &)> &GetSerializationSignal() { return serialization_signal; }
-
-	#const Signal<void(SceneDeserializationState &)> &GetDeserializationSignal() const { return deserialization_signal; }
-	#Signal<void(SceneDeserializationState &)> &GetDeserializationSignal() { return deserialization_signal; }
-
-	gen.bind_method(shared_scene, 'AddComponent', 'void', ['std::shared_ptr<hg::Component> component'], ['proxy'])
-	gen.bind_method(shared_scene, 'RemoveComponent', 'void', ['const std::shared_ptr<hg::Component> &component'], ['proxy'])
-
-	gen.bind_method_overloads(shared_scene, 'GetComponents', [
-		('const std::vector<std::shared_ptr<hg::Component>> &', [], ['proxy']),
-		('std::vector<std::shared_ptr<hg::Component>>', ['const std::string &aspect'], ['proxy'])
-	])
-
-	gen.bind_method(shared_scene, 'GetComponent<hg::Environment>', 'std::shared_ptr<hg::Environment>', [], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'GetEnvironment failed, scene has no Environment component')}, bound_name='GetEnvironment')
-
-	gen.bind_method(shared_scene, 'HasAspect', 'bool', ['const std::string &aspect'], ['proxy'])
-	gen.bind_method(shared_scene, 'GetMinMax', 'hg::MinMax', [], ['proxy'])
-
-	gen.end_class(shared_scene)
-
-	# global functions
-	gen.bind_function('hg::NewDefaultScene', 'std::shared_ptr<hg::Scene>', ['std::shared_ptr<hg::RenderSystem> render_system'])
-	#gen.bind_function('hg::LoadScene', 'bool', ['hg::Scene &scene', 'const std::string &path', 'std::shared_ptr<hg::RenderSystem> render_system'])
-	gen.bind_function('hg::SceneSetupCoreSystemsAndComponents', 'void', ['std::shared_ptr<hg::Scene> scene', 'std::shared_ptr<hg::RenderSystem> render_system'])
-
-	# hg::ScenePicking
-	gen.add_include('engine/scene_picking.h')
-
-	scene_picking = gen.begin_class('hg::ScenePicking')
-
-	gen.bind_constructor_overloads(scene_picking, [
-		(['std::shared_ptr<hg::RenderSystem> render_system'], [])
-	])
-	gen.bind_method(scene_picking, 'Prepare', 'std::future<bool>', ['std::shared_ptr<hg::Scene> scene', 'bool prepare_node_picking', 'bool prepare_world_picking'] )
-	gen.bind_method_overloads(scene_picking, 'Pick', [
-		('bool', ['const hg::Scene &scene', 'int x', 'int y', 'std::vector<std::shared_ptr<hg::Node>> &nodes'], {'arg_out': ['nodes']}),
-		('bool', ['const hg::Scene &scene', 'const hg::Rect<int> &rect', 'std::vector<std::shared_ptr<hg::Node>> &nodes'], {'arg_out': ['nodes']})
-	])
-	
-	gen.bind_method(scene_picking, 'PickWorld', 'bool', ['const hg::Scene &scene', 'float x', 'float y', 'hg::Vector3 &world_pos'], {'arg_out': ['world_pos']})
-	gen.end_class(scene_picking)
-
-
-def bind_gpu(gen):
-	# types
-	gen.add_include('engine/gpu_types.h')
-
-	gen.bind_named_enum('hg::GpuPrimitiveType', ['GpuPrimitiveLine', 'GpuPrimitiveTriangle', 'GpuPrimitivePoint', 'GpuPrimitiveLast'], storage_type='uint8_t')
-
-	# hg::GpuBuffer
-	gen.add_include('engine/gpu_buffer.h')
-
-	gen.bind_named_enum('hg::GpuBufferUsage', ['GpuBufferStatic', 'GpuBufferDynamic'])
-	gen.bind_named_enum('hg::GpuBufferType', ['GpuBufferIndex', 'GpuBufferVertex'])
-
-	buffer = gen.begin_class('hg::GpuBuffer', bound_name='Buffer_nobind', noncopyable=True, nobind=True)
-	gen.end_class(buffer)
-
-	shared_buffer = gen.begin_class('std::shared_ptr<hg::GpuBuffer>', bound_name='GpuBuffer', features={'proxy': lib.stl.SharedPtrProxyFeature(buffer)})
-	gen.end_class(shared_buffer)
-
-	# hg::GpuResource
-	gen.add_include('engine/gpu_resource.h')
-
-	resource = gen.begin_class('hg::GpuResource', bound_name='GpuResource_nobind', noncopyable=True, nobind=True)
-	gen.end_class(resource)
-
-	shared_resource = gen.begin_class('std::shared_ptr<hg::GpuResource>', bound_name='GpuResource', features={'proxy': lib.stl.SharedPtrProxyFeature(resource)})
-
-	gen.bind_method(shared_resource, 'GetName', 'const std::string &', [], ['proxy'])
-
-	gen.bind_method(shared_resource, 'IsReadyOrFailed', 'bool', [], ['proxy'])
-	gen.bind_method(shared_resource, 'IsReady', 'bool', [], ['proxy'])
-	gen.bind_method(shared_resource, 'IsFailed', 'bool', [], ['proxy'])
-
-	gen.bind_method(shared_resource, 'SetReady', 'void', [], ['proxy'])
-	gen.bind_method(shared_resource, 'SetFailed', 'void', [], ['proxy'])
-	gen.bind_method(shared_resource, 'SetNotReady', 'void', [], ['proxy'])
-
-	gen.end_class(shared_resource)
-
-	# hg::Texture
-	gen.add_include('engine/texture.h')
-
-	gen.bind_named_enum('hg::TextureUsage', ['TextureIsRenderTarget', 'TextureIsShaderResource', 'TextureUsageDefault'])
-	gen.bind_named_enum('hg::TextureFormat', ['TextureRGBA8', 'TextureBGRA8', 'TextureRGBA16', 'TextureRGBAF', 'TextureDepth', 'TextureDepthF', 'TextureR8', 'TextureR16', 'TextureInvalidFormat'], 'uint8_t')
-	gen.bind_named_enum('hg::TextureAA', ['TextureNoAA', 'TextureMSAA2x', 'TextureMSAA4x', 'TextureMSAA8x', 'TextureMSAA16x', 'TextureAALast'], 'uint8_t')
-
-	texture = gen.begin_class('hg::Texture', bound_name='Texture_nobind', noncopyable=True, nobind=True)
-	gen.end_class(texture)
-
-	shared_texture = gen.begin_class('std::shared_ptr<hg::Texture>', bound_name='Texture', features={'proxy': lib.stl.SharedPtrProxyFeature(texture)})
-
-	gen.add_base(shared_texture, shared_resource)
-
-	gen.bind_method(shared_texture, 'GetWidth', 'uint32_t', [], ['proxy'])
-	gen.bind_method(shared_texture, 'GetHeight', 'uint32_t', [], ['proxy'])
-	gen.bind_method(shared_texture, 'GetDepth', 'uint32_t', [], ['proxy'])
-	gen.bind_method(shared_texture, 'GetRect', 'hg::Rect<float>', [], ['proxy'])
-
-	gen.end_class(shared_texture)
-
-	bind_std_vector(gen, shared_texture)
-
-	# hg::RenderTarget
-	render_target = gen.begin_class('hg::RenderTarget', bound_name='RenderTarget_nobind', noncopyable=True, nobind=True)
-	gen.end_class(render_target)
-
-	gen.insert_binding_code('''\
-static std::shared_ptr<hg::Texture> _RenderTarget_GetDepthTexture(hg::RenderTarget *renderTarget) { return renderTarget->depth_texture; }
-static uint32_t _RenderTarget_GetColorTextureCount(hg::RenderTarget *renderTarget) { return renderTarget->color_texture_count; }
-static std::shared_ptr<hg::Texture> _RenderTarget_GetColorTexture(hg::RenderTarget *renderTarget, uint32_t idx) {
-	return (idx < renderTarget->color_texture.size()) ? renderTarget->color_texture[idx] : nullptr;
-}
-''')
-
-	shared_render_target = gen.begin_class('std::shared_ptr<hg::RenderTarget>', bound_name='RenderTarget', features={'proxy': lib.stl.SharedPtrProxyFeature(render_target)})
-	gen.bind_method(shared_render_target, 'GetColorTextureCount', 'uint32_t', [], {'proxy': None, 'route': route_lambda('_RenderTarget_GetColorTextureCount')})
-	gen.bind_method(shared_render_target, 'GetDepthTexture', 'std::shared_ptr<hg::Texture>', [], {'proxy': None, 'route': route_lambda('_RenderTarget_GetDepthTexture')})
-	gen.bind_method(shared_render_target, 'GetColorTexture', 'std::shared_ptr<hg::Texture>', ['uint32_t index'], {'proxy': None, 'route': route_lambda('_RenderTarget_GetColorTexture')})
-	gen.end_class(shared_render_target)
-	
-	# hg::GpuHardwareInfo
-	hw_info = gen.begin_class('hg::GpuHardwareInfo')
-	gen.bind_members(hw_info, ['std::string name', 'std::string vendor'])
-	gen.end_class(hw_info)
-
-	# hg::GpuShader
-	gen.add_include('engine/gpu_shader.h')
-
-	shader = gen.begin_class('hg::GpuShader', bound_name='GpuShader_nobind', noncopyable=True, nobind=True)
-	gen.end_class(shader)
-
-	shared_shader = gen.begin_class('std::shared_ptr<hg::GpuShader>', bound_name='GpuShader', features={'proxy': lib.stl.SharedPtrProxyFeature(shader)})
-	gen.add_base(shared_shader, shared_resource)
-	gen.end_class(shared_shader)
-
-	lib.stl.bind_future_T(gen, 'std::shared_ptr<hg::GpuShader>', 'FutureGpuShader')
-
-	shader_value = gen.begin_class('hg::GpuShaderValue', bound_name='GpuShaderValue')
-	gen.bind_members(shader_value, ['std::shared_ptr<hg::Texture> texture', 'hg::TextureUnitConfig tex_unit_cfg'])
-	gen.end_class(shader_value)
-
-	shader_variable = gen.begin_class('hg::GpuShaderVariable')
-	gen.end_class(shader_variable)
-
-	# hg::ResourceCache<T>
-	gen.add_include("engine/resource_cache.h")
-
-	def bind_tcache_T(T, bound_name):
-		tcache = gen.begin_class('hg::ResourceCache<%s>'%T, bound_name=bound_name, noncopyable=True)
-
-		gen.bind_method(tcache, 'Purge', 'size_t', [])
-
-		gen.bind_method(tcache, 'Clear', 'void', [])
-		gen.bind_method(tcache, 'Has', 'bool', ['const std::string &name'])
-		gen.bind_method(tcache, 'Get', 'std::shared_ptr<%s>'%T, ['const std::string &name'])
-
-		gen.bind_method(tcache, 'Add', 'void', ['std::shared_ptr<%s> &resource'%T])
-		#const std::vector<std::shared_ptr<T>> &GetContent() const { return cache; }
-
-		gen.end_class(tcache)
-
-	bind_tcache_T('hg::Texture', 'TextureCache')
-	bind_tcache_T('hg::GpuShader', 'ShaderCache')
-
-	# hg::Renderer
-	gen.add_include('engine/renderer.h')
-
-	gen.bind_named_enum('hg::Renderer::FillMode', ['FillSolid', 'FillWireframe', 'FillLast'])
-	gen.bind_named_enum('hg::Renderer::CullFunc', ['CullFront', 'CullBack', 'CullLast'])
-	gen.bind_named_enum('hg::Renderer::DepthFunc', ['DepthNever', 'DepthLess', 'DepthEqual', 'DepthLessEqual', 'DepthGreater', 'DepthNotEqual', 'DepthGreaterEqual', 'DepthAlways', 'DepthFuncLast'])
-	gen.bind_named_enum('hg::Renderer::BlendFunc', ['BlendZero', 'BlendOne', 'BlendSrcAlpha', 'BlendOneMinusSrcAlpha', 'BlendDstAlpha', 'BlendOneMinusDstAlpha', 'BlendLast'])
-	gen.bind_named_enum('hg::Renderer::ClearFunction', ['ClearColor', 'ClearDepth', 'ClearAll'])
-
-	renderer = gen.begin_class('hg::Renderer', bound_name='Renderer_nobind', noncopyable=True, nobind=True)
-	gen.end_class(renderer)
-
-	shared_renderer = gen.begin_class('std::shared_ptr<hg::Renderer>', bound_name='Renderer', features={'proxy': lib.stl.SharedPtrProxyFeature(renderer)})
-
-	gen.bind_method(shared_renderer, 'GetName', 'const char *', [], ['proxy'])
-	gen.bind_method(shared_renderer, 'GetDescription', 'const char *', [], ['proxy'])
-	gen.bind_method(shared_renderer, 'GetVersion', 'const char *', [], ['proxy'])
-	gen.bind_method(shared_renderer, 'GetNativeHandle', 'void *', [], ['proxy'])
-
-	gen.bind_method(shared_renderer, 'GetHardwareInfo', 'const hg::GpuHardwareInfo &', [], ['proxy'])
-
-	gen.bind_method(shared_renderer, 'PurgeCache', 'size_t', [], ['proxy'])
-	gen.bind_method(shared_renderer, 'RefreshCacheEntry', 'void', ['const std::string &name'], ['proxy'])
-
-	gen.bind_method(shared_renderer, 'IsCooked', 'bool', ['const std::string &name'], ['proxy'])
-
-	gen.bind_method(shared_renderer, 'GetTextureCache', 'const hg::ResourceCache<hg::Texture> &', [], ['proxy'])
-	gen.bind_method(shared_renderer, 'GetShaderCache', 'const hg::ResourceCache<hg::GpuShader> &', [], ['proxy'])
-
-	"""
-	Signal<void(Renderer &)> open_signal, close_signal;
-	Signal<void(Renderer &, const Surface &)> output_surface_created_signal;
-	Signal<void(Renderer &, const Surface &)> output_surface_changed_signal;
-	Signal<void(Renderer &, const Surface &)> output_surface_destroyed_signal;
-
-	Signal<void(Renderer &)> pre_draw_frame_signal, post_draw_frame_signal;
-	Signal<void(Renderer &)> show_frame_signal;
-	"""
-
-	gen.bind_method(shared_renderer, 'NewRenderTarget', 'std::shared_ptr<hg::RenderTarget>', [], ['proxy'])
-
-	gen.bind_method_overloads(shared_renderer, 'SetRenderTargetColorTexture', [
-		('void', ['hg::RenderTarget &render_target', 'std::shared_ptr<hg::Texture> texture'], ['proxy'])
-		#('void', ['hg::RenderTarget &render_target', 'std::shared_ptr<hg::Texture> texture *', 'uint32_t count'], ['proxy'])
-	])
-	gen.bind_method(shared_renderer, 'SetRenderTargetDepthTexture', 'void', ['hg::RenderTarget &render_target', 'std::shared_ptr<hg::Texture> texture'], ['proxy'])
-
-	gen.bind_method_overloads(shared_renderer, 'BlitRenderTarget', [
-		('void', ['const std::shared_ptr<hg::RenderTarget> &src_render_target', 'const std::shared_ptr<hg::RenderTarget> &dst_render_target', 'const hg::Rect<int> &src_rect', 'const hg::Rect<int> &dst_rect'], ['proxy']),
-		('void', ['const std::shared_ptr<hg::RenderTarget> &src_render_target', 'const std::shared_ptr<hg::RenderTarget> &dst_render_target', 'const hg::Rect<int> &src_rect', 'const hg::Rect<int> &dst_rect', 'bool blit_color', 'bool blit_depth'], ['proxy'])
-	])
-	#gen.bind_method(shared_renderer, 'ReadRenderTargetColorPixels', 'void', ['const std::shared_ptr<hg::RenderTarget> &src_render_target', 'const std::shared_ptr<hg::Picture> &out', 'const hg::Rect<int> &rect'], ['proxy'])
-	gen.bind_method(shared_renderer, 'ClearRenderTarget', 'void', [], ['proxy'])
-	gen.bind_method(shared_renderer, 'GetRenderTarget', 'const std::shared_ptr<hg::RenderTarget> &', [], ['proxy'])
-	gen.bind_method(shared_renderer, 'SetRenderTarget', 'void', ['std::shared_ptr<hg::RenderTarget> render_target'], ['proxy'])
-	gen.bind_method(shared_renderer, 'CheckRenderTarget', 'bool', [], ['proxy'])
-
-	gen.bind_method(shared_renderer, 'CreateRenderTarget', 'bool', ['hg::RenderTarget &render_target'], ['proxy'])
-	gen.bind_method(shared_renderer, 'FreeRenderTarget', 'void', ['hg::RenderTarget &render_target'], ['proxy'])
-
-	gen.bind_method(shared_renderer, 'NewBuffer', 'std::shared_ptr<hg::GpuBuffer>', [], ['proxy'])
-	gen.bind_method(shared_renderer, 'GetBufferSize', 'size_t', ['hg::GpuBuffer &buffer'], ['proxy'])
-	#std::future<void *> MapBuffer(sBuffer buf) {
-	#void UnmapBuffer(sBuffer buf) { run_call<void>(std::bind(&Renderer::UnmapBuffer, shared_ref(renderer), shared_ref(buf)), RA_task_affinity); }
-	#std::future<bool> UpdateBuffer(sBuffer buf, const void *p, size_t start = 0, size_t size = 0) {
-	#std::future<bool> CreateBuffer(sBuffer buf, const void *data, size_t size, Buffer::Type type, Buffer::Usage usage = Buffer::Static) {
-	#std::future<bool> CreateBuffer(sBuffer buf, const BinaryData &data, Buffer::Type type, Buffer::Usage usage = Buffer::Static) {
-
-	gen.insert_binding_code('''\
-static bool _CreateBuffer(hg::Renderer *renderer, hg::GpuBuffer &buffer, hg::BinaryData &data, hg::GpuBufferType type, hg::GpuBufferUsage usage = hg::GpuBufferStatic) {
-	return renderer->CreateBuffer(buffer, data.GetData(), data.GetDataSize(), type, usage);
-}
-''')
-	gen.bind_method(shared_renderer, 'CreateBuffer', 'void', ['hg::GpuBuffer &buffer', 'hg::BinaryData &data', 'hg::GpuBufferType type', '?hg::GpuBufferUsage usage'], {'proxy': None, 'route': lambda args: '_CreateBuffer(%s);' % ', '.join(args)})
-	gen.bind_method(shared_renderer, 'FreeBuffer', 'void', ['hg::GpuBuffer &buffer'], ['proxy'])
-
-	gen.bind_method_overloads(shared_renderer, 'NewTexture', [
-		('std::shared_ptr<hg::Texture>', [], ['proxy']),
-		('std::shared_ptr<hg::Texture>', ['const std::string &name'], ['proxy']),
-		('std::shared_ptr<hg::Texture>', ['const std::string &name', 'int width', 'int height'], ['proxy']),
-		('std::shared_ptr<hg::Texture>', ['const std::string &name', 'int width', 'int height', 'hg::TextureFormat format', 'hg::TextureAA aa', '?hg::TextureUsage usage', '?bool mipmapped'], ['proxy']),
-		('std::shared_ptr<hg::Texture>', ['const std::string &name', 'const hg::Picture &picture', '?hg::TextureUsage usage', '?bool mipmapped'], ['proxy'])
-	])
-	gen.bind_method(shared_renderer, 'NewShadowMap', 'std::shared_ptr<hg::Texture>', ['int width', 'int height', '?const std::string &name'], ['proxy'])
-	gen.bind_method(shared_renderer, 'NewExternalTexture', 'std::shared_ptr<hg::Texture>', ['?const std::string &name'], ['proxy'])
-	gen.bind_method_overloads(shared_renderer, 'CreateTexture', [
-		('bool', ['hg::Texture &texture', 'int width', 'int height', '?hg::TextureFormat format', '?hg::TextureAA aa', '?hg::TextureUsage usage', '?bool mipmapped'], ['proxy']),
-		('bool', ['hg::Texture &texture', 'const hg::Picture &picture', '?hg::TextureUsage usage', '?bool mipmapped'], ['proxy'])
-	])
-	gen.bind_method(shared_renderer, 'FreeTexture', 'void', ['hg::Texture &texture'], ['proxy'])
-
-	gen.bind_method(shared_renderer, 'LoadNativeTexture', 'bool', ['hg::Texture &texture', 'const std::string &path'], ['proxy'])
-	gen.bind_method(shared_renderer, 'GetNativeTextureExt', 'const char *', [], ['proxy'])
-
-	gen.insert_binding_code('''\
-static void RendererBlitTexture_wrapper(hg::Renderer *renderer, hg::Texture &texture, const hg::Picture &picture) { renderer->BlitTexture(texture, picture.GetData(), picture.GetDataSize(), picture.GetWidth(), picture.GetHeight()); }
-\n''')
-
-	gen.bind_method_overloads(shared_renderer, 'BlitTexture', [
-		('void', ['hg::Texture &texture', 'const hg::Picture &picture'], {'proxy': None, 'route': lambda args: 'RendererBlitTexture_wrapper(%s);' % ', '.join(args)}),
-		#('void', ['hg::Texture &texture', 'const void *data', 'size_t data_size', 'uint32_t width', 'uint32_t height'], ['proxy']),
-		#('void', ['hg::Texture &texture', 'const void *data', 'size_t data_size', 'uint32_t width', 'uint32_t height', 'uint32_t x', 'uint32_t y'], ['proxy'])
-	])
-	gen.bind_method(shared_renderer, 'ResizeTexture', 'void', ['hg::Texture &texture', 'uint32_t width', 'uint32_t height'], ['proxy'])
-
-	gen.bind_method(shared_renderer, 'CaptureTexture', 'bool', ['const hg::Texture &texture', 'hg::Picture &picture'], ['proxy'])
-
-	gen.bind_method(shared_renderer, 'GenerateTextureMipmap', 'void', ['hg::Texture &texture'], ['proxy'])
-
-	gen.bind_method(shared_renderer, 'HasTexture', 'bool', ['const std::string &path'], ['proxy'])
-	gen.bind_method(shared_renderer, 'GetTexture', 'std::shared_ptr<hg::Texture>', ['const std::string &path'], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'Texture not found')})
-	gen.bind_method(shared_renderer, 'LoadTexture', 'std::shared_ptr<hg::Texture>', ['const std::string &path', '?bool use_cache'], ['proxy'])
+	gen.bind_method(scene, 'IsChildOf', 'bool', ['const hg::Node &node', 'const hg::Node &parent'])
+	gen.bind_method(scene, 'IsRoot', 'bool', ['const hg::Node &node'])
 
 	#
-	gen.bind_method(shared_renderer, 'NewShader', 'std::shared_ptr<hg::GpuShader>', ['?const std::string &name'], ['proxy'])
+	gen.bind_method(scene, 'ReadyWorldMatrices', 'void', [])
+	gen.bind_method(scene, 'ComputeWorldMatrices', 'void', [])
 
-	gen.bind_method(shared_renderer, 'HasShader', 'bool', ['const std::string &name'], ['proxy'])
-	gen.bind_method(shared_renderer, 'GetShader', 'std::shared_ptr<hg::GpuShader>', ['?const std::string &name'], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'Shader not found')})
-	gen.bind_method_overloads(shared_renderer, 'LoadShader', [
-		('std::shared_ptr<hg::GpuShader>', ['const std::string &name', '?bool use_cache'], ['proxy']),
-		('std::shared_ptr<hg::GpuShader>', ['const std::string &name', 'const std::string &source', '?bool use_cache'], ['proxy'])
+	gen.bind_method(scene, 'Update', 'void', ['hg::time_ns dt'])
+
+	#
+	gen.bind_method(scene, 'GetSceneAnims', 'std::vector<hg::SceneAnimRef>', [])
+	gen.bind_method(scene, 'GetSceneAnim', 'hg::SceneAnimRef', ['const char *name'])
+
+	gen.bind_method(scene, 'PlayAnim', 'hg::ScenePlayAnimRef', ['hg::SceneAnimRef ref', '?hg::AnimLoopMode loop_mode', '?hg::Easing easing', '?hg::time_ns t_start', '?hg::time_ns t_end', '?bool paused', '?float t_scale'])
+
+	gen.bind_method(scene, 'IsPlaying', 'bool', ['hg::ScenePlayAnimRef ref'])
+	gen.bind_method(scene, 'StopAnim', 'void', ['hg::ScenePlayAnimRef ref'])
+	gen.bind_method(scene, 'StopAllAnims', 'void', [])
+
+	#
+	gen.bind_method(scene, 'GetPlayingAnimNames', 'std::vector<std::string>', [])
+	gen.bind_method(scene, 'GetPlayingAnimRefs', 'std::vector<hg::ScenePlayAnimRef>', [])
+	gen.bind_method(scene, 'UpdatePlayingAnims', 'void', ['hg::time_ns dt'])
+
+	#
+	gen.bind_method(scene, 'HasKey', 'bool', ['const std::string &key'])
+	gen.bind_method(scene, 'GetKeys', 'std::vector<std::string>', [])
+	gen.bind_method(scene, 'RemoveKey', 'void', ['const std::string &key'])
+
+	gen.bind_method(scene, 'GetValue', 'std::string', ['const std::string &key'])
+	gen.bind_method(scene, 'SetValue', 'void', ['const std::string &key', 'const std::string &value'])
+
+	#
+	gen.bind_method(scene, 'GarbageCollect', 'size_t', [])
+	gen.bind_method(scene, 'Clear', 'void', [])
+
+	#
+	gen.bind_method(scene, 'ReserveNodes', 'void', ['size_t count'])
+	gen.bind_method(scene, 'CreateNode', 'hg::Node', ['?std::string name'])
+	gen.bind_method(scene, 'DestroyNode', 'void', ['const hg::Node &node'])
+
+	#
+	gen.bind_method(scene, 'ReserveTransforms', 'void', ['size_t count'])
+	gen.bind_method_overloads(scene, 'CreateTransform', [
+		('hg::Transform', [], []),
+		('hg::Transform', ['const hg::Vec3 &T', '?const hg::Vec3 &R', '?const hg::Vec3 &S'], [])
+	])
+	gen.bind_method(scene, 'DestroyTransform', 'void', ['const hg::Transform &transform'])
+
+	#
+	gen.bind_method(scene, 'ReserveCameras', 'void', ['size_t count'])
+	gen.bind_method_overloads(scene, 'CreateCamera', [
+		('hg::Camera', [], []),
+		('hg::Camera', ['float znear', 'float zfar', '?float fov'], [])
+	])
+	gen.bind_method(scene, 'CreateOrthographicCamera', 'hg::Camera', ['float znear', 'float zfar', '?float size'])
+	gen.bind_method(scene, 'DestroyCamera', 'void', ['const hg::Camera &camera'])
+
+	gen.bind_method(scene, 'ComputeCurrentCameraViewState', 'hg::ViewState', ['const hg::tVec2<float> &aspect_ratio'])
+
+	#
+	gen.bind_method(scene, 'ReserveObjects', 'void', ['size_t count'])
+	protos = [
+		('hg::Object', [], []),
+		('hg::Object', ['const hg::ModelRef &model', 'const std::vector<hg::Material> &materials'], [])
+	]
+	gen.bind_method_overloads(scene, 'CreateObject', expand_std_vector_proto(gen, protos))
+	gen.bind_method(scene, 'DestroyObject', 'void', ['const hg::Object &object'])
+
+	#
+	gen.bind_method(scene, 'ReserveLights', 'void', ['size_t count'])
+	gen.bind_method(scene, 'CreateLight', 'hg::Light', [])
+	gen.bind_method(scene, 'DestroyLight', 'void', ['const hg::Light &light'])
+
+	gen.bind_method_overloads(scene, 'CreateLinearLight', [
+		('hg::Light', ['const hg::Color &diffuse', 'float diffuse_intensity', 'const hg::Color &specular', 'float specular_intensity', '?float priority', '?hg::LightShadowType shadow_type', '?float shadow_bias', '?const hg::Vec4 &pssm_split'], []),
+		('hg::Light', ['const hg::Color &diffuse', 'const hg::Color &specular', '?float priority', '?hg::LightShadowType shadow_type', '?float shadow_bias', '?const hg::Vec4 &pssm_split'], [])
+	])
+	gen.bind_method_overloads(scene, 'CreatePointLight', [
+		('hg::Light', ['float radius', 'const hg::Color &diffuse', 'float diffuse_intensity', 'const hg::Color &specular', 'float specular_intensity', '?float priority', '?hg::LightShadowType shadow_type', '?float shadow_bias'], []),
+		('hg::Light', ['float radius', 'const hg::Color &diffuse', 'const hg::Color &specular', '?float priority', '?hg::LightShadowType shadow_type', '?float shadow_bias'], [])
+	])
+	gen.bind_method_overloads(scene, 'CreateSpotLight', [
+		('hg::Light', ['float radius', 'float inner_angle', 'float outer_angle', 'const hg::Color &diffuse', 'float diffuse_intensity', 'const hg::Color &specular', 'float specular_intensity', '?float priority', '?hg::LightShadowType shadow_type', '?float shadow_bias'], []),
+		('hg::Light', ['float radius', 'float inner_angle', 'float outer_angle', 'const hg::Color &diffuse', 'const hg::Color &specular', '?float priority', '?hg::LightShadowType shadow_type', '?float shadow_bias'], [])
 	])
 
-	gen.bind_method(shared_renderer, 'CreateShader', 'void', ['const std::shared_ptr<hg::GpuShader> &shader', 'const std::shared_ptr<hg::Shader> &core_shader'], ['proxy'])
-	gen.bind_method(shared_renderer, 'FreeShader', 'void', ['hg::GpuShader &shader'], ['proxy'])
+	#
+	gen.bind_method(scene, 'ReserveScripts', 'void', ['size_t count'])
+	gen.bind_method(scene, 'CreateScript', 'hg::Script', ['?const std::string &path'])
+	gen.bind_method(scene, 'DestroyScript', 'void', ['const hg::Script &script'])
 
-	gen.bind_method(shared_renderer, 'GetShaderVariable', 'hg::GpuShaderVariable', ['const std::string &name'], ['proxy'])
-	gen.bind_method(shared_renderer, 'GetShaderBuiltin', 'hg::GpuShaderVariable', ['hg::ShaderVariable::Semantic semantic'], ['proxy'])
+	#
+	gen.bind_method(scene, 'GetScriptCount', 'size_t', [])
+	gen.bind_method(scene, 'SetScript', 'void', ['size_t slot_idx', 'const hg::Script &script'])
+	gen.bind_method(scene, 'GetScript', 'hg::Script', ['size_t slot_idx'])
 
-	def bind_set_shader_var(alias, type, count):
-			method_name = "SetShader%s%s" % (alias, str(count) if count>1 else "")
-			data = list(map(lambda x: "v%d"%x, range(count)))
-			method_args = list(map(lambda x: "%s %s"%(type,x), data))
-			args = (method_name, ', '.join(method_args), type, ','.join(data), method_name)
-			gen.insert_binding_code('''
-	static void _renderer_%s(hg::Renderer *renderer, const hg::GpuShaderVariable &var, %s) {
-		%s v[] = {%s};
-		renderer->%s(var, v); 
-	}''' % tuple(args))
-			gen.insert_binding_code('''
-	static void _renderer_%s_name(hg::Renderer *renderer, const std::string &name, %s) {
-		%s v[] = {%s};
-		renderer->%s(renderer->GetShaderVariable(name), v); 
-	}
-	''' % tuple(args))
-			args = (method_name, type, method_name, count)
-			gen.insert_binding_code('''
-	static void _renderer_%s_vector(hg::Renderer *renderer, const hg::GpuShaderVariable &var, const std::vector<%s> &v) {
-		renderer->%s(var, v.data(), v.size()/%d); 
-	}
-	static void _renderer_%s_vector(hg::Renderer *renderer, const std::string &name, const std::vector<%s> &v) {
-		renderer->%s(renderer->GetShaderVariable(name), v.data(), v.size()/%d); 
-	}
-	''' % tuple(args+args))
-			gen.bind_method_overloads(shared_renderer, method_name, expand_std_vector_proto(gen, [
-		('void', ['const hg::GpuShaderVariable &var'] + method_args, {'proxy': None, 'route': route_lambda('_renderer_%s' % method_name)}),
-		('void', ['const std::string &name'] + method_args, {'proxy': None, 'route': route_lambda('_renderer_%s_name' % method_name)}),
-		('void', ['const hg::GpuShaderVariable &var', 'const std::vector<%s>& v' % type], {'proxy': None, 'route': route_lambda('_renderer_%s_vector' % method_name)}),
-		('void', ['const std::string &name', 'const std::vector<%s>& v' % type], {'proxy': None, 'route': route_lambda('_renderer_%s_vector' % method_name)})
+	#
+	gen.bind_method(scene, 'CreateRigidBody', 'hg::RigidBody', [])
+	gen.bind_method(scene, 'DestroyRigidBody', 'void', ['const hg::RigidBody &rigid_body'])
+
+	#
+	gen.bind_method(scene, 'CreateCollision', 'hg::Collision', [])
+	gen.bind_method(scene, 'DestroyCollision', 'void', ['const hg::Collision &collision'])
+    
+	#
+	gen.bind_method(scene, 'CreateInstance', 'hg::Instance', [])
+	gen.bind_method(scene, 'DestroyInstance', 'void', ['const hg::Instance &Instance'])
+
+	#
+	canvas = gen.begin_class('hg::Scene::Canvas')
+	gen.bind_members(canvas, ['bool clear_z', 'bool clear_color', 'hg::Color color'])
+	gen.end_class(canvas)
+
+	gen.bind_member(scene, 'hg::Scene::Canvas canvas')
+
+	#
+	environment = gen.begin_class('hg::Scene::Environment')
+	gen.bind_members(environment, ['hg::Color ambient', 'hg::Color fog_color', 'float fog_near', 'float fog_far', 'hg::TextureRef brdf_map'])
+	gen.end_class(environment)
+
+	gen.bind_member(scene, 'hg::Scene::Environment environment')
+
+	gen.bind_method(scene, 'SetProbe', 'void', ['hg::TextureRef irradiance', 'hg::TextureRef radiance', 'hg::TextureRef brdf'])
+
+	#
+	gen.bind_method(scene, 'GetCurrentCamera', 'hg::Node', [])
+	gen.bind_method(scene, 'SetCurrentCamera', 'void', ['const hg::Node &camera'])
+
+	#
+	gen.bind_method(scene, 'GetMinMax', 'bool', ['const hg::PipelineResources &resources', 'hg::MinMax &minmax'], {'arg_out': ['minmax']})
+
+	gen.end_class(scene)
+
+	# helpers
+	gen.bind_function('hg::CreateSceneRootNode', 'hg::Node', ['hg::Scene &scene', 'std::string name', 'const hg::Mat4 &mtx'])
+
+	gen.bind_function('hg::CreateCamera', 'hg::Node', ['hg::Scene &scene', 'const hg::Mat4 &mtx', 'float znear', 'float zfar', '?float fov'])
+	gen.bind_function('hg::CreateOrthographicCamera', 'hg::Node', ['hg::Scene &scene', 'const hg::Mat4 &mtx', 'float znear', 'float zfar', '?float size'])
+
+	gen.bind_function_overloads('hg::CreatePointLight', [
+		('hg::Node', ['hg::Scene &scene', 'const hg::Mat4 &mtx', 'float radius', '?const hg::Color &diffuse', '?const hg::Color &specular', '?float priority', '?hg::LightShadowType shadow_type', '?float shadow_bias'], {}),
+		('hg::Node', ['hg::Scene &scene', 'const hg::Mat4 &mtx', 'float radius', 'const hg::Color &diffuse', 'float diffuse_intensity', '?const hg::Color &specular', '?float specular_intensity', '?float priority', '?hg::LightShadowType shadow_type', '?float shadow_bias'], {})
+	])
+	gen.bind_function_overloads('hg::CreateSpotLight', [
+		('hg::Node', ['hg::Scene &scene', 'const hg::Mat4 &mtx', 'float radius', 'float inner_angle', 'float outer_angle', '?const hg::Color &diffuse', '?const hg::Color &specular', '?float priority', '?hg::LightShadowType shadow_type', '?float shadow_bias'], {}),
+		('hg::Node', ['hg::Scene &scene', 'const hg::Mat4 &mtx', 'float radius', 'float inner_angle', 'float outer_angle', 'const hg::Color &diffuse', 'float diffuse_intensity', '?const hg::Color &specular', '?float specular_intensity', '?float priority', '?hg::LightShadowType shadow_type', '?float shadow_bias'], {})
+	])
+	gen.bind_function_overloads('hg::CreateLinearLight', [
+		('hg::Node', ['hg::Scene &scene', 'const hg::Mat4 &mtx', '?const hg::Color &diffuse', '?const hg::Color &specular', '?float priority', '?hg::LightShadowType shadow_type', '?float shadow_bias', 'const hg::Vec4 &pssm_split'], {}),
+		('hg::Node', ['hg::Scene &scene', 'const hg::Mat4 &mtx', 'const hg::Color &diffuse', 'float diffuse_intensity', '?const hg::Color &specular', '?float specular_intensity', '?float priority', '?hg::LightShadowType shadow_type', '?float shadow_bias', 'const hg::Vec4 &pssm_split'], {})
+	])
+
+	protos = [('hg::Node', ['hg::Scene &scene', 'const hg::Mat4 &mtx', 'const hg::ModelRef &model', 'const std::vector<hg::Material> &materials'], [])]
+	gen.bind_function_overloads('hg::CreateObject', expand_std_vector_proto(gen, protos))
+
+	gen.bind_function('hg::CreateInstanceFromFile', 'hg::Node', ['hg::Scene &scene', 'const hg::Mat4 &mtx', 'const std::string &name', 'hg::PipelineResources &resources', 'const hg::PipelineInfo &pipeline', 'bool &success', '?uint32_t flags'], {'constants_group': {'flags': 'LoadSaveSceneFlags'}, 'arg_out': ['success']})
+	gen.bind_function('hg::CreateInstanceFromAssets', 'hg::Node', ['hg::Scene &scene', 'const hg::Mat4 &mtx', 'const std::string &name', 'hg::PipelineResources &resources', 'const hg::PipelineInfo &pipeline', 'bool &success', '?uint32_t flags'], {'constants_group': {'flags': 'LoadSaveSceneFlags'}, 'arg_out': ['success']})
+
+	gen.bind_function('hg::CreateScript', 'hg::Node', ['hg::Scene &scene', '?const std::string &path'])
+
+	protos = [
+		('hg::Node', ['hg::Scene &scene', 'float radius', 'const hg::Mat4 &mtx', 'const hg::ModelRef &model_ref', 'std::vector<hg::Material> &materials'], {}),
+		('hg::Node', ['hg::Scene &scene', 'float radius', 'const hg::Mat4 &mtx', 'const hg::ModelRef &model_ref', 'std::vector<hg::Material> &materials', 'float mass'], {}),
+	]
+	gen.bind_function_overloads('hg::CreatePhysicSphere', expand_std_vector_proto(gen, protos))
+
+	protos = [
+		('hg::Node', ['hg::Scene &scene', 'const hg::Vec3 &size', 'const hg::Mat4 &mtx', 'const hg::ModelRef &model_ref', 'std::vector<hg::Material> &materials'], {}),
+		('hg::Node', ['hg::Scene &scene', 'const hg::Vec3 &size', 'const hg::Mat4 &mtx', 'const hg::ModelRef &model_ref', 'std::vector<hg::Material> &materials', 'float mass'], {}),
+	]
+	gen.bind_function_overloads('hg::CreatePhysicCube', expand_std_vector_proto(gen, protos))
+
+	# load/save scene
+	gen.bind_constants('uint32_t', [
+		("LSSF_Nodes", "hg::LSSF_Nodes"),
+		("LSSF_Scene", "hg::LSSF_Scene"),
+		("LSSF_Anims", "hg::LSSF_Anims"),
+		("LSSF_KeyValues", "hg::LSSF_KeyValues"),
+		("LSSF_Physics", "hg::LSSF_Physics"),
+		("LSSF_Scripts", "hg::LSSF_Scripts"),
+		("LSSF_All", "hg::LSSF_All"),
+		("LSSF_QueueTextureLoads", "hg::LSSF_QueueTextureLoads"),
+		("LSSF_FreezeMatrixToTransformOnSave", "hg::LSSF_FreezeMatrixToTransformOnSave"),
+		("LSSF_QueueModelLoads", "hg::LSSF_QueueModelLoads"),
+		("LSSF_DoNotChangeCurrentCameraIfValid", "hg::LSSF_DoNotChangeCurrentCameraIfValid"),
+	], 'LoadSaveSceneFlags')
+
+	gen.bind_function('hg::SaveSceneJsonToFile', 'bool', ['const char *path', 'const hg::Scene &scene', 'const hg::PipelineResources &resources', '?uint32_t flags'], {'constants_group': {'flags': 'LoadSaveSceneFlags'}})
+	gen.bind_function('hg::SaveSceneBinaryToFile', 'bool', ['const char *path', 'const hg::Scene &scene', 'const hg::PipelineResources &resources', '?uint32_t flags'], {'constants_group': {'flags': 'LoadSaveSceneFlags'}})
+	gen.bind_function('hg::SaveSceneBinaryToData', 'bool', ['hg::Data &data', 'const hg::Scene &scene', 'const hg::PipelineResources &resources', '?uint32_t flags'], {'constants_group': {'flags': 'LoadSaveSceneFlags'}})
+
+	gen.insert_binding_code('''
+static bool _LoadSceneBinaryFromFile(const char *path, hg::Scene &scene, hg::PipelineResources &resources, const hg::PipelineInfo &pipeline, uint32_t flags = LSSF_All) {
+	hg::LoadSceneContext ctx;
+	return hg::LoadSceneBinaryFromFile(path, scene, resources, pipeline, ctx, flags);
+}
+static bool _LoadSceneBinaryFromAssets(const char *name, hg::Scene &scene, hg::PipelineResources &resources, const hg::PipelineInfo &pipeline, uint32_t flags = LSSF_All) {
+	hg::LoadSceneContext ctx;
+	return hg::LoadSceneBinaryFromAssets(name, scene, resources, pipeline, ctx, flags);
+}
+static bool _LoadSceneBinaryFromData(const hg::Data &data, const char *name, hg::Scene &scene, const hg::Reader &deps_ir, const hg::ReadProvider &deps_ip, hg::PipelineResources &resources, const hg::PipelineInfo &pipeline, uint32_t flags = LSSF_All) {
+	hg::LoadSceneContext ctx;
+	return hg::LoadSceneBinaryFromData(data, name, scene, deps_ir, deps_ip, resources, pipeline, ctx, flags);
+}
+
+#include "foundation/data_rw_interface.h"
+#include "foundation/file_rw_interface.h"
+
+#include "engine/assets_rw_interface.h"
+
+static bool _LoadSceneBinaryFromDataAndFile(const hg::Data &data, const char *name, hg::Scene &scene, hg::PipelineResources &resources, const hg::PipelineInfo &pipeline, uint32_t flags = LSSF_All) {
+	return _LoadSceneBinaryFromData(data, name, scene, hg::g_file_reader, hg::g_file_read_provider, resources, pipeline, flags);
+}
+static bool _LoadSceneBinaryFromDataAndAssets(const hg::Data &data, const char *name, hg::Scene &scene, hg::PipelineResources &resources, const hg::PipelineInfo &pipeline, uint32_t flags = LSSF_All) {
+	return _LoadSceneBinaryFromData(data, name, scene, hg::g_assets_reader, hg::g_assets_read_provider, resources, pipeline, flags);
+}
+
+static bool _LoadSceneJsonFromFile(const char *path, hg::Scene &scene, hg::PipelineResources &resources, const hg::PipelineInfo &pipeline, uint32_t flags = LSSF_All) {
+	hg::LoadSceneContext ctx;
+	return hg::LoadSceneJsonFromFile(path, scene, resources, pipeline, ctx, flags);
+}
+static bool _LoadSceneJsonFromAssets(const char *name, hg::Scene &scene, hg::PipelineResources &resources, const hg::PipelineInfo &pipeline, uint32_t flags = LSSF_All) {
+	hg::LoadSceneContext ctx;
+	return hg::LoadSceneJsonFromAssets(name, scene, resources, pipeline, ctx, flags);
+}
+static bool _LoadSceneJsonFromData(const hg::Data &data, const char *name, hg::Scene &scene, const hg::Reader &deps_ir, const hg::ReadProvider &deps_ip, hg::PipelineResources &resources, const hg::PipelineInfo &pipeline, uint32_t flags = LSSF_All) {
+	hg::LoadSceneContext ctx;
+	return hg::LoadSceneJsonFromData(data, name, scene, deps_ir, deps_ip, resources, pipeline, ctx, flags);
+}
+
+static bool _LoadSceneFromFile(const char *path, hg::Scene &scene, hg::PipelineResources &resources, const hg::PipelineInfo &pipeline, uint32_t flags = LSSF_All) {
+	hg::LoadSceneContext ctx;
+	return hg::LoadSceneFromFile(path, scene, resources, pipeline, ctx, flags);
+}
+static bool _LoadSceneFromAssets(const char *name, hg::Scene &scene, hg::PipelineResources &resources, const hg::PipelineInfo &pipeline, uint32_t flags = LSSF_All) {
+	hg::LoadSceneContext ctx;
+	return hg::LoadSceneFromAssets(name, scene, resources, pipeline, ctx, flags);
+}
+''')
+
+	gen.bind_function('_LoadSceneBinaryFromFile', 'bool', ['const char *path', 'hg::Scene &scene', 'hg::PipelineResources &resources', 'const hg::PipelineInfo &pipeline', '?uint32_t flags'], {'constants_group': {'flags': 'LoadSaveSceneFlags'}}, bound_name = 'LoadSceneBinaryFromFile')
+	gen.bind_function('_LoadSceneBinaryFromAssets', 'bool', ['const char *name', 'hg::Scene &scene', 'hg::PipelineResources &resources', 'const hg::PipelineInfo &pipeline', '?uint32_t flags'], {'constants_group': {'flags': 'LoadSaveSceneFlags'}}, bound_name = 'LoadSceneBinaryFromAssets')
+	gen.bind_function('_LoadSceneJsonFromFile', 'bool', ['const char *path', 'hg::Scene &scene', 'hg::PipelineResources &resources', 'const hg::PipelineInfo &pipeline', '?uint32_t flags'], {'constants_group': {'flags': 'LoadSaveSceneFlags'}}, bound_name = 'LoadSceneJsonFromFile')
+	gen.bind_function('_LoadSceneJsonFromAssets', 'bool', ['const char *name', 'hg::Scene &scene', 'hg::PipelineResources &resources', 'const hg::PipelineInfo &pipeline', '?uint32_t flags'], {'constants_group': {'flags': 'LoadSaveSceneFlags'}}, bound_name = 'LoadSceneJsonFromAssets')
+
+	gen.bind_function('_LoadSceneBinaryFromDataAndFile', 'bool', ['const hg::Data &data', 'const char *name', 'hg::Scene &scene', 'hg::PipelineResources &resources', 'const hg::PipelineInfo &pipeline', '?uint32_t flags'], {'constants_group': {'flags': 'LoadSaveSceneFlags'}}, bound_name = 'LoadSceneBinaryFromDataAndFile')
+	gen.bind_function('_LoadSceneBinaryFromDataAndAssets', 'bool', ['const hg::Data &data', 'const char *name', 'hg::Scene &scene', 'hg::PipelineResources &resources', 'const hg::PipelineInfo &pipeline', '?uint32_t flags'], {'constants_group': {'flags': 'LoadSaveSceneFlags'}}, bound_name = 'LoadSceneBinaryFromDataAndAssets')
+
+	gen.bind_function('_LoadSceneFromFile', 'bool', ['const char *path', 'hg::Scene &scene', 'hg::PipelineResources &resources', 'const hg::PipelineInfo &pipeline', '?uint32_t flags'], {'constants_group': {'flags': 'LoadSaveSceneFlags'}}, bound_name = 'LoadSceneFromFile')
+	gen.bind_function('_LoadSceneFromAssets', 'bool', ['const char *name', 'hg::Scene &scene', 'hg::PipelineResources &resources', 'const hg::PipelineInfo &pipeline', '?uint32_t flags'], {'constants_group': {'flags': 'LoadSaveSceneFlags'}}, bound_name = 'LoadSceneFromAssets')
+
+	# duplicate
+	gen.bind_function('hg::DuplicateNodesFromFile', 'std::vector<hg::Node>', ['hg::Scene &scene', 'const std::vector<hg::Node> &nodes', 'hg::PipelineResources &resources', 'const hg::PipelineInfo &pipeline'])
+	gen.bind_function('hg::DuplicateNodesFromAssets', 'std::vector<hg::Node>', ['hg::Scene &scene', 'const std::vector<hg::Node> &nodes', 'hg::PipelineResources &resources', 'const hg::PipelineInfo &pipeline'])
+	gen.bind_function('hg::DuplicateNodesAndChildrenFromFile', 'std::vector<hg::Node>', ['hg::Scene &scene', 'const std::vector<hg::Node> &nodes', 'hg::PipelineResources &resources', 'const hg::PipelineInfo &pipeline'])
+	gen.bind_function('hg::DuplicateNodesAndChildrenFromAssets', 'std::vector<hg::Node>', ['hg::Scene &scene', 'const std::vector<hg::Node> &nodes', 'hg::PipelineResources &resources', 'const hg::PipelineInfo &pipeline'])
+
+	gen.bind_function('hg::DuplicateNodeFromFile', 'hg::Node', ['hg::Scene &scene', 'hg::Node node', 'hg::PipelineResources &resources', 'const hg::PipelineInfo &pipeline'])
+	gen.bind_function('hg::DuplicateNodeFromAssets', 'hg::Node', ['hg::Scene &scene', 'hg::Node node', 'hg::PipelineResources &resources', 'const hg::PipelineInfo &pipeline'])
+	gen.bind_function('hg::DuplicateNodeAndChildrenFromFile', 'std::vector<hg::Node>', ['hg::Scene &scene', 'hg::Node node', 'hg::PipelineResources &resources', 'const hg::PipelineInfo &pipeline'])
+	gen.bind_function('hg::DuplicateNodeAndChildrenFromAssets', 'std::vector<hg::Node>', ['hg::Scene &scene', 'hg::Node node', 'hg::PipelineResources &resources', 'const hg::PipelineInfo &pipeline'])
+
+	# scene forward pipeline
+	gen.add_include('engine/scene_forward_pipeline.h')
+
+	gen.bind_function('GetSceneForwardPipelineFog', 'hg::ForwardPipelineFog', ['const hg::Scene &scene'])
+
+	gen.insert_binding_code('''\
+static std::vector<hg::ForwardPipelineLight> _GetSceneForwardPipelineLights(const hg::Scene &scene) {
+	std::vector<hg::ForwardPipelineLight> lights;
+	hg::GetSceneForwardPipelineLights(scene, lights);
+	return lights;
+}
+''')
+
+	gen.bind_function('GetSceneForwardPipelineLights', 'std::vector<hg::ForwardPipelineLight>', ['const hg::Scene &scene'], {'route': route_lambda('_GetSceneForwardPipelineLights')})
+
+	#
+
+	# SceneForwardPipelinePass
+	gen.bind_named_enum('hg::SceneForwardPipelinePass', ['SFPP_Opaque', 'SFPP_Transparent', 'SFPP_Slot0LinearSplit0', 'SFPP_Slot0LinearSplit1', 'SFPP_Slot0LinearSplit2', 'SFPP_Slot0LinearSplit3', 'SFPP_Slot1Spot', 'SFPP_DepthPrepass'])
+
+	sfppo = gen.begin_class('hg::SceneForwardPipelinePassViewId')
+	gen.bind_constructor(sfppo, [])
+	gen.end_class(sfppo)
+
+	gen.bind_function('hg::GetSceneForwardPipelinePassViewId', 'bgfx::ViewId', ['const hg::SceneForwardPipelinePassViewId &views', 'hg::SceneForwardPipelinePass pass'])
+
+	#
+	render_data = gen.begin_class('hg::SceneForwardPipelineRenderData')
+	gen.bind_constructor(render_data, [])
+	gen.end_class(render_data)
+
+	gen.bind_function('hg::PrepareSceneForwardPipelineCommonRenderData', 'void', ['bgfx::ViewId &view_id', 'const hg::Scene &scene', 'hg::SceneForwardPipelineRenderData &render_data',
+	'const hg::ForwardPipeline &pipeline', 'const hg::PipelineResources &resources', 'hg::SceneForwardPipelinePassViewId &views', '?const char *debug_name'], {'arg_in_out': ['view_id','views']})
+
+	gen.bind_function('hg::PrepareSceneForwardPipelineViewDependentRenderData', 'void', ['bgfx::ViewId &view_id', 'const hg::ViewState &view_state', 'const hg::Scene &scene', 'hg::SceneForwardPipelineRenderData &render_data',
+	'const hg::ForwardPipeline &pipeline', 'const hg::PipelineResources &resources', 'hg::SceneForwardPipelinePassViewId &views', '?const char *debug_name'], {'arg_in_out': ['view_id','views']})
+
+	gen.bind_function('hg::SubmitSceneToForwardPipeline', 'void', ['bgfx::ViewId &view_id', 'const hg::Scene &scene', 'const hg::Rect<int> &rect', 'const hg::ViewState &view_state',
+	'const hg::ForwardPipeline &pipeline', 'const hg::SceneForwardPipelineRenderData &render_data', 'const hg::PipelineResources &resources', 'const hg::SceneForwardPipelinePassViewId &views', '?bgfx::FrameBufferHandle frame_buffer',
+	'?const char *debug_name'], {'arg_in_out': ['view_id'], 'arg_out': ['views']})
+
+	gen.bind_function('hg::SubmitSceneToPipeline', 'void', ['bgfx::ViewId &view_id', 'const hg::Scene &scene', 'const hg::Rect<int> &rect', 'const hg::ViewState &view_state', 'const hg::ForwardPipeline &pipeline',
+	'const hg::PipelineResources &resources', 'const hg::SceneForwardPipelinePassViewId &views', '?bgfx::FrameBufferHandle fb', '?const char *debug_name'], {'arg_in_out': ['view_id'], 'arg_out': ['views']})
+
+	gen.bind_function('hg::SubmitSceneToPipeline', 'void', ['bgfx::ViewId &view_id', 'const hg::Scene &scene', 'const hg::Rect<int> &rect', 'bool fov_axis_is_horizontal', 'const hg::ForwardPipeline &pipeline',
+	'const hg::PipelineResources &resources', 'const hg::SceneForwardPipelinePassViewId &views', '?bgfx::FrameBufferHandle fb', '?const char *debug_name'], {'arg_in_out': ['view_id'], 'arg_out': ['views']})
+
+	# reverse bind
+	gen.rbind_function('OnCollision', 'void', ['const hg::Node &a', 'const hg::Node &b', 'const std::vector<hg::Contact> &contacts'])
+
+	gen.rbind_function('OnUpdate_NodeCtx', 'void', ['hg::Node &node', 'hg::time_ns dt'])
+	gen.rbind_function('OnAttachToNode', 'void', ['hg::Node &node'])
+	gen.rbind_function('OnDetachFromNode', 'void', ['hg::Node &node'])
+
+	gen.rbind_function('OnUpdate_SceneCtx', 'void', ['hg::Scene &scene', 'hg::time_ns dt'])
+	gen.rbind_function('OnAttachToScene', 'void', ['hg::Scene &scene'])
+	gen.rbind_function('OnDetachFromScene', 'void', ['hg::Scene &scene'])
+
+	gen.rbind_function('OnDestroy', 'void', [])
+
+	gen.insert_code('#include "engine/scene_forward_pipeline.h"\n')
+
+	gen.rbind_function('OnSubmitSceneToForwardPipeline', 'void', ['bgfx::ViewId view_id', 'const hg::Scene &scene', 'const hg::Rect<int> &rect', 'const hg::ViewState &view_state', 'const hg::ForwardPipeline &pipeline', 'const hg::PipelineResources &resources', 'bgfx::FrameBufferHandle fb'])
+
+	# ForwardPipelineAAA
+	gen.bind_named_enum('hg::ForwardPipelineAAADebugBuffer', ['FPAAADB_None', 'FPAAADB_SSGI', 'FPAAADB_SSR'])
+		
+	forward_pipeline_aaa_config = gen.begin_class('hg::ForwardPipelineAAAConfig')
+	gen.bind_constructor(forward_pipeline_aaa_config, [])
+	gen.bind_members(forward_pipeline_aaa_config, [
+		'float temporal_aa_weight',
+		'int sample_count', 'float max_distance', 'float z_thickness',
+		'float bloom_threshold', 'float bloom_bias', 'float bloom_intensity',
+		'float motion_blur',
+		'float exposure', 'float gamma'
+	])
+	gen.end_class(forward_pipeline_aaa_config)
+
+	gen.bind_function('hg::LoadForwardPipelineAAAConfigFromFile', 'bool', ['const char *path', 'hg::ForwardPipelineAAAConfig &config'])
+	gen.bind_function('hg::LoadForwardPipelineAAAConfigFromAssets', 'bool', ['const char *path', 'hg::ForwardPipelineAAAConfig &config'])
+	gen.bind_function('hg::SaveForwardPipelineAAAConfigToFile', 'bool', ['const char *path', 'const hg::ForwardPipelineAAAConfig &config'])
+
+	forward_pipeline_aaa = gen.begin_class('hg::ForwardPipelineAAA')
+	gen.bind_method(forward_pipeline_aaa, 'Flip', 'void', ['const hg::ViewState &view_state'])
+	gen.end_class(forward_pipeline_aaa)
+
+	gen.bind_function('hg::CreateForwardPipelineAAAFromFile', 'hg::ForwardPipelineAAA', ['const char *path', 'const hg::ForwardPipelineAAAConfig &config', '?bgfx::BackbufferRatio::Enum ssgi_ratio', '?bgfx::BackbufferRatio::Enum ssr_ratio'])
+	gen.bind_function('hg::CreateForwardPipelineAAAFromAssets', 'hg::ForwardPipelineAAA', ['const char *path', 'const hg::ForwardPipelineAAAConfig &config', '?bgfx::BackbufferRatio::Enum ssgi_ratio', '?bgfx::BackbufferRatio::Enum ssr_ratio'])
+	gen.bind_function('hg::DestroyForwardPipelineAAA', 'void', ['hg::ForwardPipelineAAA &pipeline'])
+	gen.bind_function('hg::IsValid', 'bool', ['const hg::ForwardPipelineAAA &pipeline'])
+
+	gen.bind_function('hg::SubmitSceneToForwardPipeline', 'void', ['bgfx::ViewId &view_id', 'const hg::Scene &scene', 'const hg::Rect<int> &rect', 'const hg::ViewState &view_state',
+	'const hg::ForwardPipeline &pipeline', 'const hg::SceneForwardPipelineRenderData &render_data', 'const hg::PipelineResources &resources', 'const hg::SceneForwardPipelinePassViewId &views', 
+	'const hg::ForwardPipelineAAA &aaa', 'const hg::ForwardPipelineAAAConfig &aaa_config', 'int frame', '?bgfx::FrameBufferHandle frame_buffer', '?const char *debug_name'], {'arg_in_out': ['view_id']})
+
+	#
+	gen.bind_function('hg::SubmitSceneToPipeline', 'void', ['bgfx::ViewId &view_id', 'const hg::Scene &scene', 'const hg::Rect<int> &rect', 'const hg::ViewState &view_state',
+	'const hg::ForwardPipeline &pipeline', 'const hg::PipelineResources &resources', 'const hg::SceneForwardPipelinePassViewId &views', 
+	'hg::ForwardPipelineAAA &aaa', 'const hg::ForwardPipelineAAAConfig &aaa_config', 'int frame', '?bgfx::FrameBufferHandle frame_buffer', '?const char *debug_name'], {'arg_in_out': ['view_id'], 'arg_out': ['views']})
+
+	gen.bind_function('hg::SubmitSceneToPipeline', 'void', ['bgfx::ViewId &view_id', 'const hg::Scene &scene', 'const hg::Rect<int> &rect', 'bool fov_axis_is_horizontal',
+	'const hg::ForwardPipeline &pipeline', 'const hg::PipelineResources &resources', 'const hg::SceneForwardPipelinePassViewId &views', 
+	'hg::ForwardPipelineAAA &aaa', 'const hg::ForwardPipelineAAAConfig &aaa_config', 'int frame', '?bgfx::FrameBufferHandle frame_buffer', '?const char *debug_name'], {'arg_in_out': ['view_id'], 'arg_out': ['views']})
+
+	#
+	gen.add_include('engine/debugger.h')
+	gen.bind_function('hg::DebugSceneExplorer', 'void', ['hg::Scene &scene', 'const char *name'])
+
+
+def bind_bullet3_physics(gen):
+	gen.add_include('engine/scene_bullet3_physics.h')
+
+	node_node_contacts = gen.begin_class('hg::NodePairContacts')
+	gen.end_class(node_node_contacts)
+
+	constraint_6_dof = gen.begin_class('btGeneric6DofConstraint', noncopyable=True)
+	gen.end_class(constraint_6_dof)
+
+	bullet = gen.begin_class('hg::SceneBullet3Physics', noncopyable=True)
+
+	gen.bind_constructor(bullet, ['?int thread_count'])
+
+	gen.bind_method(bullet, 'SceneCreatePhysicsFromFile', 'void', ['const hg::Scene &scene'])
+	gen.bind_method(bullet, 'SceneCreatePhysicsFromAssets', 'void', ['const hg::Scene &scene'])
+
+	gen.bind_method(bullet, 'NodeCreatePhysicsFromFile', 'void', ['const hg::Node &node'])
+	gen.bind_method(bullet, 'NodeCreatePhysicsFromAssets', 'void', ['const hg::Node &node'])
+
+	gen.bind_method(bullet, 'NodeStartTrackingCollisionEvents', 'void', ['const hg::Node &node', '?hg::CollisionEventTrackingMode mode'])
+	gen.bind_method(bullet, 'NodeStopTrackingCollisionEvents', 'void', ['const hg::Node &node'])
+
+	gen.bind_method(bullet, 'NodeDestroyPhysics', 'void', ['const hg::Node &node'])
+
+	gen.bind_method(bullet, 'NodeHasBody', 'bool', ['const hg::Node &node'])
+
+	gen.bind_method(bullet, 'StepSimulation', 'void', ['hg::time_ns display_dt', '?hg::time_ns step_dt', '?int max_step'])
+
+	gen.bind_method(bullet, 'CollectCollisionEvents', 'void', ['const hg::Scene &scene', 'hg::NodePairContacts &node_pair_contacts'], {'arg_out': ['node_pair_contacts']})
+
+	gen.bind_method(bullet, 'SyncTransformsFromScene', 'void', ['const hg::Scene &scene'])
+	gen.bind_method(bullet, 'SyncTransformsToScene', 'void', ['hg::Scene &scene'])
+
+	gen.bind_method(bullet, 'GarbageCollect', 'size_t', ['const hg::Scene &scene'])
+	gen.bind_method(bullet, 'GarbageCollectResources', 'size_t', [])
+
+	gen.bind_method(bullet, 'ClearNodes', 'void', [])
+	gen.bind_method(bullet, 'Clear', 'void', [])
+
+	#
+	gen.bind_method(bullet, 'NodeWake', 'void', ['const hg::Node &node'])
+
+	gen.bind_method(bullet, 'NodeSetDeactivation', 'void', ['const hg::Node &node', 'bool enable'])
+	gen.bind_method(bullet, 'NodeGetDeactivation', 'bool', ['const hg::Node &node'])
+
+	gen.bind_method(bullet, 'NodeResetWorld', 'void', ['const hg::Node &node', 'const hg::Mat4 &world'])
+	gen.bind_method(bullet, 'NodeTeleport', 'void', ['const hg::Node &node', 'const hg::Mat4 &world'])
+
+	gen.bind_method(bullet, 'NodeAddForce', 'void', ['const hg::Node &node', 'const hg::Vec3 &F', '?const hg::Vec3 &world_pos'])
+	gen.bind_method(bullet, 'NodeAddImpulse', 'void', ['const hg::Node &node', 'const hg::Vec3 &dt_velocity', '?const hg::Vec3 &world_pos'])
+	gen.bind_method(bullet, 'NodeAddTorque', 'void', ['const hg::Node &node', 'const hg::Vec3 &T'])
+	gen.bind_method(bullet, 'NodeAddTorqueImpulse', 'void', ['const hg::Node &node', 'const hg::Vec3 &dt_angular_velocity'])
+	gen.bind_method(bullet, 'NodeGetPointVelocity', 'hg::Vec3', ['const hg::Node &node', 'const hg::Vec3 &world_pos'])
+
+	gen.bind_method(bullet, 'NodeGetLinearVelocity', 'hg::Vec3', ['const hg::Node &node'])
+	gen.bind_method(bullet, 'NodeSetLinearVelocity', 'void', ['const hg::Node &node', 'const hg::Vec3 &V'])
+	gen.bind_method(bullet, 'NodeGetAngularVelocity', 'hg::Vec3', ['const hg::Node &node'])
+	gen.bind_method(bullet, 'NodeSetAngularVelocity', 'void', ['const hg::Node &node', 'const hg::Vec3 &W'])
+
+	gen.bind_method(bullet, 'NodeGetLinearFactor', 'hg::Vec3', ['const hg::Node &node'])
+	gen.bind_method(bullet, 'NodeSetLinearFactor', 'void', ['const hg::Node &node', 'const hg::Vec3 &k'])
+	gen.bind_method(bullet, 'NodeGetAngularFactor', 'hg::Vec3', ['const hg::Node &node'])
+	gen.bind_method(bullet, 'NodeSetAngularFactor', 'void', ['const hg::Node &node', 'const hg::Vec3 &k'])
+
+	gen.bind_method(bullet, 'Add6DofConstraint', 'btGeneric6DofConstraint*', ['const hg::Node &nodeA', 'const hg::Node &nodeB', 'const hg::Mat4 &anchorALocal', 'const hg::Mat4 &anchorBInLocalSpaceA'])
+	gen.bind_method(bullet, 'Remove6DofConstraint', 'void', ['btGeneric6DofConstraint* constraint6Dof'])
+	
+	#
+	gen.bind_method(bullet, 'NodeCollideWorld', 'hg::NodePairContacts', ['const hg::Node &node', 'const hg::Mat4 &world', '?int max_contact'])
+
+	gen.bind_function('GetNodesInContact', 'std::vector<hg::Node>', ['const hg::Scene &scene', 'const hg::Node with', 'const hg::NodePairContacts &node_pair_contacts'])
+	gen.bind_function('GetNodePairContacts', 'std::vector<hg::Contact>', ['const hg::Node &first', 'const hg::Node &second', 'const hg::NodePairContacts &node_pair_contacts'])
+
+	#
+	gen.bind_method(bullet, 'RaycastFirstHit', 'hg::RaycastOut', ['const hg::Scene &scene', 'const hg::Vec3 &p0', 'const hg::Vec3 &p1'])
+	gen.bind_method(bullet, 'RaycastAllHits', 'std::vector<hg::RaycastOut>', ['const hg::Scene &scene', 'const hg::Vec3 &p0', 'const hg::Vec3 &p1'])
+
+	#
+	gen.bind_method(bullet, 'RenderCollision', 'void', ['bgfx::ViewId view_id', 'const bgfx::VertexLayout &vtx_layout', 'bgfx::ProgramHandle prg', 'hg::RenderState render_state', 'uint32_t depth'])
+
+	#
+	lib.stl.bind_function_T(gen, 'std::function<void(hg::SceneBullet3Physics&, hg::time_ns)>', 'SceneBullet3PhysicsPreTickCallback')
+	gen.bind_method(bullet, 'SetPreTickCallback', 'void', ['const std::function<void(hg::SceneBullet3Physics&, hg::time_ns)>& cbk'])
+	
+	gen.end_class(bullet)
+
+
+def bind_lua_scene_vm(gen):
+	gen.add_include('engine/scene_lua_vm.h')
+
+	vm = gen.begin_class('hg::SceneLuaVM')
+	gen.bind_constructor(vm, [])
+
+	gen.bind_method(vm, 'CreateScriptFromSource', 'bool', ['hg::Scene &scene', 'const hg::Script &script', 'const std::string &src'])
+
+	gen.bind_method(vm, 'CreateScriptFromFile', 'bool', ['hg::Scene &scene', 'const hg::Script &script'])
+	gen.bind_method(vm, 'CreateScriptFromAssets', 'bool', ['hg::Scene &scene', 'const hg::Script &script'])
+
+	gen.bind_method(vm, 'CreateNodeScriptsFromFile', 'std::vector<hg::Script>', ['hg::Scene &scene', 'const hg::Node &node'])
+	gen.bind_method(vm, 'CreateNodeScriptsFromAssets', 'std::vector<hg::Script>', ['hg::Scene &scene', 'const hg::Node &node'])
+
+	gen.insert_binding_code('''
+static std::vector<hg::Script> __LuaVM_SceneCreateScriptsFromFile(hg::SceneLuaVM *vm, hg::Scene &scene) {
+	const auto refs = vm->SceneCreateScriptsFromFile(scene);
+
+	std::vector<hg::Script> scripts;
+	scripts.reserve(refs.size());
+
+	for (auto ref : refs)
+		scripts.push_back(scene.GetScript(ref));
+
+	return scripts;
+}
+
+static std::vector<hg::Script> __LuaVM_SceneCreateScriptsFromAssets(hg::SceneLuaVM *vm, hg::Scene &scene) {
+	const auto refs = vm->SceneCreateScriptsFromAssets(scene);
+
+	std::vector<hg::Script> scripts;
+	scripts.reserve(refs.size());
+
+	for (auto ref : refs)
+		scripts.push_back(scene.GetScript(ref));
+
+	return scripts;
+}
+
+static std::vector<hg::Script> __LuaVM_GarbageCollect(hg::SceneLuaVM *vm, const hg::Scene &scene) {
+	const auto refs = vm->GarbageCollect(scene);
+
+	std::vector<hg::Script> scripts;
+	scripts.reserve(refs.size());
+
+	for (auto ref : refs)
+		scripts.push_back(scene.GetScript(ref));
+
+	return scripts;
+}
+
+static void __LuaVM_DestroyScripts(hg::SceneLuaVM *vm, const std::vector<hg::Script> &scripts) {
+	std::vector<hg::ComponentRef> refs;
+	refs.reserve(scripts.size());
+
+	for (auto &script : scripts)
+		refs.push_back(script.ref);
+
+	vm->DestroyScripts(refs);
+}
+''')
+
+	gen.bind_method(vm, 'SceneCreateScriptsFromFile', 'std::vector<hg::Script>', ['hg::Scene &scene'], {'route': route_lambda('__LuaVM_SceneCreateScriptsFromFile')})
+	gen.bind_method(vm, 'SceneCreateScriptsFromAssets', 'std::vector<hg::Script>', ['hg::Scene &scene'], {'route': route_lambda('__LuaVM_SceneCreateScriptsFromAssets')})
+	gen.bind_method(vm, 'GarbageCollect', 'std::vector<hg::Script>', ['const hg::Scene &scene'], {'route': route_lambda('__LuaVM_GarbageCollect')})
+	gen.bind_method(vm, 'DestroyScripts', 'void', ['const std::vector<hg::Script> &scripts'], {'route': route_lambda('__LuaVM_DestroyScripts')})
+
+	gen.bind_method(vm, 'GetScriptInterface', 'std::vector<std::string>', ['const hg::Script &script'])
+	gen.bind_method(vm, 'GetScriptCount', 'size_t', [])
+
+	gen.insert_binding_code('''
+static hg::LuaObject __LuaVM_GetScriptEnv(hg::SceneLuaVM *vm, const hg::Script &script) { return vm->GetScriptEnv(script.ref); }
+
+static hg::LuaObject __LuaVM_GetScriptValue(hg::SceneLuaVM *vm, const hg::Script &script, const std::string &name) { return vm->GetScriptValue(script.ref, name); }
+static bool __LuaVM_SetScriptValue(hg::SceneLuaVM *vm, const hg::Script &script, const std::string &name, const hg::LuaObject &value, bool notify = true) { return vm->SetScriptValue(script.ref, name, value, notify); }
+''')
+
+	gen.bind_method(vm, 'GetScriptEnv', 'hg::LuaObject', ['const hg::Script &script'], {'route': route_lambda('__LuaVM_GetScriptEnv')})
+
+	gen.bind_method(vm, 'GetScriptValue', 'hg::LuaObject', ['const hg::Script &script', 'const std::string &name'], {'route': route_lambda('__LuaVM_GetScriptValue')})
+	gen.bind_method(vm, 'SetScriptValue', 'bool', ['const hg::Script &script', 'const std::string &name', 'const hg::LuaObject &value', '?bool notify'], {'route': route_lambda('__LuaVM_SetScriptValue')})
+
+	gen.bind_method_overloads(vm, 'Call', expand_std_vector_proto(gen, [
+		('bool', ['const hg::Script &script', 'const std::string &function', 'const std::vector<hg::LuaObject> &args', 'std::vector<hg::LuaObject> *ret_vals'], {'arg_out': ['ret_vals']})
 	]))
 
-	for n in range(1,5) : bind_set_shader_var('Int', 'int', n) 
-	for n in range(1,5) : bind_set_shader_var('Unsigned', 'uint32_t', n) 
-	for n in range(1,5) : bind_set_shader_var('Float', 'float', n) 
+	gen.bind_method(vm, 'MakeLuaObject', 'hg::LuaObject', [])
 
-	gen.insert_binding_code('''\
-static void _renderer_SetShaderMatrix3(hg::Renderer *renderer, const hg::GpuShaderVariable &var, const hg::Matrix3 &m) { renderer->SetShaderMatrix3(var, &m); }
-static void _renderer_SetShaderMatrix4(hg::Renderer *renderer, const hg::GpuShaderVariable &var, const hg::Matrix4 &m) { renderer->SetShaderMatrix4(var, &m); }
-static void _renderer_SetShaderMatrix44(hg::Renderer *renderer, const hg::GpuShaderVariable &var, const hg::Matrix44 &m) { renderer->SetShaderMatrix44(var, &m); }
+	#
+	if gen.get_language() == 'CPython':
+		gen.insert_binding_code('''
+extern "C" {
+#include "lua.h"
+}
 
-static void _renderer_SetShaderTexture(hg::Renderer *renderer, const hg::GpuShaderVariable &var, const hg::Texture &t) { renderer->SetShaderTexture(var, t); }
+// from bind_Lua.h
+struct hg_lua_type_info {
+	uint32_t type_tag;
+	const char *c_type;
+	const char *bound_name;
 
-static void _renderer_SetShaderMatrix3_name(hg::Renderer *renderer, const std::string &name, const hg::Matrix3 &m) { renderer->SetShaderMatrix3(renderer->GetShaderVariable(name), &m); }
-static void _renderer_SetShaderMatrix4_name(hg::Renderer *renderer, const std::string &name, const hg::Matrix4 &m) { renderer->SetShaderMatrix4(renderer->GetShaderVariable(name), &m); }
-static void _renderer_SetShaderMatrix44_name(hg::Renderer *renderer, const std::string &name, const hg::Matrix44 &m) { renderer->SetShaderMatrix44(renderer->GetShaderVariable(name), &m); }
+	bool (*check)(lua_State *L, int index);
+	void (*to_c)(lua_State *L, int index, void *out);
+	int (*from_c)(lua_State *L, void *obj, OwnershipPolicy policy);
+};
 
-static void _renderer_SetShaderTexture_name(hg::Renderer *renderer, const std::string &name, const hg::Texture &t) { renderer->SetShaderTexture(renderer->GetShaderVariable(name), t); }
+// return a type info from its type tag
+hg_lua_type_info *hg_lua_get_bound_type_info(uint32_t type_tag);
+// return a type info from its type name
+hg_lua_type_info *hg_lua_get_c_type_info(const char *type);
+// returns the typetag of a userdata object on the stack, nullptr if not a Fabgen object
+uint32_t hg_lua_get_wrapped_object_type_tag(lua_State *L, int idx);
+
+static hg::LuaObject __PyObjectToLuaObject(hg::SceneLuaVM *vm, PyObject *o) {
+	lua_State *L = vm->GetL();
+
+	if (PyLong_CheckExact(o)) {
+		lua_pushinteger(L, PyLong_AsLong(o));
+	} else if (PyFloat_CheckExact(o)) {
+		lua_pushnumber(L, PyLong_AsDouble(o));
+	} else if (o == Py_False) {
+		lua_pushboolean(L, false);
+	} else if (o == Py_True) {
+		lua_pushboolean(L, true);
+	} else if (PyUnicode_Check(o)) {
+		PyObject *utf8_pyobj = PyUnicode_AsUTF8String(o);
+		const std::string v = PyBytes_AsString(utf8_pyobj);
+		Py_DECREF(utf8_pyobj);
+		lua_pushstring(L, v.data());
+	} else if (auto w = cast_to_wrapped_Object_safe(o)) {
+		const auto py_info = gen_get_bound_type_info(w->type_tag);
+		const auto lua_info = hg_lua_get_bound_type_info(w->type_tag);
+
+		if (py_info && lua_info) {
+			void *obj;
+			py_info->to_c(o, &obj);
+			__ASSERT__(obj != nullptr);
+			lua_info->from_c(L, obj, Copy);
+		} else {
+			lua_pushnil(L);
+			PyErr_SetString(PyExc_TypeError, "Cannot transfer this object type from CPython to Lua");
+		}
+	} else {
+		lua_pushnil(L);
+		PyErr_SetString(PyExc_TypeError, "Cannot transfer this object type from CPython to Lua");
+	}
+
+	return hg::Pop(L);
+}
+
+static PyObject *__LuaObjectToPyObject(hg::SceneLuaVM *vm, const hg::LuaObject &lua_obj) {
+	auto L = lua_obj.L();
+
+	lua_obj.Push();
+
+	if (lua_isinteger(L, -1)) {
+		const auto v = lua_tointeger(L, -1);
+		lua_pop(L, 1);
+		return PyLong_FromLongLong(v);
+	}
+
+	if (lua_isnumber(L, -1)) {
+		const auto v = lua_tonumber(L, -1);
+		lua_pop(L, 1);
+		return PyFloat_FromDouble(v);
+	}
+
+	if (lua_isboolean(L, -1)) {
+		const auto v = lua_toboolean(L, -1);
+		lua_pop(L, 1);
+		if (v == 1)
+			Py_RETURN_TRUE;
+		Py_RETURN_FALSE;
+	}
+
+	if (lua_isstring(L, -1)) {
+		const std::string v = lua_tostring(L, -1);
+		lua_pop(L, 1);
+		return PyUnicode_DecodeUTF8(v.c_str(), v.size(), nullptr);
+	}
+
+	if (auto type_tag = hg_lua_get_wrapped_object_type_tag(L, -1)) {
+		const auto py_info = gen_get_bound_type_info(type_tag);
+		const auto lua_info = hg_lua_get_bound_type_info(type_tag);
+
+		if (py_info && lua_info) {
+			void *obj;
+			lua_info->to_c(L, -1, &obj);
+			__ASSERT__(obj != nullptr);
+			return py_info->from_c(obj, Copy);
+		} else {
+			PyErr_SetString(PyExc_TypeError, "Cannot transfer this object type from Lua to CPython");
+		}
+	}
+
+	Py_RETURN_NONE;
+}
 ''')
 
-	gen.bind_method_overloads(shared_renderer, 'SetShaderMatrix3', [
-		('void', ['const hg::GpuShaderVariable &var', 'const hg::Matrix3 &m'], {'proxy': None, 'route': route_lambda('_renderer_SetShaderMatrix3')}),
-		('void', ['const std::string &name', 'const hg::Matrix3 &m'], {'proxy': None, 'route': route_lambda('_renderer_SetShaderMatrix3_name')})
-	])
-	gen.bind_method_overloads(shared_renderer, 'SetShaderMatrix4', [
-		('void', ['const hg::GpuShaderVariable &var', 'const hg::Matrix4 &m'], {'proxy': None, 'route': route_lambda('_renderer_SetShaderMatrix4')}),
-		('void', ['const std::string &name', 'const hg::Matrix4 &m'], {'proxy': None, 'route': route_lambda('_renderer_SetShaderMatrix4_name')})
-	])
-	gen.bind_method_overloads(shared_renderer, 'SetShaderMatrix44', [
-		('void', ['const hg::GpuShaderVariable &var', 'const hg::Matrix44 &m'], {'proxy': None, 'route': route_lambda('_renderer_SetShaderMatrix44')}),
-		('void', ['const std::string &name', 'const hg::Matrix44 &m'], {'proxy': None, 'route': route_lambda('_renderer_SetShaderMatrix44_name')})
-
-	])
-	gen.bind_method_overloads(shared_renderer, 'SetShaderTexture', [
-		('void', ['const hg::GpuShaderVariable &var', 'const hg::Texture &texture'], {'proxy': None, 'route': route_lambda('_renderer_SetShaderTexture')}),
-		('void', ['const std::string &name', 'const hg::Texture &texture'], {'proxy': None, 'route': route_lambda('_renderer_SetShaderTexture_name')})
-	])
-
-	"""
-	gen.bind_method(shared_renderer, 'SetShaderSystemBuiltins', 'void', ['float clock', 'const hg::tVector2<int> &internal_resolution', 'uint32_t fx_scale', 'const hg::Color &ambient_color', 'bool is_forward', 'bool fog_enabled', 'const hg::Color &fog_color', 'float fog_near', 'float fog_far', 'hg::Texture &depth_map'])
-	gen.bind_method(shared_renderer, 'SetShaderCameraBuiltins', 'void', ['const hg::Matrix4 &view_world', 'float z_near', 'float z_far', 'float zoom_factor', 'float eye'])
-	gen.bind_method(shared_renderer, 'SetShaderTransformationBuiltins', 'void', ['const hg::Matrix44 &view_pm', 'const hg::Matrix4 &view_m', 'const hg::Matrix4 &view_im', 'const hg::Matrix4 *node_m', 'const hg::Matrix4 *node_im', 'const hg::Matrix44 &prv_view_pm', 'const hg::Matrix4 &prv_view_im', 'const hg::Matrix4 *i_m', 'uint32_t count'])
-	gen.bind_method(shared_renderer, 'SetShaderLightBuiltins', 'void', ['const hg::Matrix4 &light_world', 'const hg::Color &light_diffuse', 'const hg::Color &light_specular', 'float range', 'float clip_dist', 'float cone_angle', 'float edge_angle', 'hg::Texture *projection_map', 'const hg::Matrix4 &view_world', 'hg::Texture *shadow_map', 'float shadow_bias', 'float inv_shadow_map_size', 'const hg::Color &shadow_color', 'uint32_t shadow_data_count', 'const hg::Matrix4 *shadow_data_inv_world', 'const hg::Matrix44 *shadow_data_projection_to_map', 'const float *shadow_data_slice_distance'])
-	gen.bind_method(shared_renderer, 'SetShaderSkeletonValues', 'void', ['uint32_t skin_bone_count', 'const hg::Matrix4 *skin_bone_matrices', 'const hg::Matrix4 *skin_bone_previous_matrices', 'const uint16_t *skin_bone_idx'])
-	gen.bind_method(shared_renderer, 'SetShaderPickingBuiltins', 'void', ['uint32_t uid'])
-	gen.bind_method(shared_renderer, 'SetShaderValues', 'void', ['const ShaderValues &shader_values', '?const ShaderValues *material_values'])
-	"""
-
-	#
-	gen.bind_method(shared_renderer, 'SetFillMode', 'void', ['hg::Renderer::FillMode mode'], ['proxy'])
-
-	gen.bind_method(shared_renderer, 'SetCullFunc', 'void', ['hg::Renderer::CullFunc func'], ['proxy'])
-	gen.bind_method(shared_renderer, 'EnableCulling', 'void', ['bool enable'], ['proxy'])
-
-	gen.bind_method(shared_renderer, 'SetDepthFunc', 'void', ['hg::Renderer::DepthFunc func'], ['proxy'])
-	gen.bind_method(shared_renderer, 'EnableDepthTest', 'void', ['bool enable'], ['proxy'])
-	gen.bind_method(shared_renderer, 'EnableDepthWrite', 'void', ['bool enable'], ['proxy'])
-
-	gen.bind_method(shared_renderer, 'SetBlendFunc', 'void', ['hg::Renderer::BlendFunc src', 'hg::Renderer::BlendFunc dst'], ['proxy'])
-	gen.bind_method(shared_renderer, 'EnableBlending', 'void', ['bool enable'], ['proxy'])
-
-	gen.bind_method(shared_renderer, 'EnableAlphaToCoverage', 'void', ['bool enable'], ['proxy'])
-
-	gen.bind_method(shared_renderer, 'SetColorMask', 'void', ['bool red', 'bool green', 'bool blue', 'bool alpha'], ['proxy'])
-
-	gen.bind_method(shared_renderer, 'SetDefaultStates', 'void', [], ['proxy'])
-
-	gen.bind_method_overloads(shared_renderer, 'SetIndexSource', [
-		('void', [], ['proxy']),
-		('void', ['hg::GpuBuffer &buffer'], ['proxy'])
-	])
-	gen.bind_method(shared_renderer, 'SetVertexSource', 'void', ['hg::GpuBuffer &buffer', 'const hg::VertexLayout &layout'], ['proxy'])
-
-	#gen.bind_method(shared_renderer, 'GetShader', 'const std::shared_ptr<hg::GpuShader> &', [], ['proxy'])
-	gen.bind_method(shared_renderer, 'SetShader', 'bool', ['const std::shared_ptr<hg::GpuShader> &shader'], ['proxy'])
-
-	gen.bind_method(shared_renderer, 'SetPolygonDepthOffset', 'void', ['float slope_scale', 'float bias'], ['proxy'])
-
-	gen.bind_method(shared_renderer, 'NewOutputSurface', 'hg::Surface', ['const hg::Window &window'], ['proxy'])
-	gen.bind_method(shared_renderer, 'SetOutputSurface', 'void', ['const hg::Surface &surface'], ['proxy'])
-	gen.bind_method(shared_renderer, 'DestroyOutputSurface', 'void', ['const hg::Surface &surface'], ['proxy'])
-	gen.bind_method(shared_renderer, 'NewOffscreenOutputSurface', 'hg::Surface', ['int width', 'int height'], ['proxy'])
-
-	gen.bind_method(shared_renderer, 'GetOutputSurface', 'const hg::Surface &', [], ['proxy'])
-	gen.bind_method(shared_renderer, 'GetOutputSurfaceSize', 'hg::tVector2<int>', [], ['proxy'])
-
-	gen.bind_method_overloads(shared_renderer, 'Open', [
-		('bool', [], ['proxy']),
-		('bool', ['bool debug'], ['proxy'])
-	])
-	gen.bind_method(shared_renderer, 'Close', 'void', [], ['proxy'])
-
-	gen.bind_method(shared_renderer, 'IsOpen', 'bool', [], ['proxy'])
-
-	gen.bind_method(shared_renderer, 'GetInverseViewMatrix', 'hg::Matrix4', [], ['proxy'])
-	gen.bind_method(shared_renderer, 'GetInverseWorldMatrix', 'hg::Matrix4', [], ['proxy'])
-
-	gen.bind_method(shared_renderer, 'SetViewMatrix', 'void', ['const hg::Matrix4 &view_matrix'], ['proxy'])
-	gen.bind_method(shared_renderer, 'GetViewMatrix', 'hg::Matrix4', [], ['proxy'])
-	gen.bind_method(shared_renderer, 'SetProjectionMatrix', 'void', ['const hg::Matrix44 &projection_matrix'], ['proxy'])
-	gen.bind_method(shared_renderer, 'GetProjectionMatrix', 'hg::Matrix44', [], ['proxy'])
-	gen.bind_method(shared_renderer, 'SetWorldMatrix', 'void', ['const hg::Matrix4 &world_matrix'], ['proxy'])
-	gen.bind_method(shared_renderer, 'GetWorldMatrix', 'hg::Matrix4', [], ['proxy'])
-
-	gen.bind_method(shared_renderer, 'SetIdentityMatrices', 'void', [], ['proxy'])
-
-	gen.bind_method_overloads(shared_renderer, 'Set2DMatrices', [
-		('void', [], ['proxy']),
-		('void', ['const hg::tVector2<float> &resolution'], ['proxy']),
-		('void', ['const hg::tVector2<float> &resolution', 'bool y_origin_bottom'], ['proxy']),
-		('void', ['bool y_origin_bottom'], ['proxy'])
-	])
-
-	gen.bind_method(shared_renderer, 'ScreenVertex', 'hg::Vector3', ['int x', 'int y'], ['proxy'])
-
-	gen.bind_method(shared_renderer, 'EnableClippingPlane', 'void', ['int idx'], ['proxy'])
-	gen.bind_method(shared_renderer, 'DisableClippingPlane', 'void', ['int idx'], ['proxy'])
-	gen.bind_method(shared_renderer, 'SetClippingPlane', 'void', ['int idx', 'float a', 'float b', 'float c', 'float d'], ['proxy'])
-
-	gen.bind_method(shared_renderer, 'ClearClippingRect', 'void', [], ['proxy'])
-	gen.bind_method(shared_renderer, 'SetClippingRect', 'void', ['const hg::Rect<float> &rect'], ['proxy'])
-	gen.bind_method(shared_renderer, 'GetClippingRect', 'hg::Rect<float>', [], ['proxy'])
-
-	gen.bind_method(shared_renderer, 'SetViewport', 'void', ['const hg::Rect<float> &rect'], ['proxy'])
-	gen.bind_method(shared_renderer, 'GetViewport', 'hg::Rect<float>', [], ['proxy'])
-
-	gen.bind_method(shared_renderer, 'GetAspectRatio', 'hg::tVector2<float>', [], ['proxy'])
-
-	gen.bind_method_overloads(shared_renderer, 'Clear', [
-		('void', ['hg::Color color'], ['proxy']),
-		('void', ['hg::Color color', 'float z', 'hg::Renderer::ClearFunction flags'], ['proxy'])
-	])
-
-	#virtual void DrawElements(PrimitiveType prim_type, int idx_count, IndexType idx_type = IndexUShort, uint32_t idx_offset = 0) = 0;
-	#virtual void DrawElementsInstanced(uint32_t instance_count, Buffer &instance_data, PrimitiveType prim_type, int idx_count, IndexType idx_type = IndexUShort) = 0;
-
-	gen.bind_method(shared_renderer, 'DrawFrame', 'void', [], ['proxy'])
-	gen.bind_method(shared_renderer, 'ShowFrame', 'void', [], ['proxy'])
-
-	gen.bind_method(shared_renderer, 'SetVSync', 'void', ['bool enabled'], ['proxy'])
-
-	gen.bind_method(shared_renderer, 'CaptureFramebuffer', 'bool', ['hg::Picture &out'], ['proxy'])
-	gen.bind_method(shared_renderer, 'InvalidateStateCache', 'void', [], ['proxy'])
-
-	gen.bind_method(shared_renderer, 'GetFrameShownCount', 'size_t', [], ['proxy'])
-
-	gen.end_class(shared_renderer)
-
-	#
-	gen.insert_binding_code('''static std::shared_ptr<hg::Renderer> CreateRenderer(const std::string &name) { return hg::g_renderer_factory.get().Instantiate(name); }
-static std::shared_ptr<hg::Renderer> CreateRenderer() { return hg::g_renderer_factory.get().Instantiate(); }
-	''', 'Renderer custom API')
-
-	gen.bind_function('CreateRenderer', 'std::shared_ptr<hg::Renderer>', ['?const std::string &name'], {'check_rval': check_bool_rval_lambda(gen, 'CreateRenderer failed, was LoadPlugins called succesfully?')})
-
-	# hg::RendererAsync
-	gen.add_include('engine/renderer_async.h')
-
-	renderer_async = gen.begin_class('hg::RendererAsync', bound_name='RendererAsync_nobind', noncopyable=True, nobind=True)
-	gen.end_class(renderer_async)
-
-	shared_renderer_async = gen.begin_class('std::shared_ptr<hg::RendererAsync>', bound_name='RendererAsync', features={'proxy': lib.stl.SharedPtrProxyFeature(renderer_async)})
-
-	gen.bind_constructor(shared_renderer_async, ['std::shared_ptr<hg::Renderer> renderer'], ['proxy'])
-	gen.bind_method(shared_renderer_async, 'GetRenderer', 'const std::shared_ptr<hg::Renderer> &', [], ['proxy'])
-
-	gen.bind_method(shared_renderer_async, 'PurgeCache', 'std::future<size_t>', [], ['proxy'])
-	gen.bind_method(shared_renderer_async, 'RefreshCacheEntry', 'void', ['const std::string &name'], ['proxy'])
-
-	gen.bind_method(shared_renderer_async, 'NewRenderTarget', 'std::shared_ptr<hg::RenderTarget>', [], ['proxy'])
-	gen.bind_method(shared_renderer_async, 'SetRenderTargetColorTexture', 'void', ['const std::shared_ptr<hg::RenderTarget> &render_target', 'const std::shared_ptr<hg::Texture> &texture'], ['proxy'])
-	gen.bind_method(shared_renderer_async, 'SetRenderTargetDepthTexture', 'void', ['const std::shared_ptr<hg::RenderTarget> &render_target', 'const std::shared_ptr<hg::Texture> &texture'], ['proxy'])
-	gen.bind_method_overloads(shared_renderer_async, 'BlitRenderTarget', [
-		('void', ['const std::shared_ptr<hg::RenderTarget> &src_render_target', 'const std::shared_ptr<hg::RenderTarget> &dst_render_target', 'const hg::Rect<int> &src_rect', 'const hg::Rect<int> &dst_rect'], ['proxy']),
-		('void', ['const std::shared_ptr<hg::RenderTarget> &src_render_target', 'const std::shared_ptr<hg::RenderTarget> &dst_render_target', 'const hg::Rect<int> &src_rect', 'const hg::Rect<int> &dst_rect', 'bool blit_color', 'bool blit_depth'], ['proxy'])
-	])
-	gen.bind_method(shared_renderer_async, 'ReadRenderTargetColorPixels', 'void', ['const std::shared_ptr<hg::RenderTarget> &src_render_target', 'const std::shared_ptr<hg::Picture> &out', 'const hg::Rect<int> &rect'], ['proxy'])
-	gen.bind_method(shared_renderer_async, 'ClearRenderTarget', 'void', [], ['proxy'])
-	gen.bind_method(shared_renderer_async, 'SetRenderTarget', 'void', ['std::shared_ptr<hg::RenderTarget> &render_target'], ['proxy'])
-	gen.bind_method(shared_renderer_async, 'CheckRenderTarget', 'std::future<bool>', [], ['proxy'])
-	gen.bind_method(shared_renderer_async, 'CreateRenderTarget', 'std::future<bool>', ['std::shared_ptr<hg::RenderTarget> &render_target'], ['proxy'])
-	gen.bind_method(shared_renderer_async, 'FreeRenderTarget', 'void', ['const std::shared_ptr<hg::RenderTarget> &render_target'], ['proxy'])
-
-	gen.bind_method(shared_renderer_async, 'NewBuffer', 'std::shared_ptr<hg::GpuBuffer>', [], ['proxy'])
-	gen.bind_method(shared_renderer_async, 'GetBufferSize', 'std::future<size_t>', ['std::shared_ptr<hg::GpuBuffer> buffer'], ['proxy'])
-	#std::future<void *> MapBuffer(sBuffer buf) {
-	#void UnmapBuffer(sBuffer buf) { run_call<void>(std::bind(&Renderer::UnmapBuffer, shared_ref(renderer), shared_ref(buf)), RA_task_affinity); }
-	#std::future<bool> UpdateBuffer(sBuffer buf, const void *p, size_t start = 0, size_t size = 0) {
-	#std::future<bool> CreateBuffer(sBuffer buf, const void *data, size_t size, Buffer::Type type, Buffer::Usage usage = Buffer::Static) {
-	#std::future<bool> CreateBuffer(sBuffer buf, const BinaryData &data, Buffer::Type type, Buffer::Usage usage = Buffer::Static) {
-	gen.bind_method(shared_renderer_async, 'FreeBuffer', 'void', ['std::shared_ptr<hg::GpuBuffer> buffer'], ['proxy'])
-
-	gen.bind_method_overloads(shared_renderer_async, 'NewTexture', [
-		('std::shared_ptr<hg::Texture>', [], ['proxy']),
-		('std::shared_ptr<hg::Texture>', ['const std::string &name'], ['proxy'])
-	])
-	gen.bind_method_overloads(shared_renderer_async, 'NewShadowMap', [
-		('std::shared_ptr<hg::Texture>', ['int width', 'int height'], ['proxy']),
-		('std::shared_ptr<hg::Texture>', ['int width', 'int height', 'const std::string &name'], ['proxy'])
-	])
-	gen.bind_method_overloads(shared_renderer_async, 'CreateTexture', [
-		('std::future<bool>', ['std::shared_ptr<hg::Texture> texture', 'int width', 'int height'], ['proxy']),
-		('std::future<bool>', ['std::shared_ptr<hg::Texture> texture', 'int width', 'int height', 'hg::TextureFormat format', 'hg::TextureAA aa'], ['proxy']),
-		('std::future<bool>', ['std::shared_ptr<hg::Texture> texture', 'int width', 'int height', 'hg::TextureFormat format', 'hg::TextureAA aa', 'hg::TextureUsage usage'], ['proxy']),
-		('std::future<bool>', ['std::shared_ptr<hg::Texture> texture', 'int width', 'int height', 'hg::TextureFormat format', 'hg::TextureAA aa', 'hg::TextureUsage usage', 'bool mipmapped'], ['proxy']),
-		('std::future<bool>', ['std::shared_ptr<hg::Texture> texture', 'hg::BinaryData &data', 'int width', 'int height'], ['proxy']),
-		('std::future<bool>', ['std::shared_ptr<hg::Texture> texture', 'hg::BinaryData &data', 'int width', 'int height', 'hg::TextureFormat format', 'hg::TextureAA aa'], ['proxy']),
-		('std::future<bool>', ['std::shared_ptr<hg::Texture> texture', 'hg::BinaryData &data', 'int width', 'int height', 'hg::TextureFormat format', 'hg::TextureAA aa', 'hg::TextureUsage usage'], ['proxy']),
-		('std::future<bool>', ['std::shared_ptr<hg::Texture> texture', 'hg::BinaryData &data', 'int width', 'int height', 'hg::TextureFormat format', 'hg::TextureAA aa', 'hg::TextureUsage usage', 'bool mipmapped'], ['proxy']),
-		('std::future<bool>', ['std::shared_ptr<hg::Texture> texture', 'std::shared_ptr<hg::Picture> picture'], ['proxy']),
-		('std::future<bool>', ['std::shared_ptr<hg::Texture> texture', 'std::shared_ptr<hg::Picture> picture', 'hg::TextureUsage usage'], ['proxy']),
-		('std::future<bool>', ['std::shared_ptr<hg::Texture> texture', 'std::shared_ptr<hg::Picture> picture', 'hg::TextureUsage usage', 'bool mipmapped'], ['proxy'])
-
-	])
-	gen.bind_method(shared_renderer_async, 'FreeTexture', 'void', ['std::shared_ptr<hg::Texture> texture'], ['proxy'])
-	gen.bind_method_overloads(shared_renderer_async, 'BlitTexture', [
-		('void', ['std::shared_ptr<hg::Texture> texture', 'const hg::BinaryData &data', 'uint32_t width', 'uint32_t height'], ['proxy']),
-		('void', ['std::shared_ptr<hg::Texture> texture', 'const hg::BinaryData &data', 'uint32_t width', 'uint32_t height', 'uint32_t x', 'uint32_t y'], ['proxy'])
-	])
-	gen.bind_method(shared_renderer_async, 'ResizeTexture', 'void', ['std::shared_ptr<hg::Texture> texture', 'uint32_t width', 'uint32_t height'], ['proxy'])
-	gen.bind_method_overloads(shared_renderer_async, 'BlitTextureBackground', [
-		('void', ['std::shared_ptr<hg::Texture> texture', 'const hg::BinaryData &data', 'uint32_t width', 'uint32_t height'], ['proxy']),
-		('void', ['std::shared_ptr<hg::Texture> texture', 'const hg::BinaryData &data', 'uint32_t width', 'uint32_t height', 'uint32_t x', 'uint32_t y'], ['proxy'])
-	])
-	gen.bind_method(shared_renderer_async, 'CaptureTexture', 'std::future<bool>', ['std::shared_ptr<hg::Texture> texture', 'std::shared_ptr<hg::Picture> out'], ['proxy'])
-	gen.bind_method(shared_renderer_async, 'GenerateTextureMipmap', 'void', ['std::shared_ptr<hg::Texture> texture'], ['proxy'])
-	gen.bind_method_overloads(shared_renderer_async, 'LoadTexture', [
-		('std::shared_ptr<hg::Texture>', ['const std::string &path'], ['proxy']),
-		('std::shared_ptr<hg::Texture>', ['const std::string &path', 'bool use_cache'], ['proxy'])
-	])
-	gen.bind_method(shared_renderer_async, 'GetNativeTextureExt', 'const char *', [], ['proxy'])
-
-	#
-	gen.bind_method(shared_renderer_async, 'SetFillMode', 'void', ['hg::Renderer::FillMode fill_mode'], ['proxy'])
-	gen.bind_method(shared_renderer_async, 'SetCullFunc', 'void', ['hg::Renderer::CullFunc cull_mode'], ['proxy'])
-	gen.bind_method(shared_renderer_async, 'EnableCulling', 'void', ['bool enable'], ['proxy'])
-
-	gen.bind_method(shared_renderer_async, 'SetDepthFunc', 'void', ['hg::Renderer::DepthFunc depth_func'], ['proxy'])
-
-	gen.bind_method(shared_renderer_async, 'EnableDepthTest', 'void', ['bool enable'], ['proxy'])
-	gen.bind_method(shared_renderer_async, 'EnableDepthWrite', 'void', ['bool enable'], ['proxy'])
-
-	gen.bind_method(shared_renderer_async, 'SetBlendFunc', 'void', ['hg::Renderer::BlendFunc src_blend', 'hg::Renderer::BlendFunc dst_blend'], ['proxy'])
-
-	gen.bind_method(shared_renderer_async, 'EnableBlending', 'void', ['bool enable'], ['proxy'])
-	gen.bind_method(shared_renderer_async, 'EnableAlphaToCoverage', 'void', ['bool enable'], ['proxy'])
-	gen.bind_method(shared_renderer_async, 'SetDefaultStates', 'void', [], ['proxy'])
-	gen.bind_method(shared_renderer_async, 'SetIndexSource', 'void', ['?std::shared_ptr<hg::GpuBuffer> &buffer'], ['proxy'])
-	gen.bind_method(shared_renderer_async, 'SetVertexSource', 'void', ['std::shared_ptr<hg::GpuBuffer> &buffer', 'const hg::VertexLayout &layout'], ['proxy'])
-
-	gen.bind_method(shared_renderer_async, 'GetShader', 'std::future<std::shared_ptr<hg::GpuShader>>', [], ['proxy'])
-	gen.bind_method(shared_renderer_async, 'SetShader', 'std::future<bool>', ['std::shared_ptr<hg::GpuShader> &shader'], ['proxy'])
-
-	#
-	gen.bind_method(shared_renderer_async, 'NewWindow', 'std::future<hg::Window>', ['int w', 'int h', 'int bpp', 'hg::Window::Visibility visibility'], ['proxy'])
-
-	gen.bind_method(shared_renderer_async, 'NewOutputSurface', 'std::future<hg::Surface>', ['const hg::Window &window'], ['proxy'])
-	gen.bind_method(shared_renderer_async, 'NewOffscreenOutputSurface', 'std::future<hg::Surface>', ['int width', 'int height'], ['proxy'])
-
-	gen.bind_method(shared_renderer_async, 'SetOutputSurface', 'void', ['const hg::Surface &surface'], ['proxy'])
-	gen.bind_method(shared_renderer_async, 'DestroyOutputSurface', 'void', ['hg::Surface &surface'], ['proxy'])
-
-	gen.bind_method(shared_renderer_async, 'GetOutputSurface', 'std::future<hg::Surface>', [], ['proxy'])
-	gen.bind_method(shared_renderer_async, 'GetOutputSurfaceSize', 'std::future<hg::tVector2<int>>', [], ['proxy'])
-
-	gen.bind_method(shared_renderer_async, 'FitViewportToOutputSurface', 'void', [], ['proxy'])
-
-	gen.bind_method(shared_renderer_async, 'UpdateWindow', 'void', ['const hg::Window &window'], ['proxy'])
-
-	gen.bind_method(shared_renderer_async, 'Open', 'std::future<bool>', ['?bool debug'], ['proxy'])
-	gen.bind_method(shared_renderer_async, 'Close', 'std::future<void>', [], ['proxy'])
-
-	gen.bind_method(shared_renderer_async, 'GetInverseViewMatrix', 'std::future<hg::Matrix4>', [], ['proxy'])
-	gen.bind_method(shared_renderer_async, 'GetInverseWorldMatrix', 'std::future<hg::Matrix4>', [], ['proxy'])
-
-	gen.bind_method(shared_renderer_async, 'SetViewMatrix', 'void', ['const hg::Matrix4 &view'], ['proxy'])
-	gen.bind_method(shared_renderer_async, 'GetViewMatrix', 'std::future<hg::Matrix4>', [], ['proxy'])
-
-	gen.bind_method(shared_renderer_async, 'SetProjectionMatrix', 'void', ['const hg::Matrix44 &projection'], ['proxy'])
-	gen.bind_method(shared_renderer_async, 'GetProjectionMatrix', 'std::future<hg::Matrix44>', [], ['proxy'])
-
-	gen.bind_method(shared_renderer_async, 'SetWorldMatrix', 'void', ['const hg::Matrix4 &world'], ['proxy'])
-	gen.bind_method(shared_renderer_async, 'GetWorldMatrix', 'std::future<hg::Matrix4>', [], ['proxy'])
-
-	gen.bind_method(shared_renderer_async, 'SetIdentityMatrices', 'void', [], ['proxy'])
-	gen.bind_method(shared_renderer_async, 'Set2DMatrices', 'void', ['?bool reverse_y'], ['proxy'])
-
-	gen.bind_method(shared_renderer_async, 'EnableClippingPlane', 'void', ['int idx'], ['proxy'])
-	gen.bind_method(shared_renderer_async, 'DisableClippingPlane', 'void', ['int idx'], ['proxy'])
-	gen.bind_method(shared_renderer_async, 'SetClippingPlane', 'void', ['int idx', 'float a', 'float b', 'float c', 'float d'], ['proxy'])
-
-	#
-	gen.bind_method(shared_renderer_async, 'ClearClippingRect', 'void', [], ['proxy'])
-	gen.bind_method(shared_renderer_async, 'SetClippingRect', 'void', ['const hg::Rect<float> &clip_rect'], ['proxy'])
-	gen.bind_method(shared_renderer_async, 'GetClippingRect', 'std::future<hg::Rect<float>>', [], ['proxy'])
-
-	gen.bind_method(shared_renderer_async, 'SetViewport', 'void', ['const hg::Rect<float> &rect'], ['proxy'])
-	gen.bind_method(shared_renderer_async, 'GetViewport', 'std::future<hg::Rect<float>>', [], ['proxy'])
-	gen.bind_method(shared_renderer_async, 'GetAspectRatio', 'std::future<hg::tVector2<float>>', [], ['proxy'])
-
-	gen.bind_method(shared_renderer_async, 'Clear', 'void', ['hg::Color color', '?float z', '?hg::Renderer::ClearFunction clear_mask'], ['proxy'])
-
-	gen.bind_method(shared_renderer_async, 'DrawFrame', 'std::future<void>', [], ['proxy'])
-	gen.bind_method(shared_renderer_async, 'ShowFrame', 'std::future<void>', [], ['proxy'])
-
-	gen.bind_method(shared_renderer_async, 'SetVSync', 'void', ['bool enabled'], ['proxy'])
+		gen.bind_method(vm, 'Pack', 'hg::LuaObject', ['PyObject *o'], {'route': route_lambda('__PyObjectToLuaObject')})
+		gen.bind_method(vm, 'Unpack', 'PyObject *', ['const hg::LuaObject &o'], {'route': route_lambda('__LuaObjectToPyObject')})
+
+	gen.end_class(vm)
+
+
+def bind_scene_systems(gen):
+	gen.add_include('engine/scene_systems.h')
+
+	scene_clocks = gen.begin_class('hg::SceneClocks')
+	gen.bind_constructor(scene_clocks, [])
+	gen.end_class(scene_clocks)
+
+	scene_sync_to_systems_from_file_protos = [
+		('void', ['hg::Scene &scene', 'hg::SceneLuaVM &vm'], []),
+	]
+	scene_sync_to_systems_from_assets_protos = [
+		('void', ['hg::Scene &scene', 'hg::SceneLuaVM &vm'], []),
+	]
+	scene_update_systems_protos = [
+		('void', ['hg::Scene &scene', 'hg::SceneClocks &clocks', 'hg::time_ns dt'], []),
+		('void', ['hg::Scene &scene', 'hg::SceneClocks &clocks', 'hg::time_ns dt', 'hg::SceneLuaVM &vm'], []),
+	]
+	scene_garbage_collect_systems_protos = [
+		('size_t', ['hg::Scene &scene'], []),
+		('size_t', ['hg::Scene &scene', 'hg::SceneLuaVM &vm'], []),
+	]
+	scene_clear_systems_protos = [
+		('void', ['hg::Scene &scene'], []),
+		('void', ['hg::Scene &scene', 'hg::SceneLuaVM &vm'], []),
+	]
+
+	if gen.defined('HG_ENABLE_BULLET3_SCENE_PHYSICS'):
+		scene_sync_to_systems_from_file_protos.extend([
+			('void', ['hg::Scene &scene', 'hg::SceneBullet3Physics &physics'], []),
+			('void', ['hg::Scene &scene', 'hg::SceneBullet3Physics &physics', 'hg::SceneLuaVM &vm'], []),
+		])
+		scene_sync_to_systems_from_assets_protos.extend([
+			('void', ['hg::Scene &scene', 'hg::SceneBullet3Physics &physics'], []),
+			('void', ['hg::Scene &scene', 'hg::SceneBullet3Physics &physics', 'hg::SceneLuaVM &vm'], []),
+		])
+		scene_update_systems_protos.extend([
+			('void', ['hg::Scene &scene', 'hg::SceneClocks &clocks', 'hg::time_ns dt', 'hg::SceneBullet3Physics &physics', 'hg::time_ns step', 'int max_physics_step'], []),
+			('void', ['hg::Scene &scene', 'hg::SceneClocks &clocks', 'hg::time_ns dt', 'hg::SceneBullet3Physics &physics', 'hg::time_ns step', 'int max_physics_step', 'hg::SceneLuaVM &vm'], []),
+			('void', ['hg::Scene &scene', 'hg::SceneClocks &clocks', 'hg::time_ns dt', 'hg::SceneBullet3Physics &physics', 'hg::NodePairContacts &contacts', 'hg::time_ns step', 'int max_physics_step'], []),
+			('void', ['hg::Scene &scene', 'hg::SceneClocks &clocks', 'hg::time_ns dt', 'hg::SceneBullet3Physics &physics', 'hg::NodePairContacts &contacts', 'hg::time_ns step', 'int max_physics_step', 'hg::SceneLuaVM &vm'], []),
+		])
+		scene_garbage_collect_systems_protos.extend([
+			('size_t', ['hg::Scene &scene', 'hg::SceneBullet3Physics &physics'], []),
+			('size_t', ['hg::Scene &scene', 'hg::SceneBullet3Physics &physics', 'hg::SceneLuaVM &vm'], []),
+		])
+		scene_clear_systems_protos.extend([
+			('void', ['hg::Scene &scene', 'hg::SceneBullet3Physics &physics'], []),
+			('void', ['hg::Scene &scene', 'hg::SceneBullet3Physics &physics', 'hg::SceneLuaVM &vm'], []),
+		])
+
+	gen.bind_function_overloads('hg::SceneSyncToSystemsFromFile', scene_sync_to_systems_from_file_protos)
+	gen.bind_function_overloads('hg::SceneSyncToSystemsFromAssets', scene_sync_to_systems_from_assets_protos)
+	gen.bind_function_overloads('hg::SceneUpdateSystems', scene_update_systems_protos)
+	gen.bind_function_overloads('hg::SceneGarbageCollectSystems', scene_garbage_collect_systems_protos)
+	gen.bind_function_overloads('hg::SceneClearSystems', scene_clear_systems_protos)
+
+
+def bind_font(gen):
+	gen.add_include('engine/font.h')
 	
-	gen.bind_method(shared_renderer_async, 'CaptureFramebuffer', 'std::future<bool>', ['const std::shared_ptr<hg::Picture> &out'], ['proxy'])
+	font = gen.begin_class('hg::Font')
+	gen.end_class(font)
 
-	gen.end_class(shared_renderer_async)
+	gen.bind_function('hg::LoadFontFromFile', 'hg::Font', ['const char *path', '?float size', '?uint16_t resolution', '?int padding', '?const char *glyphs'])
+	gen.bind_function('hg::LoadFontFromAssets', 'hg::Font', ['const char *name', '?float size', '?uint16_t resolution', '?int padding', '?const char *glyphs'])
 
-	# global rendering functions
-	gen.bind_function('DrawBuffers', 'void', ['hg::Renderer &renderer', 'uint32_t index_count', 'hg::GpuBuffer &idx', 'hg::GpuBuffer &vtx', 'hg::VertexLayout &layout', '?hg::IndexType idx_type', '?hg::GpuPrimitiveType primitive_type'])
+	gen.bind_named_enum('hg::DrawTextHAlign', ['DTHA_Left', 'DTHA_Center', 'DTHA_Right'])
+	gen.bind_named_enum('hg::DrawTextVAlign', ['DTVA_Top', 'DTVA_Center', 'DTVA_Bottom'])
+
+	gen.bind_function_overloads('hg::DrawText', expand_std_vector_proto(gen, [
+		('void', ['bgfx::ViewId view_id', 'const hg::Font &font', 'const char *text', 'bgfx::ProgramHandle prg', 'const char *page_uniform',
+		'uint8_t page_stage', 'const hg::Mat4 &mtx'], []),
+
+		('void', ['bgfx::ViewId view_id', 'const hg::Font &font', 'const char *text', 'bgfx::ProgramHandle prg', 'const char *page_uniform',
+		'uint8_t page_stage', 'const hg::Mat4 &mtx', 'hg::Vec3 pos'], []),
+
+		('void', ['bgfx::ViewId view_id', 'const hg::Font &font', 'const char *text', 'bgfx::ProgramHandle prg', 'const char *page_uniform',
+		'uint8_t page_stage', 'const hg::Mat4 &mtx', 'hg::Vec3 pos', 'hg::DrawTextHAlign halign', 'hg::DrawTextVAlign valign'], []),
+
+		('void', ['bgfx::ViewId view_id', 'const hg::Font &font', 'const char *text', 'bgfx::ProgramHandle prg', 'const char *page_uniform',
+		'uint8_t page_stage', 'const hg::Mat4 &mtx', 'hg::Vec3 pos', 'hg::DrawTextHAlign halign', 'hg::DrawTextVAlign valign', 'const std::vector<hg::UniformSetValue> &values',
+		'const std::vector<hg::UniformSetTexture> &textures', '?hg::RenderState state', '?uint32_t depth'], [])
+	]))
+
+	gen.bind_function('hg::ComputeTextRect', 'hg::Rect<float>', ['const hg::Font &font', 'const char *text', '?float xpos', '?float ypos'])
+	gen.bind_function('hg::ComputeTextHeight', 'float', ['const hg::Font &font', 'const char *text'])
+
+
+def bind_meta(gen):
+	gen.add_include('engine/meta.h')
+	gen.add_include('json.hpp')
+
+	json = gen.begin_class('hg::json', bound_name='JSON')
+	gen.bind_constructor(json, [])
+	gen.end_class(json)
+
+	gen.bind_function('hg::LoadJsonFromFile', 'hg::json', ['const char *path'])
+	gen.bind_function('hg::LoadJsonFromAssets', 'hg::json', ['const char *name'])
+
+	gen.bind_function('hg::SaveJsonToFile', 'bool', ['const hg::json &js', 'const char *path'])
+
+	gen.bind_function('GetJsonString', 'bool', ['const hg::json &js', 'const std::string &key', 'std::string &value'], {'arg_out': ['value'], 'route': route_lambda('hg::GetJsonValue')})
+	gen.bind_function('GetJsonBool', 'bool', ['const hg::json &js', 'const std::string &key', 'bool &value'], {'arg_out': ['value'], 'route': route_lambda('hg::GetJsonValue')})
+	gen.bind_function('GetJsonInt', 'bool', ['const hg::json &js', 'const std::string &key', 'int &value'], {'arg_out': ['value'], 'route': route_lambda('hg::GetJsonValue')})
+	gen.bind_function('GetJsonFloat', 'bool', ['const hg::json &js', 'const std::string &key', 'float &value'], {'arg_out': ['value'], 'route': route_lambda('hg::GetJsonValue')})
+
+	gen.bind_function_overloads('hg::SetJsonValue', [
+		('void', ['hg::json &js', 'const std::string &key', 'const std::string &value'], {}),
+		('void', ['hg::json &js', 'const std::string &key', 'bool value'], {}),
+		('void', ['hg::json &js', 'const std::string &key', 'int value'], {}),
+		('void', ['hg::json &js', 'const std::string &key', 'float value'], {})
+	])
 
 
 def bind_render(gen):
-	gen.add_include('engine/render_system.h')
+	gen.add_include('engine/render_pipeline.h')
 
-	gen.bind_named_enum('hg::Eye', ['EyeMono', 'EyeStereoLeft', 'EyeStereoRight'])
-	gen.bind_named_enum('hg::CullMode', ['CullBack', 'CullFront', 'CullNever'])
-	gen.bind_named_enum('hg::BlendMode', ['BlendOpaque', 'BlendAlpha', 'BlendAdditive'])
+	gen.bind_named_enum('bgfx::RendererType::Enum', [
+		'Noop', 'Direct3D9', 'Direct3D11', 'Direct3D12', 'Gnm', 'Metal', 'Nvn', 'OpenGLES', 'OpenGL', 'Vulkan', 'Count'
+	], bound_name='RendererType', prefix='RT_')
 
-	render_system = gen.begin_class('hg::RenderSystem', bound_name='RenderSystem_nobind', noncopyable=True, nobind=True)
-	gen.end_class(render_system)
-	shared_render_system = gen.begin_class('std::shared_ptr<hg::RenderSystem>', bound_name='RenderSystem', features={'proxy': lib.stl.SharedPtrProxyFeature(render_system)})
-
-	# hg::SurfaceShader
-	gen.add_include('engine/surface_shader.h')
-
-	surface_shader = gen.begin_class('hg::SurfaceShader', bound_name='SurfaceShader_nobind', noncopyable=True, nobind=True)
-	gen.end_class(surface_shader)
-
-	shared_surface_shader = gen.begin_class('std::shared_ptr<hg::SurfaceShader>', bound_name='SurfaceShader', features={'proxy': lib.stl.SharedPtrProxyFeature(surface_shader)})
-	gen.bind_method_overloads(shared_surface_shader, 'SetUserUniformValue', [
-		('bool', ['const std::string &name', 'hg::Vector4 value'], ['proxy']),
-		('bool', ['const std::string &name', 'std::shared_ptr<hg::Texture> texture'], ['proxy'])
+	gen.bind_function_overloads('hg::RenderInit', [
+		('bool', ['hg::Window *window'], []),
+		('bool', ['hg::Window *window', 'bgfx::RendererType::Enum type'], []),
+		('hg::Window *', ['int width', 'int height', 'uint32_t reset_flags', '?bgfx::TextureFormat::Enum format', '?uint32_t debug_flags'], {'constants_group': {'reset_flags': 'ResetFlags', 'debug_flags': 'DebugFlags'}}),
+		('hg::Window *', ['int width', 'int height', 'bgfx::RendererType::Enum type', '?uint32_t reset_flags', '?bgfx::TextureFormat::Enum format', '?uint32_t debug_flags'], {'constants_group': {'reset_flags': 'ResetFlags', 'debug_flags': 'DebugFlags'}}),
+		('hg::Window *', ['const char *window_title', 'int width', 'int height', 'uint32_t reset_flags', '?bgfx::TextureFormat::Enum format', '?uint32_t debug_flags'], {'constants_group': {'reset_flags': 'ResetFlags', 'debug_flags': 'DebugFlags'}}),
+		('hg::Window *', ['const char *window_title', 'int width', 'int height', 'bgfx::RendererType::Enum type', '?uint32_t reset_flags', '?bgfx::TextureFormat::Enum format', '?uint32_t debug_flags'], {'constants_group': {'reset_flags': 'ResetFlags', 'debug_flags': 'DebugFlags'}})
 	])
-	gen.end_class(shared_surface_shader)
+	gen.bind_function('hg::RenderShutdown', 'void', [])
 
-	# hg::RenderMaterial
-	gen.add_include('engine/render_material.h')
+	gen.bind_function('hg::RenderResetToWindow', 'bool', ['hg::Window *win', 'int &width', 'int &height', '?uint32_t reset_flags'], {'arg_in_out': ['width', 'height']})
 
-	material = gen.begin_class('hg::RenderMaterial', bound_name='RenderMaterial_nobind', noncopyable=True, nobind=True)
-	gen.end_class(material)
+	gen.bind_named_enum('bgfx::TextureFormat::Enum', [
+		'BC1', 'BC2', 'BC3', 'BC4', 'BC5', 'BC6H', 'BC7', 'ETC1', 'ETC2', 'ETC2A', 'ETC2A1', 'PTC12', 'PTC14', 'PTC12A', 'PTC14A', 'PTC22', 'PTC24',
+		'ATC', 'ATCE', 'ATCI', 'ASTC4x4', 'ASTC5x5', 'ASTC6x6', 'ASTC8x5', 'ASTC8x6', 'ASTC10x5',
+		'Unknown',
+		'R1', 'A8', 'R8', 'R8I', 'R8U', 'R8S', 'R16', 'R16I', 'R16U', 'R16F', 'R16S', 'R32I', 'R32U', 'R32F', 'RG8', 'RG8I', 'RG8U', 'RG8S',
+		'RG16', 'RG16I', 'RG16U', 'RG16F', 'RG16S', 'RG32I', 'RG32U', 'RG32F', 'RGB8', 'RGB8I', 'RGB8U', 'RGB8S', 'RGB9E5F', 'BGRA8', 'RGBA8',
+		'RGBA8I', 'RGBA8U', 'RGBA8S', 'RGBA16', 'RGBA16I', 'RGBA16U', 'RGBA16F', 'RGBA16S', 'RGBA32I', 'RGBA32U', 'RGBA32F', 'R5G6B5', 'RGBA4',
+		'RGB5A1', 'RGB10A2', 'RG11B10F',
+		'UnknownDepth',
+		'D16', 'D24', 'D24S8', 'D32', 'D16F', 'D24F', 'D32F', 'D0S8',
+	], bound_name='TextureFormat', prefix='TF_')
 
-	shared_material = gen.begin_class('std::shared_ptr<hg::RenderMaterial>', bound_name='RenderMaterial', features={'proxy': lib.stl.SharedPtrProxyFeature(material)})
-	gen.add_base(shared_material, gen.get_conv('std::shared_ptr<hg::GpuResource>'))
+	gen.bind_constants('uint32_t', [
+		("RF_None", "BGFX_RESET_NONE"),
+		("RF_MSAA2X", "BGFX_RESET_MSAA_X2"),
+		("RF_MSAA4X", "BGFX_RESET_MSAA_X4"),
+		("RF_MSAA8X", "BGFX_RESET_MSAA_X8"),
+		("RF_MSAA16X", "BGFX_RESET_MSAA_X16"),
+		("RF_VSync", "BGFX_RESET_VSYNC"),
+		("RF_MaxAnisotropy", "BGFX_RESET_MAXANISOTROPY"),
+		("RF_Capture", "BGFX_RESET_CAPTURE"),
+		("RF_FlushAfterRender", "BGFX_RESET_FLUSH_AFTER_RENDER"),
+		("RF_FlipAfterRender", "BGFX_RESET_FLIP_AFTER_RENDER"),
+		("RF_SRGBBackBuffer", "BGFX_RESET_SRGB_BACKBUFFER"),
+		("RF_HDR10", "BGFX_RESET_HDR10"),
+		("RF_HiDPI", "BGFX_RESET_HIDPI"),
+		("RF_DepthClamp", "BGFX_RESET_DEPTH_CLAMP"),
+		("RF_Suspend", "BGFX_RESET_SUSPEND"),
+	], 'ResetFlags')
 
-	gen.bind_method(shared_material, 'Create', 'void', ['hg::RenderSystem &render_system', 'std::shared_ptr<hg::Material> material'], ['proxy'])
-	gen.bind_method(shared_material, 'Free', 'void', [], ['proxy'])
+	gen.bind_named_enum('bgfx::BackbufferRatio::Enum', ['Equal', 'Half', 'Quarter', 'Eighth', 'Sixteenth', 'Double'], bound_name='BackbufferRatio', prefix='BR_')
+	
+	gen.bind_function('bgfx::reset', 'void', ['uint32_t width', 'uint32_t height', '?uint32_t flags', '?bgfx::TextureFormat::Enum format'], {'constants_group': {'flags': 'ResetFlags'}}, bound_name='RenderReset')
 
-	gen.bind_method(shared_material, 'Clone', 'std::shared_ptr<hg::RenderMaterial>', [], ['proxy'])
-	gen.bind_method(shared_material, 'IsReadyOrFailed', 'bool', [], ['proxy'])
+	gen.bind_constants('uint32_t', [
+		("DF_IFH", "BGFX_DEBUG_IFH"),
+		("DF_Profiler", "BGFX_DEBUG_PROFILER"),
+		("DF_Stats", "BGFX_DEBUG_STATS"),
+		("DF_Text", "BGFX_DEBUG_TEXT"),
+		("DF_Wireframe", "BGFX_DEBUG_WIREFRAME"),
+	], 'DebugFlags')
 
-	gen.bind_method(shared_material, 'GetSurfaceShader', 'const std::shared_ptr<hg::SurfaceShader> &', [], ['proxy'])
-	gen.bind_method(shared_material, 'SetSurfaceShader', 'void', ['std::shared_ptr<hg::SurfaceShader> surface_shader'], ['proxy'])
+	gen.bind_function('bgfx::setDebug', 'void', ['uint32_t flags'], {'constants_group': {'flags': 'DebugFlags'}}, bound_name='SetRenderDebug')
 
-	gen.insert_binding_code('''
-static bool _RenderMaterial_GetFloat(hg::RenderMaterial *m, const std::string &name, float &o0) { if (auto v = m->GetValue(name)) { o0 = v->fv[0]; return true; } return false; }
-static bool _RenderMaterial_GetFloat2(hg::RenderMaterial *m, const std::string &name, float &o0, float &o1) { if (auto v = m->GetValue(name)) { o0 = v->fv[0]; o1 = v->fv[1]; return true; } return false; }
-static bool _RenderMaterial_GetFloat3(hg::RenderMaterial *m, const std::string &name, float &o0, float &o1, float &o2) { if (auto v = m->GetValue(name)) { o0 = v->fv[0]; o1 = v->fv[1]; o2 = v->fv[2]; return true; } return false; }
-static bool _RenderMaterial_GetFloat4(hg::RenderMaterial *m, const std::string &name, float &o0, float &o1, float &o2, float &o3) { if (auto v = m->GetValue(name)) { o0 = v->fv[0]; o1 = v->fv[1]; o2 = v->fv[2]; o3 = v->fv[3]; return true; } return false; }
+	# frame
+	fbh = gen.begin_class('bgfx::FrameBufferHandle')
+	gen.end_class(fbh)
+	
+	gen.bind_variable("const bgfx::FrameBufferHandle hg::InvalidFrameBufferHandle")
 
-static bool _RenderMaterial_GetInt(hg::RenderMaterial *m, const std::string &name, int &o0) { if (auto v = m->GetValue(name)) { o0 = v->iv[0]; return true; } return false; }
-static bool _RenderMaterial_GetInt2(hg::RenderMaterial *m, const std::string &name, int &o0, int &o1) { if (auto v = m->GetValue(name)) { o0 = v->iv[0]; o1 = v->iv[1]; return true; } return false; }
-static bool _RenderMaterial_GetInt3(hg::RenderMaterial *m, const std::string &name, int &o0, int &o1, int &o2) { if (auto v = m->GetValue(name)) { o0 = v->iv[0]; o1 = v->iv[1]; o2 = v->iv[2]; return true; } return false; }
-static bool _RenderMaterial_GetInt4(hg::RenderMaterial *m, const std::string &name, int &o0, int &o1, int &o2, int &o3) { if (auto v = m->GetValue(name)) { o0 = v->iv[0]; o1 = v->iv[1]; o2 = v->iv[2]; o3 = v->iv[3]; return true; } return false; }
+	gen.bind_constants('uint16_t', [
+		("CF_None", "BGFX_CLEAR_NONE"),
+		("CF_Color", "BGFX_CLEAR_COLOR"),
+		("CF_Depth", "BGFX_CLEAR_DEPTH"),
+		("CF_Stencil", "BGFX_CLEAR_STENCIL"),
+		("CF_DiscardColor0", "BGFX_CLEAR_DISCARD_COLOR_0"),
+		("CF_DiscardColor1", "BGFX_CLEAR_DISCARD_COLOR_1"),
+		("CF_DiscardColor2", "BGFX_CLEAR_DISCARD_COLOR_2"),
+		("CF_DiscardColor3", "BGFX_CLEAR_DISCARD_COLOR_3"),
+		("CF_DiscardColor4", "BGFX_CLEAR_DISCARD_COLOR_4"),
+		("CF_DiscardColor5", "BGFX_CLEAR_DISCARD_COLOR_5"),
+		("CF_DiscardColor6", "BGFX_CLEAR_DISCARD_COLOR_6"),
+		("CF_DiscardColor7", "BGFX_CLEAR_DISCARD_COLOR_7"),
+		("CF_DiscardDepth", "BGFX_CLEAR_DISCARD_DEPTH"),
+		("CF_DiscardStencil", "BGFX_CLEAR_DISCARD_STENCIL"),
+		("CF_DiscardColorAll", "BGFX_CLEAR_DISCARD_COLOR_MASK"),
+		("CF_DiscardAll", "BGFX_CLEAR_DISCARD_MASK"),
+	], 'ClearFlags')
 
-static bool _RenderMaterial_GetUnsigned(hg::RenderMaterial *m, const std::string &name, unsigned int &o0) { if (auto v = m->GetValue(name)) { o0 = v->uv[0]; return true; } return false; }
-static bool _RenderMaterial_GetUnsigned2(hg::RenderMaterial *m, const std::string &name, unsigned int &o0, unsigned int &o1) { if (auto v = m->GetValue(name)) { o0 = v->uv[0]; o1 = v->uv[1]; return true; } return false; }
-static bool _RenderMaterial_GetUnsigned3(hg::RenderMaterial *m, const std::string &name, unsigned int &o0, unsigned int &o1, unsigned int &o2) { if (auto v = m->GetValue(name)) { o0 = v->uv[0]; o1 = v->uv[1]; o2 = v->uv[2]; return true; } return false; }
-static bool _RenderMaterial_GetUnsigned4(hg::RenderMaterial *m, const std::string &name, unsigned int &o0, unsigned int &o1, unsigned int &o2, unsigned int &o3) { if (auto v = m->GetValue(name)) { o0 = v->uv[0]; o1 = v->uv[1]; o2 = v->uv[2]; o3 = v->uv[3]; return true; } return false; }
+	gen.bind_named_enum('bgfx::ViewMode::Enum', ['Default', 'Sequential', 'DepthAscending', 'DepthDescending'], bound_name='ViewMode', prefix='VM_')
 
-static bool _RenderMaterial_GetTexture(hg::RenderMaterial *m, const std::string &name, std::shared_ptr<hg::Texture> &o) { if (auto v = m->GetValue(name)) { o = v->texture; return true; } return false; }
-
-static bool _RenderMaterial_SetFloat(hg::RenderMaterial *m, const std::string &name, float o0) { if (auto v = m->GetValue(name)) { v->fv[0] = o0; return true; } return false; }
-static bool _RenderMaterial_SetFloat2(hg::RenderMaterial *m, const std::string &name, float o0, float o1) { if (auto v = m->GetValue(name)) { v->fv[0] = o0; v->fv[1] = o1; return true; } return false; }
-static bool _RenderMaterial_SetFloat3(hg::RenderMaterial *m, const std::string &name, float o0, float o1, float o2) { if (auto v = m->GetValue(name)) { v->fv[0] = o0; v->fv[1] = o1; v->fv[2] = o2; return true; } return false; }
-static bool _RenderMaterial_SetFloat4(hg::RenderMaterial *m, const std::string &name, float o0, float o1, float o2, float o3) { if (auto v = m->GetValue(name)) { v->fv[0] = o0; v->fv[1] = o1; v->fv[2] = o2; v->fv[3] = o3; return true; } return false; }
-
-static bool _RenderMaterial_SetInt(hg::RenderMaterial *m, const std::string &name, int o0) { if (auto v = m->GetValue(name)) { v->iv[0] = o0; return true; } return false; }
-static bool _RenderMaterial_SetInt2(hg::RenderMaterial *m, const std::string &name, int o0, int o1) { if (auto v = m->GetValue(name)) { v->iv[0] = o0; v->iv[1] = o1; return true; } return false; }
-static bool _RenderMaterial_SetInt3(hg::RenderMaterial *m, const std::string &name, int o0, int o1, int o2) { if (auto v = m->GetValue(name)) { v->iv[0] = o0; v->iv[1] = o1; v->iv[2] = o2; return true; } return false; }
-static bool _RenderMaterial_SetInt4(hg::RenderMaterial *m, const std::string &name, int o0, int o1, int o2, int o3) { if (auto v = m->GetValue(name)) { v->iv[0] = o0; v->iv[1] = o1; v->iv[2] = o2; v->iv[3] = o3; return true; } return false; }
-
-static bool _RenderMaterial_SetUnsigned(hg::RenderMaterial *m, const std::string &name, unsigned int o0) { if (auto v = m->GetValue(name)) { v->uv[0] = o0; return true; } return false; }
-static bool _RenderMaterial_SetUnsigned2(hg::RenderMaterial *m, const std::string &name, unsigned int o0, unsigned int o1) { if (auto v = m->GetValue(name)) { v->uv[0] = o0; v->uv[1] = o1; return true; } return false; }
-static bool _RenderMaterial_SetUnsigned3(hg::RenderMaterial *m, const std::string &name, unsigned int o0, unsigned int o1, unsigned int o2) { if (auto v = m->GetValue(name)) { v->uv[0] = o0; v->uv[1] = o1; v->uv[2] = o2; return true; } return false; }
-static bool _RenderMaterial_SetUnsigned4(hg::RenderMaterial *m, const std::string &name, int o0, unsigned int o1, unsigned int o2, unsigned int o3) { if (auto v = m->GetValue(name)) { v->uv[0] = o0; v->uv[1] = o1; v->uv[2] = o2; v->uv[3] = o3; return true; } return false; }
-
-static bool _RenderMaterial_SetTexture(hg::RenderMaterial *m, const std::string &name, std::shared_ptr<hg::Texture> &o) { if (auto v = m->GetValue(name)) { v->texture = o; return true; } return false; }
+	gen.insert_binding_code('''\
+static void _SetViewClear(bgfx::ViewId view_id, uint16_t clear_flags, const hg::Color &col, float depth = 1.f, uint8_t stencil = 0) {
+	bgfx::setViewClear(view_id, clear_flags, hg::ColorToABGR32(col), depth, stencil);
+}
 ''')
 
-	# 
-	gen.bind_method(shared_material, 'GetFloat', 'bool', ['const std::string &name', 'float &o0'], {'proxy': None, 'arg_out': ['o0'], 'route': lambda args: '_RenderMaterial_GetFloat(%s);' % (', '.join(args))})
-	gen.bind_method(shared_material, 'GetFloat2', 'bool', ['const std::string &name', 'float &o0', 'float &o1'], {'proxy': None, 'arg_out': ['o0', 'o1'], 'route': lambda args: '_RenderMaterial_GetFloat2(%s);' % (', '.join(args))})
-	gen.bind_method(shared_material, 'GetFloat3', 'bool', ['const std::string &name', 'float &o0', 'float &o1', 'float &o2'], {'proxy': None, 'arg_out': ['o0', 'o1', 'o2'], 'route': lambda args: '_RenderMaterial_GetFloat3(%s);' % (', '.join(args))})
-	gen.bind_method(shared_material, 'GetFloat4', 'bool', ['const std::string &name', 'float &o0', 'float &o1', 'float &o2', 'float &o3'], {'proxy': None, 'arg_out': ['o0', 'o1', 'o2', 'o3'], 'route': lambda args: '_RenderMaterial_GetFloat4(%s);' % (', '.join(args))})
+	gen.bind_function_overloads('bgfx::setViewClear', [
+		('void', ['bgfx::ViewId view_id', 'uint16_t flags', '?uint32_t rgba', '?float depth', '?uint8_t stencil'], {'constants_group': {'flags': 'ClearFlags'}}),
+		('void', ['bgfx::ViewId view_id', 'uint16_t flags', 'const hg::Color &col', '?float depth', '?uint8_t stencil'], {'route': route_lambda('_SetViewClear'), 'constants_group': {'flags': 'ClearFlags'}})
+	], bound_name='SetViewClear')
 
-	gen.bind_method(shared_material, 'GetInt', 'bool', ['const std::string &name', 'int &o0'], {'proxy': None, 'arg_out': ['o0'], 'route': lambda args: '_RenderMaterial_GetInt(%s);' % (', '.join(args))})
-	gen.bind_method(shared_material, 'GetInt2', 'bool', ['const std::string &name', 'int &o0', 'int &o1'], {'proxy': None, 'arg_out': ['o0', 'o1'], 'route': lambda args: '_RenderMaterial_GetInt2(%s);' % (', '.join(args))})
-	gen.bind_method(shared_material, 'GetInt3', 'bool', ['const std::string &name', 'int &o0', 'int &o1', 'int &o2'], {'proxy': None, 'arg_out': ['o0', 'o1', 'o2'], 'route': lambda args: '_RenderMaterial_GetInt3(%s);' % (', '.join(args))})
-	gen.bind_method(shared_material, 'GetInt4', 'bool', ['const std::string &name', 'int &o0', 'int &o1', 'int &o2', 'int &o3'], {'proxy': None, 'arg_out': ['o0', 'o1', 'o2', 'o3'], 'route': lambda args: '_RenderMaterial_GetInt4(%s);' % (', '.join(args))})
+	gen.bind_function('bgfx::setViewRect', 'void', ['bgfx::ViewId view_id', 'uint16_t x', 'uint16_t y', 'uint16_t w', 'uint16_t h'], bound_name='SetViewRect')
+	gen.bind_function('bgfx::setViewFrameBuffer', 'void', ['bgfx::ViewId view_id', 'bgfx::FrameBufferHandle handle'], bound_name='SetViewFrameBuffer')
+	gen.bind_function('bgfx::setViewMode', 'void', ['bgfx::ViewId view_id', 'bgfx::ViewMode::Enum mode'], bound_name='SetViewMode')
 
-	gen.bind_method(shared_material, 'GetUnsigned', 'bool', ['const std::string &name', 'unsigned int &o0'], {'proxy': None, 'arg_out': ['o0'], 'route': lambda args: '_RenderMaterial_GetUnsigned(%s);' % (', '.join(args))})
-	gen.bind_method(shared_material, 'GetUnsigned2', 'bool', ['const std::string &name', 'unsigned int &o0', 'unsigned int &o1'], {'proxy': None, 'arg_out': ['o0', 'o1'], 'route': lambda args: '_RenderMaterial_GetUnsigned2(%s);' % (', '.join(args))})
-	gen.bind_method(shared_material, 'GetUnsigned3', 'bool', ['const std::string &name', 'unsigned int &o0', 'unsigned int &o1', 'unsigned int &o2'], {'proxy': None, 'arg_out': ['o0', 'o1', 'o2'], 'route': lambda args: '_RenderMaterial_GetUnsigned3(%s);' % (', '.join(args))})
-	gen.bind_method(shared_material, 'GetUnsigned4', 'bool', ['const std::string &name', 'unsigned int &o0', 'unsigned int &o1', 'unsigned int &o2', 'unsigned int &o3'], {'proxy': None, 'arg_out': ['o0', 'o1', 'o2', 'o3'], 'route': lambda args: '_RenderMaterial_GetUnsigned4(%s);' % (', '.join(args))})
+	gen.bind_function('bgfx::touch', 'void', ['bgfx::ViewId view_id'], bound_name='Touch')
+	gen.bind_function('bgfx::frame', 'uint32_t', [], bound_name='Frame')
 
-	gen.bind_method(shared_material, 'GetTexture', 'bool', ['const std::string &name', 'std::shared_ptr<hg::Texture> &o'], {'proxy': None, 'arg_out': ['o'], 'route': lambda args: '_RenderMaterial_GetTexture(%s);' % (', '.join(args))})
+	gen.insert_binding_code('''\
+static void _SetViewTransform(bgfx::ViewId view_id, const hg::Mat4 &view, const hg::Mat44 &proj) {
+	bgfx::setViewTransform(view_id, hg::to_bgfx(view).data(), hg::to_bgfx(proj).data());
+}
+''')
+	gen.bind_function('_SetViewTransform', 'void', ['bgfx::ViewId view_id', 'const hg::Mat4 &view', 'const hg::Mat44 &proj'], bound_name='SetViewTransform')
 
-	gen.bind_method(shared_material, 'SetFloat', 'bool', ['const std::string &name', 'float o0'], {'proxy': None, 'route': lambda args: '_RenderMaterial_SetFloat(%s);' % (', '.join(args))})
-	gen.bind_method(shared_material, 'SetFloat2', 'bool', ['const std::string &name', 'float o0', 'float o1'], {'proxy': None, 'route': lambda args: '_RenderMaterial_SetFloat2(%s);' % (', '.join(args))})
-	gen.bind_method(shared_material, 'SetFloat3', 'bool', ['const std::string &name', 'float o0', 'float o1', 'float o2'], {'proxy': None, 'route': lambda args: '_RenderMaterial_SetFloat3(%s);' % (', '.join(args))})
-	gen.bind_method(shared_material, 'SetFloat4', 'bool', ['const std::string &name', 'float o0', 'float o1', 'float o2', 'float o3'], {'proxy': None, 'route': lambda args: '_RenderMaterial_SetFloat4(%s);' % (', '.join(args))})
-
-	gen.bind_method(shared_material, 'SetInt', 'bool', ['const std::string &name', 'int o0'], {'proxy': None, 'route': lambda args: '_RenderMaterial_SetInt(%s);' % (', '.join(args))})
-	gen.bind_method(shared_material, 'SetInt2', 'bool', ['const std::string &name', 'int o0', 'int o1'], {'proxy': None, 'route': lambda args: '_RenderMaterial_SetInt2(%s);' % (', '.join(args))})
-	gen.bind_method(shared_material, 'SetInt3', 'bool', ['const std::string &name', 'int o0', 'int o1', 'int o2'], {'proxy': None, 'route': lambda args: '_RenderMaterial_SetInt3(%s);' % (', '.join(args))})
-	gen.bind_method(shared_material, 'SetInt4', 'bool', ['const std::string &name', 'int o0', 'int o1', 'int o2', 'int o3'], {'proxy': None, 'route': lambda args: '_RenderMaterial_SetInt4(%s);' % (', '.join(args))})
-
-	gen.bind_method(shared_material, 'SetUnsigned', 'bool', ['const std::string &name', 'unsigned int o0'], {'proxy': None, 'route': lambda args: '_RenderMaterial_SetUnsigned(%s);' % (', '.join(args))})
-	gen.bind_method(shared_material, 'SetUnsigned2', 'bool', ['const std::string &name', 'unsigned int o0', 'unsigned int o1'], {'proxy': None, 'route': lambda args: '_RenderMaterial_SetUnsigned2(%s);' % (', '.join(args))})
-	gen.bind_method(shared_material, 'SetUnsigned3', 'bool', ['const std::string &name', 'unsigned int o0', 'unsigned int o1', 'unsigned int o2'], {'proxy': None, 'route': lambda args: '_RenderMaterial_SetUnsigned3(%s);' % (', '.join(args))})
-	gen.bind_method(shared_material, 'SetUnsigned4', 'bool', ['const std::string &name', 'unsigned int o0', 'unsigned int o1', 'unsigned int o2', 'unsigned int o3'], {'proxy': None, 'route': lambda args: '_RenderMaterial_SetUnsigned4(%s);' % (', '.join(args))})
-
-	gen.bind_method(shared_material, 'SetTexture', 'bool', ['const std::string &name', 'std::shared_ptr<hg::Texture> &o'], {'proxy': None, 'route': lambda args: '_RenderMaterial_SetTexture(%s);' % (', '.join(args))})
-
-	gen.end_class(shared_material)
-
-	# hg::RenderGeometry
-	gen.add_include('engine/render_geometry.h')
-
-	geometry = gen.begin_class('hg::RenderGeometry', bound_name='RenderGeometry_nobind', noncopyable=True, nobind=True)
-	gen.end_class(geometry)
-
-	shared_geometry = gen.begin_class('std::shared_ptr<hg::RenderGeometry>', bound_name='RenderGeometry', features={'proxy': lib.stl.SharedPtrProxyFeature(geometry)})
-	gen.add_base(shared_geometry, gen.get_conv('std::shared_ptr<hg::GpuResource>'))
-
-	gen.bind_constructor_overloads(shared_geometry, [
-		([], ['proxy']),
-		(['const std::string &name'], ['proxy']),
+	gen.bind_function_overloads('hg::SetView2D', [
+		('void', ['bgfx::ViewId id', 'int x', 'int y', 'int res_x', 'int res_y'], {}),
+		('void', ['bgfx::ViewId id', 'int x', 'int y', 'int res_x', 'int res_y', 'float znear', 'float zfar'], {}),
+		('void', ['bgfx::ViewId id', 'int x', 'int y', 'int res_x', 'int res_y', 'float znear', 'float zfar', 'uint16_t flags', 'const hg::Color &color', 'float depth', 'uint8_t stencil', '?bool y_up'], {'constants_group': {'flags': 'ClearFlags'}})
 	])
-	gen.bind_method(shared_geometry, 'SetMaterial', 'bool', ['uint32_t index', 'std::shared_ptr<hg::RenderMaterial> material'], ['proxy'])
+	gen.bind_function_overloads('hg::SetViewPerspective', [
+		('void', ['bgfx::ViewId id', 'int x', 'int y', 'int res_x', 'int res_y', 'const hg::Mat4 &world'], {}),
+		('void', ['bgfx::ViewId id', 'int x', 'int y', 'int res_x', 'int res_y', 'const hg::Mat4 &world', 'float znear', 'float zfar'], {}),
+		('void', ['bgfx::ViewId id', 'int x', 'int y', 'int res_x', 'int res_y', 'const hg::Mat4 &world', 'float znear', 'float zfar', 'float zoom_factor'], {}),
+		('void', ['bgfx::ViewId id', 'int x', 'int y', 'int res_x', 'int res_y', 'const hg::Mat4 &world', 'float znear', 'float zfar', 'float zoom_factor', 'uint16_t flags', 'const hg::Color &color', 'float depth', 'uint8_t stencil'], {'constants_group': {'flags': 'ClearFlags'}})
+	])
+	gen.bind_function_overloads('hg::SetViewOrthographic', [
+		('void', ['bgfx::ViewId id', 'int x', 'int y', 'int res_x', 'int res_y', 'const hg::Mat4 &world'], {}),
+		('void', ['bgfx::ViewId id', 'int x', 'int y', 'int res_x', 'int res_y', 'const hg::Mat4 &world', 'float znear', 'float zfar'], {}),
+		('void', ['bgfx::ViewId id', 'int x', 'int y', 'int res_x', 'int res_y', 'const hg::Mat4 &world', 'float znear', 'float zfar', 'float size'], {}),
+		('void', ['bgfx::ViewId id', 'int x', 'int y', 'int res_x', 'int res_y', 'const hg::Mat4 &world', 'float znear', 'float zfar', 'float size', 'uint16_t flags', 'const hg::Color &color', 'float depth', 'uint8_t stencil'], {'constants_group': {'flags': 'ClearFlags'}})
+	])
 
-	gen.insert_binding_code('static hg::MinMax _render_Geometry_GetMinMax(hg::RenderGeometry *geo) { return geo->minmax; }')
-	gen.bind_method(shared_geometry, 'GetMinMax', 'hg::MinMax', [], {'proxy': None, 'route': route_lambda('_render_Geometry_GetMinMax')})
+	# vertex declaration
+	gen.bind_named_enum('bgfx::Attrib::Enum', ['Position', 'Normal', 'Tangent', 'Bitangent', 'Color0', 'Color1', 'Color2', 'Color3', 'Indices', 'Weight',
+						'TexCoord0', 'TexCoord1', 'TexCoord2', 'TexCoord3', 'TexCoord4', 'TexCoord5', 'TexCoord6', 'TexCoord7'], bound_name='Attrib', prefix='A_')
+	gen.bind_named_enum('bgfx::AttribType::Enum', ['Uint8', 'Uint10', 'Int16', 'Half', 'Float'], bound_name='AttribType', prefix='AT_')
 
-	gen.insert_binding_code('''
-static std::shared_ptr<hg::RenderMaterial> _RenderGeometry_GetMaterial(hg::RenderGeometry *geo, uint32_t idx) {
-	if (idx >= geo->materials.size())
-		return nullptr;
-	return geo->materials[idx];
-}
+	vtx_decl = gen.begin_class('bgfx::VertexLayout')
+	gen.bind_constructor(vtx_decl, [])
+	gen.bind_method(vtx_decl, 'begin', 'bgfx::VertexLayout &', [], bound_name='Begin')
+	gen.bind_method(vtx_decl, 'add', 'bgfx::VertexLayout &', ['bgfx::Attrib::Enum attrib', 'uint8_t count', 'bgfx::AttribType::Enum type', '?bool normalized', '?bool as_int'], bound_name='Add')
+	gen.bind_method(vtx_decl, 'skip', 'bgfx::VertexLayout &', ['uint8_t size'], bound_name='Skip')
+	gen.bind_method(vtx_decl, 'end', 'void', [], bound_name='End')
+	gen.bind_method(vtx_decl, 'has', 'bool', ['bgfx::Attrib::Enum attrib'], bound_name='Has')
+	gen.bind_method(vtx_decl, 'getOffset', 'uint16_t', ['bgfx::Attrib::Enum attrib'], bound_name='GetOffset')
+	gen.bind_method(vtx_decl, 'getStride', 'uint16_t', [], bound_name='GetStride')
+	gen.bind_method(vtx_decl, 'getSize', 'uint32_t', ['uint32_t count'], bound_name='GetSize')
+	gen.end_class(vtx_decl)
 
-static size_t _RenderGeometry_GetMaterialCount(hg::RenderGeometry *geo) { return geo->materials.size(); } 
-''')
-	gen.bind_method(shared_geometry, 'GetMaterial', 'std::shared_ptr<hg::RenderMaterial>', ['uint32_t index'], {'proxy': None, 'route': route_lambda('_RenderGeometry_GetMaterial'), 'check_rval': check_bool_rval_lambda(gen, 'Empty material')})
-	gen.bind_method(shared_geometry, 'GetMaterialCount', 'size_t', [], {'proxy': None, 'route': route_lambda('_RenderGeometry_GetMaterialCount')})
+	gen.bind_function('hg::VertexLayoutPosFloatNormFloat', 'bgfx::VertexLayout', [])
+	gen.bind_function('hg::VertexLayoutPosFloatNormUInt8', 'bgfx::VertexLayout', [])
+	gen.bind_function('hg::VertexLayoutPosFloatColorFloat', 'bgfx::VertexLayout', [])
+	gen.bind_function('hg::VertexLayoutPosFloatColorUInt8', 'bgfx::VertexLayout', [])
+	gen.bind_function('hg::VertexLayoutPosFloatTexCoord0UInt8', 'bgfx::VertexLayout', [])
+	gen.bind_function('hg::VertexLayoutPosFloatNormUInt8TexCoord0UInt8', 'bgfx::VertexLayout', [])
 
-	gen.insert_binding_code('''
-static void _RenderGeometry_SetLodProxy(hg::RenderGeometry *geo, std::shared_ptr<hg::RenderGeometry> &proxy, float distance) {
-	geo->flag = hg::GeometryFlag(geo->flag & ~hg::GeometryFlagNullLodProxy);
-	geo->lod_proxy = proxy;
-	geo->lod_distance = distance;
-}
+	# program
+	bgfx_program_handle = gen.begin_class('bgfx::ProgramHandle')
+	bgfx_program_handle._inline = True
+	gen.end_class(bgfx_program_handle)
 
-static void _RenderGeometry_SetNullLodProxy(hg::RenderGeometry *geo) {
-	geo->flag = hg::GeometryFlag(geo->flag | hg::GeometryFlagNullLodProxy);
-	geo->lod_proxy = nullptr;
-	geo->lod_distance = 0;
-}
+	gen.bind_function_overloads('hg::LoadProgramFromFile', [
+		('bgfx::ProgramHandle', ['const char *path'], []),
+		('bgfx::ProgramHandle', ['const char *vertex_shader_path', 'const char *fragment_shader_path'], [])
+	])
+	gen.bind_function_overloads('hg::LoadProgramFromAssets', [
+		('bgfx::ProgramHandle', ['const char *name'], []),
+		('bgfx::ProgramHandle', ['const char *vertex_shader_name', 'const char *fragment_shader_name'], [])
+	])
+	
+	gen.insert_binding_code('static void _DestroyProgram(bgfx::ProgramHandle h) { bgfx::destroy(h); }')
+	gen.bind_function('DestroyProgram', 'void', ['bgfx::ProgramHandle h'], {'route': route_lambda('_DestroyProgram')})
 
-static void _RenderGeometry_SetShadowProxy(hg::RenderGeometry *geo, std::shared_ptr<hg::RenderGeometry> &proxy) {
-	geo->flag = hg::GeometryFlag(geo->flag & ~hg::GeometryFlagNullShadowProxy);
-	geo->shadow_proxy = proxy;
-}
+	# TextureInfo
+	texture_info = gen.begin_class('bgfx::TextureInfo')
+	gen.bind_members(texture_info, ['bgfx::TextureFormat::Enum format', 'uint32_t storageSize',
+		'uint16_t width', 'uint16_t height', 'uint16_t depth', 'uint16_t numLayers',
+		'uint8_t numMips', 'uint8_t bitsPerPixel', 'bool cubeMap'
+	])
+	gen.end_class(texture_info)
 
-static void _RenderGeometry_SetNullShadowProxy(hg::RenderGeometry *geo) {
-	geo->flag = hg::GeometryFlag(geo->flag | hg::GeometryFlagNullShadowProxy);
-	geo->shadow_proxy = nullptr;
-}
-''')
-	gen.bind_method(shared_geometry, 'SetLodProxy', 'void', ['std::shared_ptr<hg::RenderGeometry> &proxy', 'float distance'], {'proxy': None, 'route': route_lambda('_RenderGeometry_SetLodProxy')})
-	gen.bind_method(shared_geometry, 'SetNullLodProxy', 'void', [], {'proxy': None, 'route': route_lambda('_RenderGeometry_SetNullLodProxy')})
-	gen.bind_method(shared_geometry, 'SetShadowProxy', 'void', ['std::shared_ptr<hg::RenderGeometry> &proxy'], {'proxy': None, 'route': route_lambda('_RenderGeometry_SetShadowProxy')})
-	gen.bind_method(shared_geometry, 'SetNullShadowProxy', 'void', [], {'proxy': None, 'route': route_lambda('_RenderGeometry_SetNullShadowProxy')})
+	# texture flags
+	gen.bind_constants('uint64_t', [
+		('TF_UMirror', 'BGFX_SAMPLER_U_MIRROR'),
+		('TF_UClamp', 'BGFX_SAMPLER_U_CLAMP'),
+		('TF_UBorder', 'BGFX_SAMPLER_U_BORDER'),
+		('TF_VMirror', 'BGFX_SAMPLER_V_MIRROR'),
+		('TF_VClamp', 'BGFX_SAMPLER_V_CLAMP'),
+		('TF_VBorder', 'BGFX_SAMPLER_V_BORDER'),
+		('TF_WMirror', 'BGFX_SAMPLER_W_MIRROR'),
+		('TF_WClamp', 'BGFX_SAMPLER_W_CLAMP'),
+		('TF_WBorder', 'BGFX_SAMPLER_W_BORDER'),
+		('TF_SamplerMinPoint', 'BGFX_SAMPLER_MIN_POINT'),
+		('TF_SamplerMinAnisotropic', 'BGFX_SAMPLER_MIN_ANISOTROPIC'),
+		('TF_SamplerMagPoint', 'BGFX_SAMPLER_MAG_POINT'),
+		('TF_SamplerMagAnisotropic', 'BGFX_SAMPLER_MAG_ANISOTROPIC'),
+		('TF_BlitDestination', 'BGFX_TEXTURE_BLIT_DST'),
+		('TF_ReadBack', 'BGFX_TEXTURE_READ_BACK'),
+		('TF_RenderTarget', 'BGFX_TEXTURE_RT')
+	], 'TextureFlags')
 
-	gen.end_class(shared_geometry)
+	gen.bind_function('hg::LoadTextureFlagsFromFile', 'uint64_t', ['const std::string &path'], {'rval_constants_group': 'TextureFlags'})
+	gen.bind_function('hg::LoadTextureFlagsFromAssets', 'uint64_t', ['const std::string &name'], {'rval_constants_group': 'TextureFlags'})
 
-	# hg::RenderStatistics
-	gen.add_include('engine/render_stats.h')
+	# texture
+	gen.bind_function('hg::CreateTexture', 'hg::Texture', ['int width', 'int height', 'const char *name', 'uint64_t flags', '?bgfx::TextureFormat::Enum format'], {'constants_group': {'flags': 'TextureFlags'}})
+	gen.bind_function('hg::CreateTextureFromPicture', 'hg::Texture', ['const hg::Picture& pic', 'const char *name', 'uint64_t flags', '?bgfx::TextureFormat::Enum format'], {'constants_group': {'flags': 'TextureFlags'}})
 
-	render_stats = gen.begin_class('hg::RenderStatistics')
-	gen.bind_members(render_stats, ['hg::time_ns frame_start', 'size_t render_primitive_drawn', 'size_t line_drawn', 'size_t triangle_drawn', 'size_t instanced_batch_count', 'size_t instanced_batch_size'])
-	gen.end_class(render_stats)
+	gen.bind_function('hg::UpdateTextureFromPicture', 'void', ['hg::Texture &tex', 'const hg::Picture &pic'])
 
-	# hg::ViewState
+	gen.bind_function('hg::LoadTextureFromFile', 'hg::Texture', ['const char *path', 'uint64_t flags', 'bgfx::TextureInfo *info'], {'arg_out': ['info'], 'constants_group': {'flags': 'TextureFlags'}})
+	gen.bind_function('hg::LoadTextureFromAssets', 'hg::Texture', ['const char *path', 'uint64_t flags', 'bgfx::TextureInfo *info'], {'arg_out': ['info'], 'constants_group': {'flags': 'TextureFlags'}})
+
+	gen.insert_binding_code('static void _DestroyTexture(const hg::Texture &tex) { bgfx::destroy(tex.handle); }')
+	gen.bind_function('DestroyTexture', 'void', ['const hg::Texture &tex'], {'route': route_lambda('_DestroyTexture')})
+
+	gen.bind_function('hg::ProcessTextureLoadQueue', 'size_t', ['hg::PipelineResources &res', '?hg::time_ns t_budget'])
+
+	gen.bind_function('hg::ProcessModelLoadQueue', 'size_t', ['hg::PipelineResources &res', '?hg::time_ns t_budget'])
+	gen.bind_function('hg::ProcessLoadQueues', 'size_t', ['hg::PipelineResources &res', '?hg::time_ns t_budget'])
+
+	# ModelRef/TextureRef/MaterialRef/PipelineProgramRef
+	model_ref = gen.begin_class('hg::ModelRef')
+	model_ref._inline = True
+	gen.bind_comparison_ops(model_ref, ['==', '!='], ['const hg::ModelRef &m'])
+	gen.end_class(model_ref)
+	gen.bind_variable("const hg::ModelRef hg::InvalidModelRef")
+
+	texture_ref = gen.begin_class('hg::TextureRef')
+	texture_ref._inline = True
+	gen.bind_comparison_ops(texture_ref, ['==', '!='], ['const hg::TextureRef &t'])
+	gen.end_class(texture_ref)
+	gen.bind_variable("const hg::TextureRef hg::InvalidTextureRef")
+
+	material_ref = gen.begin_class('hg::MaterialRef')
+	material_ref._inline = True
+	gen.bind_comparison_ops(material_ref, ['==', '!='], ['const hg::MaterialRef &m'])
+	gen.end_class(material_ref)
+	gen.bind_variable("const hg::MaterialRef hg::InvalidMaterialRef")
+
+	pprogram_ref = gen.begin_class('hg::PipelineProgramRef')
+	pprogram_ref._inline = True
+	gen.bind_comparison_ops(pprogram_ref, ['==', '!='], ['const hg::PipelineProgramRef &p'])
+	gen.end_class(pprogram_ref)
+	gen.bind_variable("const hg::PipelineProgramRef hg::InvalidPipelineProgramRef")
+
+	gen.bind_function('CaptureTexture', 'uint32_t', ['const hg::PipelineResources &resources', 'const hg::TextureRef &tex', 'hg::Picture &pic'])
+
+	# Texture with pipeline
+	gen.bind_function('hg::LoadTextureFromFile', 'hg::TextureRef', ['const char *path', 'uint32_t flags', 'hg::PipelineResources &resources'])
+	gen.bind_function('hg::LoadTextureFromAssets', 'hg::TextureRef', ['const char *path', 'uint32_t flags', 'hg::PipelineResources &resources'])
+
+	# Texture
+	texture_with_flags = gen.begin_class('hg::Texture')
+	texture_with_flags._inline = True
+	gen.end_class(texture_with_flags)
+
+	gen.insert_binding_code('static bool _IsValid(const hg::Texture &t) { return bgfx::isValid(t.handle); }')
+	gen.bind_function('hg::IsValid', 'bool', ['const hg::Texture &t'], {'route': route_lambda('_IsValid')})
+
+	# UniformSetValue
+	uniform_set_value = gen.begin_class('hg::UniformSetValue')
+	gen.end_class(uniform_set_value)
+
+	bind_std_vector(gen, uniform_set_value)
+
+	gen.bind_function('hg::MakeUniformSetValue', 'hg::UniformSetValue', ['const char *name', 'float v'])
+	gen.bind_function('hg::MakeUniformSetValue', 'hg::UniformSetValue', ['const char *name', 'const hg::tVec2<float> &v'])
+	gen.bind_function('hg::MakeUniformSetValue', 'hg::UniformSetValue', ['const char *name', 'const hg::Vec3 &v'])
+	gen.bind_function('hg::MakeUniformSetValue', 'hg::UniformSetValue', ['const char *name', 'const hg::Vec4 &v'])
+	gen.bind_function('hg::MakeUniformSetValue', 'hg::UniformSetValue', ['const char *name', 'const hg::Mat3 &v'])
+	gen.bind_function('hg::MakeUniformSetValue', 'hg::UniformSetValue', ['const char *name', 'const hg::Mat4 &v'])
+	gen.bind_function('hg::MakeUniformSetValue', 'hg::UniformSetValue', ['const char *name', 'const hg::Mat44 &v'])
+
+	# UniformSetTexture
+	uniform_set_texture = gen.begin_class('hg::UniformSetTexture')
+	gen.end_class(uniform_set_texture)
+
+	bind_std_vector(gen, uniform_set_texture)
+
+	gen.bind_function('hg::MakeUniformSetTexture', 'hg::UniformSetTexture', ['const char *name', 'const hg::Texture &texture', 'uint8_t stage'])
+
+	# PipelineProgram
+	pipeline_program = gen.begin_class('hg::PipelineProgram')
+	gen.end_class(pipeline_program)
+
+	gen.bind_function('hg::LoadPipelineProgramFromFile', 'hg::PipelineProgram', ['const char *path', 'hg::PipelineResources &resources', 'const hg::PipelineInfo &pipeline'], [])
+	gen.bind_function('hg::LoadPipelineProgramFromAssets', 'hg::PipelineProgram', ['const char *name', 'hg::PipelineResources &resources', 'const hg::PipelineInfo &pipeline'], [])
+
+	gen.bind_function('hg::LoadPipelineProgramRefFromFile', 'hg::PipelineProgramRef', ['const char *path', 'hg::PipelineResources &resources', 'const hg::PipelineInfo &pipeline'], [])
+	gen.bind_function('hg::LoadPipelineProgramRefFromAssets', 'hg::PipelineProgramRef', ['const char *name', 'hg::PipelineResources &resources', 'const hg::PipelineInfo &pipeline'], [])
+
+	# PipelineDisplayList
+	#pipeline_display_list = gen.begin_class('hg::PipelineDisplayList')
+	#gen.end_class(pipeline_display_list)
+
+	#bind_std_vector(gen, pipeline_display_list)
+
+	# ViewState
 	view_state = gen.begin_class('hg::ViewState')
-	gen.bind_members(view_state, ['hg::Rect<float> viewport', 'hg::Rect<float> clipping', 'hg::Matrix4 view', 'hg::Matrix44 projection', 'hg::FrustumPlanes frustum_planes', 'hg::Eye eye'])
+	gen.bind_members(view_state, ['hg::Frustum frustum', 'hg::Mat44 proj', 'hg::Mat4 view'])
 	gen.end_class(view_state)
 
-	# hg::RenderSystem
-	gen.bind_named_enum('hg::RenderTechnique', ['TechniqueForward', 'TechniqueDeferred'], prefix='Render')
-	lib.stl.bind_future_T(gen, 'hg::RenderTechnique', 'FutureRenderTechnique')
+	gen.bind_function('hg::ComputeOrthographicViewState', 'hg::ViewState', ['const hg::Mat4 &world', 'float size', 'float znear', 'float zfar', 'const hg::tVec2<float> &aspect_ratio'])
+	gen.bind_function('hg::ComputePerspectiveViewState', 'hg::ViewState', ['const hg::Mat4 &world', 'float fov', 'float znear', 'float zfar', 'const hg::tVec2<float> &aspect_ratio'])
 
-	gen.bind_constructor(shared_render_system, [], ['proxy'])
+	# Material
+	material = gen.begin_class('hg::Material')
+	gen.bind_constructor(material, [])
+	gen.end_class(material)
 
-	gen.bind_method(shared_render_system, 'GetRenderer', 'const std::shared_ptr<hg::Renderer> &', [], ['proxy'])
+	bind_std_vector(gen, material)
 
-	gen.bind_method(shared_render_system, 'Initialize', 'bool', ['std::shared_ptr<hg::Renderer> renderer', '?bool support_3d'], ['proxy'])
-	gen.bind_method(shared_render_system, 'IsInitialized', 'bool', [], ['proxy'])
+	gen.bind_function('hg::SetMaterialProgram', 'void', ['hg::Material &mat', 'hg::PipelineProgramRef program'])
+	gen.bind_function('hg::SetMaterialValue', 'void', ['hg::Material &mat', 'const char *name', 'float v'])
+	gen.bind_function('hg::SetMaterialValue', 'void', ['hg::Material &mat', 'const char *name', 'const hg::tVec2<float> &v'])
+	gen.bind_function('hg::SetMaterialValue', 'void', ['hg::Material &mat', 'const char *name', 'const hg::Vec3 &v'])
+	gen.bind_function('hg::SetMaterialValue', 'void', ['hg::Material &mat', 'const char *name', 'const hg::Vec4 &v'])
+	gen.bind_function('hg::SetMaterialValue', 'void', ['hg::Material &mat', 'const char *name', 'const hg::Mat3 &m'])
+	gen.bind_function('hg::SetMaterialValue', 'void', ['hg::Material &mat', 'const char *name', 'const hg::Mat4 &m'])
+	gen.bind_function('hg::SetMaterialValue', 'void', ['hg::Material &mat', 'const char *name', 'const hg::Mat44 &m'])
+	gen.bind_function('hg::SetMaterialTexture', 'void', ['hg::Material &mat', 'const char *name', 'hg::TextureRef texture', 'uint8_t stage'])
+	gen.bind_function('hg::SetMaterialTextureRef', 'void', ['hg::Material &mat', 'const char *name', 'hg::TextureRef texture'])
 
-	gen.bind_method(shared_render_system, 'GetInternalResolution', 'hg::tVector2<int>', [], ['proxy'])
-	gen.bind_method(shared_render_system, 'SetInternalResolution', 'void', ['const hg::tVector2<int> &resolution'], ['proxy'])
-
-	gen.bind_method(shared_render_system, 'GetViewportToInternalResolutionRatio', 'hg::tVector2<float>', [], ['proxy'])
-
-	gen.bind_method(shared_render_system, 'GetStatistics', 'hg::RenderStatistics', [], ['proxy'])
-
-	gen.bind_method(shared_render_system, 'SetAA', 'void', ['uint32_t sample_count'], ['proxy'])
-	gen.bind_method(shared_render_system, 'PurgeCache', 'size_t', [], ['proxy'])
-	gen.bind_method(shared_render_system, 'RefreshCacheEntry', 'void', ['const std::string &name'], ['proxy'])
-
-	gen.bind_method(shared_render_system, 'HasMaterial', 'bool', ['const std::string &name'], ['proxy'])
-	gen.bind_method(shared_render_system, 'GetMaterial', 'std::shared_ptr<hg::RenderMaterial>', ['const std::string &name'],  {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'Material not found')})
-	gen.bind_method(shared_render_system, 'LoadMaterial', 'std::shared_ptr<hg::RenderMaterial>', ['const std::string &name', '?bool use_cache'], ['proxy'])
-	gen.bind_method(shared_render_system, 'CreateMaterial', 'std::shared_ptr<hg::RenderMaterial>', ['const std::shared_ptr<hg::Material> &material', '?bool use_cache'], ['proxy'])
-
-	gen.bind_method(shared_render_system, 'HasGeometry', 'bool', ['const std::string &name'], ['proxy'])
-	gen.bind_method(shared_render_system, 'GetGeometry', 'std::shared_ptr<hg::RenderGeometry>', ['const std::string &name'], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'Geometry not found')})
-	gen.bind_method(shared_render_system, 'LoadGeometry', 'std::shared_ptr<hg::RenderGeometry>', ['const std::string &name', '?bool use_cache'], ['proxy'])
-	gen.bind_method(shared_render_system, 'CreateGeometry', 'std::shared_ptr<hg::RenderGeometry>', ['const std::shared_ptr<hg::Geometry> &geometry', '?bool use_cache'], ['proxy'])
-
-	gen.bind_method(shared_render_system, 'HasSurfaceShader', 'bool', ['const std::string &name'], ['proxy'])
-	gen.bind_method(shared_render_system, 'GetSurfaceShader', 'std::shared_ptr<hg::SurfaceShader>', ['const std::string &name'], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'Surface shader not found')})
-	gen.bind_method(shared_render_system, 'LoadSurfaceShader', 'std::shared_ptr<hg::SurfaceShader>', ['const std::string &name', '?bool use_cache'], ['proxy'])
-
-	gen.bind_method(shared_render_system, 'GetRenderTechnique', 'hg::RenderTechnique', [], ['proxy'])
-	gen.bind_method(shared_render_system, 'SetRenderTechnique', 'void', ['hg::RenderTechnique render_technique'], ['proxy'])
-
-	gen.bind_method(shared_render_system, 'GetFrameClock', 'hg::time_ns', [], ['proxy'])
-
-	gen.bind_method(shared_render_system, 'SetView', 'void', ['const hg::Matrix4 &view', 'const hg::Matrix44 &projection', '?hg::Eye eye'], ['proxy'])
-	gen.bind_method(shared_render_system, 'GetEye', 'hg::Eye', [], ['proxy'])
-
-	gen.bind_method(shared_render_system, 'GetViewState', 'hg::ViewState', [], ['proxy'])
-	gen.bind_method(shared_render_system, 'SetViewState', 'void', ['const hg::ViewState &view_state'], ['proxy'])
-
-	gen.bind_method(shared_render_system, 'GetViewFrustum', 'const hg::FrustumPlanes &', [], ['proxy'])
-
-	gen.bind_method(shared_render_system, 'DrawRasterFontBatch', 'void', [], ['proxy'])
-
-	gen.bind_method(shared_render_system, 'SetShaderAuto', 'bool', ['bool has_color', '?const hg::Texture &texture'], ['proxy'])
-
-	gen.insert_binding_code('''\
-static void RenderSystemDrawLine_wrapper(hg::RenderSystem *render_system, uint32_t count, const std::vector<hg::Vector3> &pos) { render_system->DrawLine(count, pos.data()); }
-static void RenderSystemDrawLine_wrapper(hg::RenderSystem *render_system, uint32_t count, const std::vector<hg::Vector3> &pos, const std::vector<hg::Color> &col) { render_system->DrawLine(count, pos.data(), col.data()); }
-static void RenderSystemDrawLine_wrapper(hg::RenderSystem *render_system, uint32_t count, const std::vector<hg::Vector3> &pos, const std::vector<hg::Color> &col, const std::vector<hg::tVector2<float>> &uv) { render_system->DrawLine(count, pos.data(), col.data(), uv.data()); }
-
-static void RenderSystemDrawTriangle_wrapper(hg::RenderSystem *render_system, uint32_t count, const std::vector<hg::Vector3> &pos) { render_system->DrawTriangle(count, pos.data()); }
-static void RenderSystemDrawTriangle_wrapper(hg::RenderSystem *render_system, uint32_t count, const std::vector<hg::Vector3> &pos, const std::vector<hg::Color> &col) { render_system->DrawTriangle(count, pos.data(), col.data()); }
-static void RenderSystemDrawTriangle_wrapper(hg::RenderSystem *render_system, uint32_t count, const std::vector<hg::Vector3> &pos, const std::vector<hg::Color> &col, const std::vector<hg::tVector2<float>> &uv) { render_system->DrawTriangle(count, pos.data(), col.data(), uv.data()); }
-
-static void RenderSystemDrawSprite_wrapper(hg::RenderSystem *render_system, uint32_t count, const std::vector<hg::Vector3> &pos) { render_system->DrawSprite(count, pos.data()); }
-static void RenderSystemDrawSprite_wrapper(hg::RenderSystem *render_system, uint32_t count, const std::vector<hg::Vector3> &pos, const std::vector<hg::Color> &col) { render_system->DrawSprite(count, pos.data(), col.data()); }
-static void RenderSystemDrawSprite_wrapper(hg::RenderSystem *render_system, uint32_t count, const std::vector<hg::Vector3> &pos, const std::vector<hg::Color> &col, const std::vector<float> &size) { render_system->DrawSprite(count, pos.data(), col.data(), size.data()); }
-\n''', 'wrapper signatures to cast target language list and std::vector to raw pointers')
-
-	DrawLine_wrapper_route = lambda args: 'RenderSystemDrawLine_wrapper(%s);' % (', '.join(args))
-	DrawTriangle_wrapper_route = lambda args: 'RenderSystemDrawTriangle_wrapper(%s);' % (', '.join(args))
-	DrawSprite_wrapper_route = lambda args: 'RenderSystemDrawSprite_wrapper(%s);' % (', '.join(args))
-
-	draw_line_protos = [
-		('void', ['uint32_t count', 'const std::vector<hg::Vector3> &pos'], {'proxy': None, 'route': DrawLine_wrapper_route}),
-		('void', ['uint32_t count', 'const std::vector<hg::Vector3> &pos', 'const std::vector<hg::Color> &col'], {'proxy': None, 'route': DrawLine_wrapper_route}),
-		('void', ['uint32_t count', 'const std::vector<hg::Vector3> &pos', 'const std::vector<hg::Color> &col', 'const std::vector<hg::tVector2<float>> &uv'], {'proxy': None, 'route': DrawLine_wrapper_route})	]
-	gen.bind_method_overloads(shared_render_system, 'DrawLine', expand_std_vector_proto(gen, draw_line_protos))
-
-	draw_triangle_protos = [
-		('void', ['uint32_t count', 'const std::vector<hg::Vector3> &pos'], {'proxy': None, 'route': DrawTriangle_wrapper_route}),
-		('void', ['uint32_t count', 'const std::vector<hg::Vector3> &pos', 'const std::vector<hg::Color> &col'], {'proxy': None, 'route': DrawTriangle_wrapper_route}),
-		('void', ['uint32_t count', 'const std::vector<hg::Vector3> &pos', 'const std::vector<hg::Color> &col', 'const std::vector<hg::tVector2<float>> &uv'], {'proxy': None, 'route': DrawTriangle_wrapper_route})	]
-	gen.bind_method_overloads(shared_render_system, 'DrawTriangle', expand_std_vector_proto(gen, draw_triangle_protos))
-
-	draw_sprite_protos = [
-		('void', ['uint32_t count', 'const std::vector<hg::Vector3> &pos'], {'proxy': None, 'route': DrawSprite_wrapper_route}),
-		('void', ['uint32_t count', 'const std::vector<hg::Vector3> &pos', 'const std::vector<hg::Color> &col'], {'proxy': None, 'route': DrawSprite_wrapper_route}),
-		('void', ['uint32_t count', 'const std::vector<hg::Vector3> &pos', 'const std::vector<hg::Color> &col', 'const std::vector<float> &size'], {'proxy': None, 'route': DrawSprite_wrapper_route})	]
-	gen.bind_method_overloads(shared_render_system, 'DrawSprite', expand_std_vector_proto(gen, draw_sprite_protos))
+	gen.bind_function('hg::GetMaterialTexture', 'hg::TextureRef', ['hg::Material &mat', 'const char *name'])
+	gen.bind_function('hg::GetMaterialTextures', 'std::vector<std::string>', ['hg::Material &mat'])
+	gen.bind_function('hg::GetMaterialValues', 'std::vector<std::string>', ['hg::Material &mat'])
 	
-	gen.insert_binding_code('''\
-static void RenderSystemDrawLineAuto_wrapper(hg::RenderSystem *render_system, uint32_t count, const std::vector<hg::Vector3> &pos) { render_system->DrawLineAuto(count, pos.data()); }
-static void RenderSystemDrawLineAuto_wrapper(hg::RenderSystem *render_system, uint32_t count, const std::vector<hg::Vector3> &pos, const std::vector<hg::Color> &col) { render_system->DrawLineAuto(count, pos.data(), col.data()); }
-static void RenderSystemDrawLineAuto_wrapper(hg::RenderSystem *render_system, uint32_t count, const std::vector<hg::Vector3> &pos, const std::vector<hg::Color> &col, const std::vector<hg::tVector2<float>> &uv, const hg::Texture *texture) { render_system->DrawLineAuto(count, pos.data(), col.data(), uv.data(), texture); }
+	gen.bind_named_enum('hg::FaceCulling', ['FC_Disabled', 'FC_Clockwise', 'FC_CounterClockwise'])
+	gen.bind_function('hg::GetMaterialFaceCulling', 'hg::FaceCulling', ['const hg::Material &mat'])
+	gen.bind_function('hg::SetMaterialFaceCulling', 'void', ['hg::Material &mat', 'hg::FaceCulling culling'])
 
-static void RenderSystemDrawTriangleAuto_wrapper(hg::RenderSystem *render_system, uint32_t count, const std::vector<hg::Vector3> &pos) { render_system->DrawTriangleAuto(count, pos.data()); }
-static void RenderSystemDrawTriangleAuto_wrapper(hg::RenderSystem *render_system, uint32_t count, const std::vector<hg::Vector3> &pos, const std::vector<hg::Color> &col) { render_system->DrawTriangleAuto(count, pos.data(), col.data()); }
-static void RenderSystemDrawTriangleAuto_wrapper(hg::RenderSystem *render_system, uint32_t count, const std::vector<hg::Vector3> &pos, const std::vector<hg::Color> &col, const std::vector<hg::tVector2<float>> &uv, const hg::Texture *texture) { render_system->DrawTriangleAuto(count, pos.data(), col.data(), uv.data(), texture); }
+	gen.bind_named_enum('hg::DepthTest', ['DT_Less', 'DT_LessEqual', 'DT_Equal', 'DT_GreaterEqual', 'DT_Greater', 'DT_NotEqual', 'DT_Never', 'DT_Always', 'DT_Disabled'])
+	gen.bind_function('hg::GetMaterialDepthTest', 'hg::DepthTest', ['const hg::Material &mat'])
+	gen.bind_function('hg::SetMaterialDepthTest', 'void', ['hg::Material &mat', 'hg::DepthTest test'])
 
-static void RenderSystemDrawSpriteAuto_wrapper(hg::RenderSystem *render_system, uint32_t count, const std::vector<hg::Vector3> &pos, const hg::Texture &texture) { render_system->DrawSpriteAuto(count, pos.data(), texture); }
-static void RenderSystemDrawSpriteAuto_wrapper(hg::RenderSystem *render_system, uint32_t count, const std::vector<hg::Vector3> &pos, const hg::Texture &texture, const std::vector<hg::Color> &col) { render_system->DrawSpriteAuto(count, pos.data(), texture, col.data()); }
-static void RenderSystemDrawSpriteAuto_wrapper(hg::RenderSystem *render_system, uint32_t count, const std::vector<hg::Vector3> &pos, const hg::Texture &texture, const std::vector<hg::Color> &col, const std::vector<float> &size) { render_system->DrawSpriteAuto(count, pos.data(), texture, col.data(), size.data()); }
-\n''', 'wrapper signatures to cast target language list and std::vector to raw pointers')
+	gen.bind_named_enum('hg::BlendMode', ['BM_Additive', 'BM_Alpha', 'BM_Darken', 'BM_Lighten', 'BM_Multiply', 'BM_Opaque', 'BM_Screen', 'BM_LinearBurn', 'BM_AlphaRGB_AddAlpha','BM_Undefined'])
+	gen.bind_function('hg::GetMaterialBlendMode', 'hg::BlendMode', ['const hg::Material &mat'])
+	gen.bind_function('hg::SetMaterialBlendMode', 'void', ['hg::Material &mat', 'hg::BlendMode mode'])
 
-	DrawLineAuto_wrapper_route = lambda args: 'RenderSystemDrawLineAuto_wrapper(%s);' % (', '.join(args))
-	DrawTriangleAuto_wrapper_route = lambda args: 'RenderSystemDrawTriangleAuto_wrapper(%s);' % (', '.join(args))
-	DrawSpriteAuto_wrapper_route = lambda args: 'RenderSystemDrawSpriteAuto_wrapper(%s);' % (', '.join(args))
+	gen.bind_function('hg::GetMaterialWriteRGBA', 'void', ['const hg::Material &mat', 'bool &write_r', 'bool &write_g', 'bool &write_b', 'bool &write_a'], {'arg_out': ['write_r', 'write_g', 'write_b', 'write_a']})
+	gen.bind_function('hg::SetMaterialWriteRGBA', 'void', ['hg::Material &mat', 'bool write_r', 'bool write_g', 'bool write_b', 'bool write_a'])
 
-	draw_line_auto_protos = [
-		('void', ['uint32_t count', 'const std::vector<hg::Vector3> &pos'], {'proxy': None, 'route': DrawLineAuto_wrapper_route}),
-		('void', ['uint32_t count', 'const std::vector<hg::Vector3> &pos', 'const std::vector<hg::Color> &col'], {'proxy': None, 'route': DrawLineAuto_wrapper_route}),
-		('void', ['uint32_t count', 'const std::vector<hg::Vector3> &pos', 'const std::vector<hg::Color> &col', 'const std::vector<hg::tVector2<float>> &uv', 'const hg::Texture *texture'], {'proxy': None, 'route': DrawLineAuto_wrapper_route})	]
-	gen.bind_method_overloads(shared_render_system, 'DrawLineAuto', expand_std_vector_proto(gen, draw_line_auto_protos))
+	gen.bind_function('hg::GetMaterialNormalMapInWorldSpace', 'bool', ['const hg::Material &mat'])
+	gen.bind_function('hg::SetMaterialNormalMapInWorldSpace', 'void', ['hg::Material &mat', 'bool enable'])
 
-	draw_triangle_auto_protos = [
-		('void', ['uint32_t count', 'const std::vector<hg::Vector3> &pos'], {'proxy': None, 'route': DrawTriangleAuto_wrapper_route}),
-		('void', ['uint32_t count', 'const std::vector<hg::Vector3> &pos', 'const std::vector<hg::Color> &col'], {'proxy': None, 'route': DrawTriangleAuto_wrapper_route}),
-		('void', ['uint32_t count', 'const std::vector<hg::Vector3> &pos', 'const std::vector<hg::Color> &col', 'const std::vector<hg::tVector2<float>> &uv', 'const hg::Texture *texture'], {'proxy': None, 'route': DrawTriangleAuto_wrapper_route})	]
-	gen.bind_method_overloads(shared_render_system, 'DrawTriangleAuto', expand_std_vector_proto(gen, draw_triangle_auto_protos))
+	gen.bind_function('hg::GetMaterialWriteZ', 'bool', ['const hg::Material &mat'])
+	gen.bind_function('hg::SetMaterialWriteZ', 'void', ['hg::Material &mat', 'bool enable'])
 
-	draw_sprite_auto_protos = [
-		('void', ['uint32_t count', 'const std::vector<hg::Vector3> &pos', 'const hg::Texture &texture'], {'proxy': None, 'route': DrawSpriteAuto_wrapper_route}),
-		('void', ['uint32_t count', 'const std::vector<hg::Vector3> &pos', 'const hg::Texture &texture', 'const std::vector<hg::Color> &col'], {'proxy': None, 'route': DrawSpriteAuto_wrapper_route}),
-		('void', ['uint32_t count', 'const std::vector<hg::Vector3> &pos', 'const hg::Texture &texture', 'const std::vector<hg::Color> &col', 'const std::vector<float> &size'], {'proxy': None, 'route': DrawSpriteAuto_wrapper_route})	]
-	gen.bind_method_overloads(shared_render_system, 'DrawSpriteAuto', expand_std_vector_proto(gen, draw_sprite_auto_protos))
+	gen.bind_function('hg::GetMaterialDiffuseUsesUV1', 'bool', ['const hg::Material &mat'])
+	gen.bind_function('hg::SetMaterialDiffuseUsesUV1', 'void', ['hg::Material &mat', 'bool enable'])
+	gen.bind_function('hg::GetMaterialSpecularUsesUV1', 'bool', ['const hg::Material &mat'])
+	gen.bind_function('hg::SetMaterialSpecularUsesUV1', 'void', ['hg::Material &mat', 'bool enable'])
+	gen.bind_function('hg::GetMaterialAmbientUsesUV1', 'bool', ['const hg::Material &mat'])
+	gen.bind_function('hg::SetMaterialAmbientUsesUV1', 'void', ['hg::Material &mat', 'bool enable'])
 
-	gen.bind_method(shared_render_system, 'DrawQuad2D', 'void', ['const hg::Rect<float> &src_rect', 'const hg::Rect<float> &dst_rect'], ['proxy'])
-	gen.bind_method(shared_render_system, 'DrawFullscreenQuad', 'void', ['const hg::tVector2<float> &uv'], ['proxy'])
+	gen.bind_function('hg::GetMaterialSkinning', 'bool', ['const hg::Material &mat'])
+	gen.bind_function('hg::SetMaterialSkinning', 'void', ['hg::Material &mat', 'bool enable'])
+	gen.bind_function('hg::GetMaterialAlphaCut', 'bool', ['const hg::Material &mat'])
+	gen.bind_function('hg::SetMaterialAlphaCut', 'void', ['hg::Material &mat', 'bool enable'])
 
-	gen.bind_method(shared_render_system, 'DrawGeometrySimple', 'void', ['const hg::RenderGeometry &geometry'], ['proxy'])
-	#gen.bind_method(shared_render_system, 'DrawSceneSimple', 'void', ['const hg::Scene &scene'], ['proxy'])
+	gen.bind_function('hg::CreateMaterial', 'hg::Material', ['hg::PipelineProgramRef prg'])
+	gen.bind_function('hg::CreateMaterial', 'hg::Material', ['hg::PipelineProgramRef prg', 'const char *value_name', 'const hg::Vec4 &value'])
+	gen.bind_function('hg::CreateMaterial', 'hg::Material', ['hg::PipelineProgramRef prg', 'const char *value_name_0', 'const hg::Vec4 &value_0', 'const char *value_name_1', 'const hg::Vec4 &value_1'])
 
-	gen.bind_method(shared_render_system, 'GetShadowMap', 'const std::shared_ptr<hg::Texture> &', [], ['proxy'])
-	
-	gen.insert_binding_code('''static std::shared_ptr<hg::Texture> _GetDepthReadTexture(hg::RenderSystem *render_system) { return render_system->t_depth_read; }\n''', 'Get Depth read texture')
-	gen.bind_method(shared_render_system, 'GetDepthReadTexture', 'std::shared_ptr<hg::Texture>', [], {'proxy': None, 'route': route_lambda('_GetDepthReadTexture')})
+	# RenderState
+	render_state = gen.begin_class('hg::RenderState')
+	gen.end_class(render_state)
 
-	gen.end_class(shared_render_system)
-
-	gen.bind_function('SetShaderEngineValues', 'void', ['hg::RenderSystem &render_system'])
-
-	# hg::RenderSystemAsync
-	gen.add_include('engine/render_system_async.h')
-
-	render_system_async = gen.begin_class('hg::RenderSystemAsync', bound_name='RenderSystemAsync_nobind', noncopyable=True, nobind=True)
-	gen.end_class(render_system_async)
-
-	shared_render_system_async = gen.begin_class('std::shared_ptr<hg::RenderSystemAsync>', bound_name='RenderSystemAsync', features={'proxy': lib.stl.SharedPtrProxyFeature(render_system_async)})
-	gen.bind_constructor(shared_render_system_async, ['std::shared_ptr<hg::RenderSystem> render_system'], ['proxy'])
-
-	gen.bind_method(shared_render_system_async, 'GetRenderSystem', 'const std::shared_ptr<hg::RenderSystem> &', [], ['proxy'])
-
-	gen.bind_method(shared_render_system_async, 'GetRenderTechnique', 'std::future<hg::RenderTechnique>', [], ['proxy'])
-	gen.bind_method(shared_render_system_async, 'SetRenderTechnique', 'void', ['hg::RenderTechnique technique'], ['proxy'])
-
-	gen.bind_method(shared_render_system_async, 'GetInternalResolution', 'std::future<hg::tVector2<int>>', [], ['proxy'])
-	gen.bind_method(shared_render_system_async, 'SetInternalResolution', 'void', ['const hg::tVector2<int> &resolution'], ['proxy'])
-
-	gen.bind_method(shared_render_system_async, 'GetViewportToInternalResolutionRatio', 'std::future<hg::tVector2<float>>', [], ['proxy'])
-
-	gen.bind_method(shared_render_system_async, 'SetAA', 'void', ['uint32_t sample_count'], ['proxy'])
-
-	gen.bind_method(shared_render_system_async, 'SetView', 'void', ['const hg::Matrix4 &view', 'const hg::Matrix44 &projection'], ['proxy'])
-
-	gen.bind_method(shared_render_system_async, 'PurgeCache', 'std::future<size_t>', [], ['proxy'])
-	gen.bind_method(shared_render_system_async, 'RefreshCacheEntry', 'void', ['const std::string &name'], ['proxy'])
-
-	gen.bind_method(shared_render_system_async, 'DrawRasterFontBatch', 'void', [], ['proxy'])
-
-	gen.bind_method(shared_render_system_async, 'HasMaterial', 'bool', ['const std::string &name'], ['proxy'])
-	gen.bind_method(shared_render_system_async, 'GetMaterial', 'std::shared_ptr<hg::RenderMaterial>', ['const std::string &name'], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'Material not found')})
-	gen.bind_method_overloads(shared_render_system_async, 'LoadMaterial', [
-		('std::shared_ptr<hg::RenderMaterial>', ['const std::string &name', '?bool use_cache'], ['proxy']),
-		('std::shared_ptr<hg::RenderMaterial>', ['const std::string &name', 'const std::string &source', '?hg::DocumentFormat format', '?bool use_cache'], ['proxy'])
-	])
-	gen.bind_method(shared_render_system_async, 'CreateMaterial', 'std::shared_ptr<hg::RenderMaterial>', ['const std::shared_ptr<hg::Material> &material', '?bool use_cache'], ['proxy'])
-
-	gen.bind_method(shared_render_system_async, 'HasGeometry', 'bool', ['const std::string &name'], ['proxy'])
-	gen.bind_method(shared_render_system_async, 'GetGeometry', 'std::shared_ptr<hg::RenderGeometry>', ['const std::string &name'], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'Geometry not found')})
-	gen.bind_method_overloads(shared_render_system_async, 'LoadGeometry', [
-		('std::shared_ptr<hg::RenderGeometry>', ['const std::string &name', '?bool use_cache'], ['proxy']),
-		('std::shared_ptr<hg::RenderGeometry>', ['const std::string &name', 'const std::string &source', '?hg::DocumentFormat format', '?bool use_cache'], ['proxy'])
-	])
-	gen.bind_method(shared_render_system_async, 'CreateGeometry', 'std::shared_ptr<hg::RenderGeometry>', ['const std::shared_ptr<hg::Geometry> &geometry', '?bool use_cache'], ['proxy'])
-
-	gen.bind_method(shared_render_system_async, 'HasSurfaceShader', 'bool', ['const std::string &name'], ['proxy'])
-	gen.bind_method(shared_render_system_async, 'GetSurfaceShader', 'std::shared_ptr<hg::SurfaceShader>', ['const std::string &name'], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'Surface shader not found')})
-	gen.bind_method(shared_render_system_async, 'LoadSurfaceShader', 'std::shared_ptr<hg::SurfaceShader>', ['const std::string &name', '?bool use_cache'], ['proxy'])
-
-	"""
-	void DrawLine(uint32_t count, const std::vector<Vector3> &vtx, const std::vector<Color> *color = nullptr, const std::vector<Vector2> *uv = nullptr) {
-	void DrawTriangle(uint32_t count, const std::vector<Vector3> &vtx, const std::vector<Color> *color = nullptr, const std::vector<Vector2> *uv = nullptr) {
-	void DrawSprite(uint32_t count, const std::vector<Vector3> &vtx, const std::vector<Color> *color = nullptr, const std::vector<float> *size = nullptr, float global_size = 1.f) {
-	void DrawLineAuto(uint32_t count, const std::vector<Vector3> &vtx, const std::vector<Color> *color = nullptr, const std::vector<Vector2> *uv = nullptr, gpu::std::shared_ptr<Texture> texture = nullptr) {
-	void DrawTriangleAuto(uint32_t count, const std::vector<Vector3> &vtx, const std::vector<Color> *color = nullptr, const std::vector<Vector2> *uv = nullptr, gpu::std::shared_ptr<Texture> texture = nullptr) {
-	void DrawSpriteAuto(uint32_t count, const std::vector<Vector3> &vtx, const std::vector<Color> *color = nullptr, const std::vector<float> *size = nullptr, gpu::std::shared_ptr<Texture> texture = nullptr, float global_size = 1.f) {
-	"""
-
-	gen.bind_method(shared_render_system_async, 'BeginDrawFrame', 'void', [], ['proxy'])
-	gen.bind_method(shared_render_system_async, 'EndDrawFrame', 'void', [], ['proxy'])
-
-	#gen.bind_method(shared_render_system_async, 'DrawRenderablesPicking', 'std::future<bool>', [], ['proxy'])
-
-	gen.bind_method(shared_render_system_async, 'Initialize', 'std::future<bool>', ['std::shared_ptr<hg::Renderer> renderer', '?bool support_3d'], ['proxy'])
-	gen.bind_method(shared_render_system_async, 'Free', 'std::future<void>', [], ['proxy'])
-
-	gen.bind_method(shared_render_system_async, 'SetShaderEngineValues', 'void', [], ['proxy'])
-
-	gen.end_class(shared_render_system_async)
-	
-	# hg::RenderPass
-	gen.bind_named_enum('hg::RenderPass::Pass', ['Opaque', 'Transparent', 'FramebufferDependent', 'Shadow'], bound_name='RenderPass', prefix='RenderPass')
-	gen.bind_named_enum('hg::RenderPass::Shader', ['Depth', 'DS_GBufferMRT4', 'FS_Constant', 'FS_PointLight', 'FS_PointLightShadowMapping', 'FS_LinearLight', 'FS_LinearLightShadowMapping', 'FS_SpotLight', 'FS_SpotLightShadowMapping', 'FS_SpotLightProjection', 'FS_SpotLightProjectionShadowMapping', 'PP_NormalDepth', 'PP_Velocity', 'Picking'], bound_name='RenderPassShader', prefix='RenderPassShader')
-
-	# hg::RasterFont
-	gen.add_include('engine/raster_font.h')
-
-	raster_font = gen.begin_class('hg::RasterFont', bound_name='RasterFont_nobind', nobind=True)
-	gen.end_class(raster_font)
-
-	shared_raster_font = gen.begin_class('std::shared_ptr<hg::RasterFont>', bound_name='RasterFont', features={'proxy': lib.stl.SharedPtrProxyFeature(raster_font)})
-	gen.bind_constructor_overloads(shared_raster_font, [
-		(['const std::string &font_path', 'float font_size'], ['proxy']),
-		(['const std::string &font_path', 'float font_size', 'uint32_t page_resolution'], ['proxy']),
-		(['const std::string &font_path', 'float font_size', 'uint32_t page_resolution', 'uint32_t glyph_margin'], ['proxy']),
-		(['const std::string &font_path', 'float font_size', 'uint32_t page_resolution', 'uint32_t glyph_margin', 'bool autohint'], ['proxy'])
+	gen.bind_function_overloads('hg::ComputeRenderState', [
+		('hg::RenderState', ['hg::BlendMode blend', '?hg::DepthTest depth_test', '?hg::FaceCulling culling', '?bool write_z', '?bool write_r', '?bool write_g', '?bool write_b', '?bool write_a'], {}),
+		('hg::RenderState', ['hg::BlendMode blend', 'bool write_z', '?bool write_r', '?bool write_g', '?bool write_b', '?bool write_a'], {})
 	])
 
-	gen.bind_method(shared_raster_font, 'Prepare', 'bool', ['hg::RenderSystem &render_system', 'const std::string &text'], ['proxy'])
-	gen.bind_method_overloads(shared_raster_font, 'Write', [
-		('bool', ['hg::RenderSystem &render_system', 'const std::string &text', 'const hg::Matrix4 &matrix'], ['proxy']),
-		('bool', ['hg::RenderSystem &render_system', 'const std::string &text', 'const hg::Matrix4 &matrix', 'hg::Color color'], ['proxy']),
-		('bool', ['hg::RenderSystem &render_system', 'const std::string &text', 'const hg::Matrix4 &matrix', 'hg::Color color', 'float scale'], ['proxy']),
-		('bool', ['hg::RenderSystem &render_system', 'const std::string &text', 'const hg::Matrix4 &matrix', 'hg::Color color', 'float scale', 'bool snap_glyph_to_grid', 'bool orient_toward_camera'], ['proxy'])
-	])
+	# sort key
+	gen.bind_function('hg::ComputeSortKey', 'uint32_t', ['float view_depth'])
+	gen.bind_function('hg::ComputeSortKeyFromWorld', 'uint32_t', ['const hg::Vec3 &T', 'const hg::Mat4 &view'])
+	gen.bind_function('hg::ComputeSortKeyFromWorld', 'uint32_t', ['const hg::Vec3 &T', 'const hg::Mat4 &view', 'const hg::Mat4 &model'])
 
-	gen.bind_method(shared_raster_font, 'GetTextRect', 'hg::Rect<float>', ['hg::RenderSystem &render_system', 'const std::string &text'], ['proxy'])
+	# model
+	gen.add_include('engine/render_pipeline.h')
+	gen.add_include('engine/create_geometry.h')
 
-	gen.bind_method(shared_raster_font, 'Load', 'bool', ['const hg::RenderSystem &render_system', 'const std::string &base_path'], ['proxy'])
-	gen.bind_method(shared_raster_font, 'Save', 'bool', ['const hg::RenderSystem &render_system', 'const std::string &base_path'], ['proxy'])
+	mdl = gen.begin_class('hg::Model')
+	gen.end_class(mdl)
 
-	gen.bind_method(shared_raster_font, 'GetSize', 'float', [], ['proxy'])
-	gen.end_class(shared_raster_font)
+	gen.bind_function('hg::LoadModelFromFile', 'hg::Model', ['const char *path'])
+	gen.bind_function('hg::LoadModelFromAssets', 'hg::Model', ['const char *name'])
 
-	# hg::SimpleGraphicEngine
-	gen.add_include('engine/simple_graphic_engine.h')
+	gen.bind_function('hg::CreateCubeModel', 'hg::Model', ['const bgfx::VertexLayout &decl', 'float x', 'float y', 'float z'])
+	gen.bind_function('hg::CreateSphereModel', 'hg::Model', ['const bgfx::VertexLayout &decl', 'float radius', 'int subdiv_x', 'int subdiv_y'])
+	gen.bind_function('hg::CreatePlaneModel', 'hg::Model', ['const bgfx::VertexLayout &decl', 'float width', 'float length', 'int subdiv_x', 'int subdiv_z'])
+	gen.bind_function('hg::CreateCylinderModel', 'hg::Model', ['const bgfx::VertexLayout &decl', 'float radius', 'float height', 'int subdiv_x'])
+	gen.bind_function('hg::CreateConeModel', 'hg::Model', ['const bgfx::VertexLayout &decl', 'float radius', 'float height', 'int subdiv_x'])
+	gen.bind_function('hg::CreateCapsuleModel', 'hg::Model', ['const bgfx::VertexLayout &decl', 'float radius', 'float height', 'int subdiv_x', 'int subdiv_y'])
 
-	simple_graphic_engine = gen.begin_class('hg::SimpleGraphicEngine', bound_name='SimpleGraphicEngine', noncopyable=True)
-	gen.bind_constructor(simple_graphic_engine, [])
-
-	gen.bind_method(simple_graphic_engine, 'SetSnapGlyphToGrid', 'void', ['bool snap'])
-	gen.bind_method(simple_graphic_engine, 'GetSnapGlyphToGrid', 'bool', [])
-
-	gen.bind_method(simple_graphic_engine, 'SetBlendMode', 'void', ['hg::BlendMode mode'])
-	gen.bind_method(simple_graphic_engine, 'GetBlendMode', 'hg::BlendMode', [])
-	gen.bind_method(simple_graphic_engine, 'SetCullMode', 'void', ['hg::CullMode mode'])
-	gen.bind_method(simple_graphic_engine, 'GetCullMode', 'hg::CullMode', [])
-
-	gen.bind_method(simple_graphic_engine, 'SetDepthWrite', 'void', ['bool enable'])
-	gen.bind_method(simple_graphic_engine, 'GetDepthWrite', 'bool', [])
-	gen.bind_method(simple_graphic_engine, 'SetDepthTest', 'void', ['bool enable'])
-	gen.bind_method(simple_graphic_engine, 'GetDepthTest', 'bool', [])
+	lib.stl.bind_function_T(gen, 'std::function<void(uint16_t)>', 'SetDrawStatesCallback')
 
 	gen.insert_binding_code('''
-static void _Quad(hg::SimpleGraphicEngine *engine, float ax, float ay, float az, float bx, float by, float bz, float cx, float cy, float cz, float dx, float dy, float dz, const hg::Color &a_color, const hg::Color &b_color, const hg::Color &c_color, const hg::Color &d_color) {
-	engine->Quad(ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz, 0, 0, 0, 0, nullptr, a_color, b_color, c_color, d_color);
+static void _DrawModel(bgfx::ViewId view_id, const hg::Model &mdl, bgfx::ProgramHandle prg, const std::vector<hg::UniformSetValue>& values, const std::vector<hg::UniformSetTexture>& textures, const hg::Mat4 &matx, hg::RenderState state = {}, uint32_t depth = 0) {
+	hg::DrawModel(view_id, mdl, prg, values, textures, &matx, 1, state, depth);
+}
+
+static void _DrawModel(bgfx::ViewId view_id, const hg::Model &mdl, bgfx::ProgramHandle prg, const std::vector<hg::UniformSetValue>& values, const std::vector<hg::UniformSetTexture>& textures, std::vector<hg::Mat4> &matx, hg::RenderState state = {}, uint32_t depth = 0) {
+	hg::DrawModel(view_id, mdl, prg, values, textures, matx.data(), matx.size(), state, depth);
+}
+	''')
+
+	gen.bind_function_overloads('hg::DrawModel', expand_std_vector_proto(gen, [
+		('void', ['bgfx::ViewId view_id', 'const hg::Model &mdl', 'bgfx::ProgramHandle prg', 'const std::vector<hg::UniformSetValue>& values', 'const std::vector<hg::UniformSetTexture>& textures', 'const hg::Mat4 &matrix', '?hg::RenderState render_state', '?uint32_t depth'], {'route': route_lambda('_DrawModel')}),
+		('void', ['bgfx::ViewId view_id', 'const hg::Model &mdl', 'bgfx::ProgramHandle prg', 'const std::vector<hg::UniformSetValue>& values', 'const std::vector<hg::UniformSetTexture>& textures', 'std::vector<hg::Mat4> &matrices', '?hg::RenderState render_state', '?uint32_t depth'], {'route': route_lambda('_DrawModel')})
+	]))
+
+	# PipelineResources
+	gen.insert_binding_code('''
+static hg::TextureRef _PipelineResources_AddTexture(hg::PipelineResources *res, const char *name, const hg::Texture &tex) { return res->textures.Add(name, tex); }
+static hg::ModelRef _PipelineResources_AddModel(hg::PipelineResources *res, const char *name, const hg::Model &mdl) { return res->models.Add(name, mdl); }
+static hg::PipelineProgramRef _PipelineResources_AddProgram(hg::PipelineResources *res, const char *name, const hg::PipelineProgram &prg) { return res->programs.Add(name, prg); }
+
+static hg::TextureRef _PipelineResources_HasTexture(hg::PipelineResources *res, const char *name) { return res->textures.Has(name); }
+static hg::ModelRef _PipelineResources_HasModel(hg::PipelineResources *res, const char *name) { return res->models.Has(name); }
+static hg::PipelineProgramRef _PipelineResources_HasProgram(hg::PipelineResources *res, const char *name) { return res->programs.Has(name); }
+
+static void _PipelineResources_UpdateTexture(hg::PipelineResources *res, hg::TextureRef ref, const hg::Texture &tex) { return res->textures.Update(ref, tex); }
+static void _PipelineResources_UpdateModel(hg::PipelineResources *res, hg::ModelRef ref, const hg::Model &mdl) { return res->models.Update(ref, mdl); }
+static void _PipelineResources_UpdateProgram(hg::PipelineResources *res, hg::PipelineProgramRef ref, const hg::PipelineProgram &prg) { return res->programs.Update(ref, prg); }
+
+static hg::Texture& _PipelineResources_GetTexture(hg::PipelineResources *res, hg::TextureRef ref) { return res->textures.Get(ref); }
+static hg::Model& _PipelineResources_GetModel(hg::PipelineResources *res, hg::ModelRef ref) { return res->models.Get(ref); }
+static hg::PipelineProgram& _PipelineResources_GetProgram(hg::PipelineResources *res, hg::PipelineProgramRef ref) { return res->programs.Get(ref); }
+
+static std::string _PipelineResources_GetTextureName(hg::PipelineResources *res, hg::TextureRef ref) { return res->textures.GetName(ref); }
+static std::string _PipelineResources_GetModelName(hg::PipelineResources *res, hg::ModelRef ref) { return res->models.GetName(ref); }
+static std::string _PipelineResources_GetProgramName(hg::PipelineResources *res, hg::PipelineProgramRef ref) { return res->programs.GetName(ref); }
+
+static void _PipelineResources_DestroyAllTextures(hg::PipelineResources *res) { return res->textures.DestroyAll(); }
+static void _PipelineResources_DestroyAllModels(hg::PipelineResources *res) { return res->models.DestroyAll(); }
+static void _PipelineResources_DestroyAllPrograms(hg::PipelineResources *res) { return res->programs.DestroyAll(); }
+
+static void _PipelineResources_DestroyTexture(hg::PipelineResources *res, hg::TextureRef ref) { return res->textures.Destroy(ref); }
+static void _PipelineResources_DestroyModel(hg::PipelineResources *res, hg::ModelRef ref) { return res->models.Destroy(ref); }
+static void _PipelineResources_DestroyProgram(hg::PipelineResources *res, hg::PipelineProgramRef ref) { return res->programs.Destroy(ref); }
+
+static bool _PipelineResources_HasTextureInfo(hg::PipelineResources *res, hg::TextureRef ref) { return res->texture_infos.find(ref.ref) != std::end(res->texture_infos); }
+
+static bgfx::TextureInfo _PipelineResources_GetTextureInfo(hg::PipelineResources *res, hg::TextureRef ref) {
+	auto i = res->texture_infos.find(ref.ref);
+	return i == std::end(res->texture_infos) ? bgfx::TextureInfo{} : i->second;
 }
 ''')
 
-	gen.bind_method(simple_graphic_engine, 'Line', 'void', ['float sx', 'float sy', 'float sz', 'float ex', 'float ey', 'float ez', 'const hg::Color &start_color', 'const hg::Color &end_color'])
-	gen.bind_method(simple_graphic_engine, 'Triangle', 'void', ['float ax', 'float ay', 'float az', 'float bx', 'float by', 'float bz', 'float cx', 'float cy', 'float cz', 'const hg::Color &a_color', 'const hg::Color &b_color', 'const hg::Color &c_color'])
-	gen.bind_method_overloads(simple_graphic_engine, 'Text', [
-		('void', ['float x', 'float y', 'float z', 'const std::string &text', 'const hg::Color &color', 'std::shared_ptr<hg::RasterFont> font', 'float scale'], []),
-		('void', ['const hg::Matrix4 &mat', 'const std::string &text', 'const hg::Color &color', 'std::shared_ptr<hg::RasterFont> font', 'float scale'], [])
+	pipe_res = gen.begin_class('hg::PipelineResources')
+	gen.bind_constructor(pipe_res, [])
+
+	gen.bind_method(pipe_res, 'AddTexture', 'hg::TextureRef', ['const char *name', 'const hg::Texture &tex'], {'route': route_lambda('_PipelineResources_AddTexture')})
+	gen.bind_method(pipe_res, 'AddModel', 'hg::ModelRef', ['const char *name', 'const hg::Model &mdl'], {'route': route_lambda('_PipelineResources_AddModel')})
+	gen.bind_method(pipe_res, 'AddProgram', 'hg::PipelineProgramRef', ['const char *name', 'const hg::PipelineProgram &prg'], {'route': route_lambda('_PipelineResources_AddProgram')})
+
+	gen.bind_method(pipe_res, 'HasTexture', 'hg::TextureRef', ['const char *name'], {'route': route_lambda('_PipelineResources_HasTexture')})
+	gen.bind_method(pipe_res, 'HasModel', 'hg::ModelRef', ['const char *name'], {'route': route_lambda('_PipelineResources_HasModel')})
+	gen.bind_method(pipe_res, 'HasProgram', 'hg::PipelineProgramRef', ['const char *name'], {'route': route_lambda('_PipelineResources_HasProgram')})
+
+	gen.bind_method(pipe_res, 'UpdateTexture', 'void', ['hg::TextureRef ref', 'const hg::Texture &tex'], {'route': route_lambda('_PipelineResources_UpdateTexture')})
+	gen.bind_method(pipe_res, 'UpdateModel', 'void', ['hg::ModelRef ref', 'const hg::Model &mdl'], {'route': route_lambda('_PipelineResources_UpdateModel')})
+	gen.bind_method(pipe_res, 'UpdateProgram', 'void', ['hg::PipelineProgramRef ref', 'const hg::PipelineProgram &prg'], {'route': route_lambda('_PipelineResources_UpdateProgram')})
+    
+	gen.bind_method(pipe_res, 'GetTexture', 'hg::Texture&', ['hg::TextureRef ref'], {'route': route_lambda('_PipelineResources_GetTexture')})
+	gen.bind_method(pipe_res, 'GetModel', 'hg::Model&', ['hg::ModelRef ref'], {'route': route_lambda('_PipelineResources_GetModel')})
+	gen.bind_method(pipe_res, 'GetProgram', 'hg::PipelineProgram&', ['hg::PipelineProgramRef ref'], {'route': route_lambda('_PipelineResources_GetProgram')})
+	
+	gen.bind_method(pipe_res, 'GetTextureName', 'std::string', ['hg::TextureRef ref'], {'route': route_lambda('_PipelineResources_GetTextureName')})
+	gen.bind_method(pipe_res, 'GetModelName', 'std::string', ['hg::ModelRef ref'], {'route': route_lambda('_PipelineResources_GetModelName')})
+	gen.bind_method(pipe_res, 'GetProgramName', 'std::string', ['hg::PipelineProgramRef ref'], {'route': route_lambda('_PipelineResources_GetProgramName')})
+
+	gen.bind_method(pipe_res, 'DestroyAllTextures', 'void', [], {'route': route_lambda('_PipelineResources_DestroyAllTextures')})
+	gen.bind_method(pipe_res, 'DestroyAllModels', 'void', [], {'route': route_lambda('_PipelineResources_DestroyAllModels')})
+	gen.bind_method(pipe_res, 'DestroyAllPrograms', 'void', [], {'route': route_lambda('_PipelineResources_DestroyAllPrograms')})
+
+	gen.bind_method(pipe_res, 'DestroyTexture', 'void', ['hg::TextureRef ref'], {'route': route_lambda('_PipelineResources_DestroyTexture')})
+	gen.bind_method(pipe_res, 'DestroyModel', 'void', ['hg::ModelRef ref'], {'route': route_lambda('_PipelineResources_DestroyModel')})
+	gen.bind_method(pipe_res, 'DestroyProgram', 'void', ['hg::PipelineProgramRef ref'], {'route': route_lambda('_PipelineResources_DestroyProgram')})
+
+	gen.bind_method(pipe_res, 'HasTextureInfo', 'bool', ['hg::TextureRef ref'], {'route': route_lambda('_PipelineResources_HasTextureInfo')})
+	gen.bind_method(pipe_res, 'GetTextureInfo', 'bgfx::TextureInfo', ['hg::TextureRef ref'], {'route': route_lambda('_PipelineResources_GetTextureInfo')})
+
+	gen.end_class(pipe_res)
+
+	#
+	gen.bind_function('hg::UpdateMaterialPipelineProgramVariant', 'void', ['hg::Material &mat', 'const hg::PipelineResources &resources'])
+
+	gen.bind_function('hg::CreateMissingMaterialProgramValuesFromFile', 'void', ['hg::Material &mat', 'const hg::PipelineResources &resources'])
+	gen.bind_function('hg::CreateMissingMaterialProgramValuesFromAssets', 'void', ['hg::Material &mat', 'const hg::PipelineResources &resources'])
+
+	#
+	frame_buffer = gen.begin_class('hg::FrameBuffer')
+	gen.bind_member(frame_buffer, 'bgfx::FrameBufferHandle handle')
+	gen.end_class(frame_buffer)
+
+	gen.bind_function_overloads('hg::CreateFrameBuffer', [
+		('hg::FrameBuffer', ['const hg::Texture &color', 'const hg::Texture &depth', 'const char *name'], []),
+		('hg::FrameBuffer', ['bgfx::TextureFormat::Enum color_format', 'bgfx::TextureFormat::Enum depth_format', 'int aa', 'const char *name'], []),
+		('hg::FrameBuffer', ['int width', 'int height', 'bgfx::TextureFormat::Enum color_format', 'bgfx::TextureFormat::Enum depth_format', 'int aa', 'const char *name'], [])
 	])
-	gen.bind_method_overloads(simple_graphic_engine, 'Quad', [
-		('void', ['float ax', 'float ay', 'float az', 'float bx', 'float by', 'float bz', 'float cx', 'float cy', 'float cz', 'float dx', 'float dy', 'float dz', 'const hg::Color &a_color', 'const hg::Color &b_color', 'const hg::Color &c_color', 'const hg::Color &d_color'], {'route': lambda args: '_Quad(%s);' % ', '.join(args)}),
-		('void', ['float ax', 'float ay', 'float az', 'float bx', 'float by', 'float bz', 'float cx', 'float cy', 'float cz', 'float dx', 'float dy', 'float dz', 'float uv_sx', 'float uv_sy', 'float uv_ex', 'float uv_ey', 'std::shared_ptr<hg::Texture> texture', 'const hg::Color &a_color', 'const hg::Color &b_color', 'const hg::Color &c_color', 'const hg::Color &d_color'], [])
-	])
-	gen.bind_method(simple_graphic_engine, 'Geometry', 'void', ['float x', 'float y', 'float z', 'float ex', 'float ey', 'float ez', 'float sx', 'float sy', 'float sz', 'std::shared_ptr<hg::RenderGeometry> geometry'])
 
-	gen.bind_method(simple_graphic_engine, 'Draw', 'void', ['hg::RenderSystem &render_system'])
-	gen.bind_method(simple_graphic_engine, 'Clear', 'void', ['hg::RenderSystem &render_system'])
+	gen.bind_function('hg::GetColorTexture', 'hg::Texture', ['hg::FrameBuffer &frameBuffer'])
+	gen.bind_function('hg::GetDepthTexture', 'hg::Texture', ['hg::FrameBuffer &frameBuffer'])
+	
+	gen.insert_binding_code('''
+static void _FrameBuffer_GetTextures(hg::FrameBuffer &framebuffer, hg::Texture &color, hg::Texture &depth) {
+	color = hg::GetColorTexture(framebuffer);
+	depth = hg::GetDepthTexture(framebuffer);
+}
+static bool _IsValid(const hg::FrameBuffer &fb) { return bgfx::isValid(fb.handle); }
+''')	
+	gen.bind_function('GetTextures', 'void', ['hg::FrameBuffer &framebuffer', 'hg::Texture &color', 'hg::Texture &depth'], {'route': route_lambda('_FrameBuffer_GetTextures'),  'arg_out': ['color', 'depth']})
+	gen.bind_function('hg::DestroyFrameBuffer', 'void', ['hg::FrameBuffer &frameBuffer'])
+	gen.bind_function('hg::IsValid', 'bool', ['const hg::FrameBuffer &fb'], {'route': route_lambda('_IsValid')})
+	#
+	vertices = gen.begin_class('hg::Vertices')
+	gen.bind_constructor(vertices, ['const bgfx::VertexLayout &decl', 'size_t count'])
 
-	gen.bind_method(simple_graphic_engine, 'Flush', 'void', ['hg::RenderSystem &render_system'])
+	gen.bind_method(vertices, 'GetDecl', 'const bgfx::VertexLayout &', [])
 
-	gen.end_class(simple_graphic_engine)
+	gen.bind_method(vertices, 'Begin', 'hg::Vertices &', ['size_t vertex_index'])
+	gen.bind_method(vertices, 'SetPos', 'hg::Vertices &', ['const hg::Vec3 &pos'])
+	gen.bind_method(vertices, 'SetNormal', 'hg::Vertices &', ['const hg::Vec3 &normal'])
+	gen.bind_method(vertices, 'SetTangent', 'hg::Vertices &', ['const hg::Vec3 &tangent'])
+	gen.bind_method(vertices, 'SetBinormal', 'hg::Vertices &', ['const hg::Vec3 &binormal'])
+	gen.bind_method(vertices, 'SetTexCoord0', 'hg::Vertices &', ['const hg::tVec2<float> &uv'])
+	gen.bind_method(vertices, 'SetTexCoord1', 'hg::Vertices &', ['const hg::tVec2<float> &uv'])
+	gen.bind_method(vertices, 'SetTexCoord2', 'hg::Vertices &', ['const hg::tVec2<float> &uv'])
+	gen.bind_method(vertices, 'SetTexCoord3', 'hg::Vertices &', ['const hg::tVec2<float> &uv'])
+	gen.bind_method(vertices, 'SetTexCoord4', 'hg::Vertices &', ['const hg::tVec2<float> &uv'])
+	gen.bind_method(vertices, 'SetTexCoord5', 'hg::Vertices &', ['const hg::tVec2<float> &uv'])
+	gen.bind_method(vertices, 'SetTexCoord6', 'hg::Vertices &', ['const hg::tVec2<float> &uv'])
+	gen.bind_method(vertices, 'SetTexCoord7', 'hg::Vertices &', ['const hg::tVec2<float> &uv'])
+	gen.bind_method(vertices, 'SetColor0', 'hg::Vertices &', ['const hg::Color &color'])
+	gen.bind_method(vertices, 'SetColor1', 'hg::Vertices &', ['const hg::Color &color'])
+	gen.bind_method(vertices, 'SetColor2', 'hg::Vertices &', ['const hg::Color &color'])
+	gen.bind_method(vertices, 'SetColor3', 'hg::Vertices &', ['const hg::Color &color'])
+	gen.bind_method(vertices, 'End', 'void', ['?bool validate'])
+
+	gen.bind_method(vertices, 'Clear', 'void', [])
+
+	gen.bind_method(vertices, 'Reserve', 'void', ['size_t count'])
+	gen.bind_method(vertices, 'Resize', 'void', ['size_t count'])
+
+	gen.bind_method(vertices, 'GetData', 'const void *', [])
+
+	gen.bind_method(vertices, 'GetSize', 'size_t', [])
+	gen.bind_method(vertices, 'GetCount', 'size_t', [])
+	gen.bind_method(vertices, 'GetCapacity', 'size_t', [])
+
+	gen.end_class(vertices)
+
+	#
+	gen.bind_function('hg::SetTransform', 'void', ['const hg::Mat4 &mtx'])
+
+	gen.bind_function_overloads('hg::DrawLines',
+		expand_std_vector_proto(gen, [
+		('void', ['bgfx::ViewId view_id', 'const hg::Vertices &vtx', 'bgfx::ProgramHandle prg', '?hg::RenderState render_state', '?uint32_t depth'], {}),
+		('void', ['bgfx::ViewId view_id', 'const hg::Vertices &vtx', 'bgfx::ProgramHandle prg', 'const std::vector<hg::UniformSetValue> &values', 'const std::vector<hg::UniformSetTexture> &textures', '?hg::RenderState render_state', '?uint32_t depth'], {}),
+		('void', ['bgfx::ViewId view_id', 'const std::vector<uint16_t> &idx', 'const hg::Vertices &vtx', 'bgfx::ProgramHandle prg', 'const std::vector<hg::UniformSetValue> &values', 'const std::vector<hg::UniformSetTexture> &textures', '?hg::RenderState render_state', '?uint32_t depth'], {})
+		])
+	)
+
+	gen.bind_function_overloads('hg::DrawTriangles',
+		expand_std_vector_proto(gen, [
+		('void', ['bgfx::ViewId view_id', 'const hg::Vertices &vtx', 'bgfx::ProgramHandle prg', '?hg::RenderState state', '?uint32_t depth'], {}),
+		('void', ['bgfx::ViewId view_id', 'const hg::Vertices &vtx', 'bgfx::ProgramHandle prg', 'const std::vector<hg::UniformSetValue> &values', 'const std::vector<hg::UniformSetTexture> &textures', '?hg::RenderState state', '?uint32_t depth'], {}),
+		('void', ['bgfx::ViewId view_id', 'const std::vector<uint16_t> &idx', 'const hg::Vertices &vtx', 'bgfx::ProgramHandle prg', 'const std::vector<hg::UniformSetValue> &values', 'const std::vector<hg::UniformSetTexture> &textures', '?hg::RenderState state', '?uint32_t depth'], {})
+		])
+	)
+
+	gen.bind_function_overloads('hg::DrawSprites',
+		expand_std_vector_proto(gen, [
+		('void', ['bgfx::ViewId view_id', 'const hg::Mat3 &inv_view_R', 'bgfx::VertexLayout &vtx_layout', 'const std::vector<hg::Vec3> &pos', 'const hg::tVec2<float> &size', 'bgfx::ProgramHandle prg', '?hg::RenderState state', '?uint32_t depth'], {}),
+		('void', ['bgfx::ViewId view_id', 'const hg::Mat3 &inv_view_R', 'bgfx::VertexLayout &vtx_layout', 'const std::vector<hg::Vec3> &pos', 'const hg::tVec2<float> &size', 'bgfx::ProgramHandle prg', 'const std::vector<hg::UniformSetValue> &values', 'const std::vector<hg::UniformSetTexture> &textures', '?hg::RenderState state', '?uint32_t depth'], {})
+		])
+	)
+
+	# pipeline
+	pipeline = gen.begin_class('hg::Pipeline')
+	gen.end_class(pipeline)
+
+	# PipelineInfo
+	pipeline_info = gen.begin_class('hg::PipelineInfo')
+	gen.bind_member(pipeline_info, 'std::string name')
+	gen.end_class(pipeline_info)
+
+	# forward pipeline info
+	gen.bind_function('hg::GetForwardPipelineInfo', 'const hg::PipelineInfo &', [])
+
+
+def bind_vertex(gen):
+	gen.add_include('engine/vertex.h')
+
+	vertex = gen.begin_class('hg::Vertex')
+	gen.bind_constructor(vertex, [])
+	gen.bind_members(vertex, ['hg::Vec3 pos', 'hg::Vec3 normal', 'hg::Vec3 tangent', 'hg::Vec3 binormal',
+		'hg::tVec2<float> uv0', 'hg::tVec2<float> uv1', 'hg::tVec2<float> uv2', 'hg::tVec2<float> uv3',
+		'hg::tVec2<float> uv4', 'hg::tVec2<float> uv5', 'hg::tVec2<float> uv6', 'hg::tVec2<float> uv7',
+		'hg::Color color0', 'hg::Color color1', 'hg::Color color2', 'hg::Color color3'])
+	gen.end_class(vertex)
+
+	gen.bind_function('hg::MakeVertex', 'hg::Vertex', ['const hg::Vec3 &pos', '?const hg::Vec3 &nrm', '?const hg::tVec2<float> &uv0', '?const hg::Color &color0'])
+
+
+def bind_geometry_builder(gen):
+	gen.add_include('engine/geometry_builder.h')
+
+	geometry = gen.begin_class('hg::Geometry')
+	gen.end_class(geometry)
+
+	gen.bind_function('hg::SaveGeometryToFile','bool',['const char *path', 'const hg::Geometry &geo'])
+	
+	geometry_builder = gen.begin_class('hg::GeometryBuilder')
+	gen.bind_constructor(geometry_builder, [])
+	gen.bind_method(geometry_builder, 'AddVertex', 'void', ['hg::Vertex &vtx'])
+
+	protos = [('void', ['const std::vector<uint32_t> &idxs', 'uint16_t material'], [])]
+	gen.bind_method_overloads(geometry_builder, 'AddPolygon', expand_std_vector_proto(gen, protos))
+	gen.bind_method(geometry_builder, 'AddTriangle', 'void',['uint32_t a', 'uint32_t b', 'uint32_t c', 'uint32_t material'])
+	gen.bind_method(geometry_builder, 'AddQuad', 'void',['uint32_t a', 'uint32_t b', 'uint32_t c', 'uint32_t d', 'uint32_t material'])
+	gen.bind_method(geometry_builder, 'Make', 'hg::Geometry', [])
+	gen.bind_method(geometry_builder, 'Clear', 'void', [])
+	gen.end_class(geometry_builder)
+
+	
+def bind_model_builder(gen):    
+	gen.add_include('engine/model_builder.h')
+
+	# ModelBuilder
+	model_builder = gen.begin_class('hg::ModelBuilder')
+	gen.bind_constructor(model_builder, [])
+	gen.bind_method(model_builder, 'AddVertex', 'uint32_t', ['const hg::Vertex &vtx'])
+	gen.bind_method(model_builder, 'AddTriangle', 'void', ['uint32_t a', 'uint32_t b', 'uint32_t c'])
+	gen.bind_method(model_builder, 'AddQuad', 'void', ['uint32_t a', 'uint32_t b', 'uint32_t c', 'uint32_t d'])
+	gen.bind_method(model_builder, 'AddPolygon', 'void', ['const std::vector<uint32_t> &idxs'])
+	gen.bind_method(model_builder, 'GetCurrentListIndexCount', 'size_t', [])
+	gen.bind_method(model_builder, 'EndList', 'void', ['uint16_t material'])
+	gen.bind_method(model_builder, 'Clear', 'void', [])
+	gen.bind_method(model_builder, 'MakeModel', 'hg::Model', ['const bgfx::VertexLayout &decl'])
+	gen.end_class(model_builder)
 
 
 def bind_iso_surface(gen):
 	gen.add_include('engine/iso_surface.h')
 
-	iso_surface = gen.begin_class('hg::IsoSurface', bound_name='IsoSurface_nobind', nobind=True)
+	iso_surface = gen.begin_class('hg::IsoSurface')
 	gen.end_class(iso_surface)
 
-	shared_iso_surface = gen.begin_class('std::shared_ptr<hg::IsoSurface>', bound_name='IsoSurface', features={'proxy': lib.stl.SharedPtrProxyFeature(iso_surface)})
-	gen.bind_constructor(shared_iso_surface, [], ['proxy'])
-	gen.bind_method(shared_iso_surface, 'Clear', 'void', [], ['proxy'])
-	gen.bind_method(shared_iso_surface, 'AddTriangle', 'void', ['const hg::Vector3 &p0', 'const hg::Vector3 &p1', 'const hg::Vector3 &p2'], ['proxy'])
-	gen.bind_method(shared_iso_surface, 'GetTriangleCount', 'size_t', [], ['proxy'])
-	gen.end_class(shared_iso_surface)
+	gen.bind_function('hg::NewIsoSurface', 'hg::IsoSurface', ['int width', 'int height', 'int depth'])
+
+	gen.bind_function('hg::IsoSurfaceSphere', 'void', ['hg::IsoSurface &surface', 'int width', 'int height', 'int depth', 'float x', 'float y', 'float z', 'float radius', '?float value', '?float exponent'])
+	#gen.bind_function('hg::ConvoluteIsoSurface', 'hg::IsoSurface', ['const hg::IsoSurface &surface', 'int width', 'int height', 'int depth', ''])
+	gen.bind_function('hg::GaussianBlurIsoSurface', 'hg::IsoSurface', ['const hg::IsoSurface &surface', 'int width', 'int height', 'int depth'])
+
+	gen.bind_function_overloads('hg::IsoSurfaceToModel', [
+		('bool', ['hg::ModelBuilder &builder', 'const hg::IsoSurface &surface', 'int width', 'int height', 'int depth', '?uint16_t material', '?float isolevel'], {}),
+		('bool', ['hg::ModelBuilder &builder', 'const hg::IsoSurface &surface', 'int width', 'int height', 'int depth', 'uint16_t material', 'float isolevel', 'float scale_x', 'float scale_y', 'float scale_z'], {})
+	])
+
+
+def bind_fps_controller(gen):
+	gen.add_include('engine/fps_controller.h')
+
+	gen.bind_function('hg::FpsController', 'void', ['bool key_up', 'bool key_down', 'bool key_left', 'bool key_right', 'bool btn', 'float dx', 'float dy', 'hg::Vec3 &pos', 'hg::Vec3 &rot', 'float speed', 'hg::time_ns dt_t'])
+	gen.bind_function('hg::FpsController', 'void', ['const hg::Keyboard &keyboard', 'const hg::Mouse &mouse', 'hg::Vec3 &pos', 'hg::Vec3 &rot', 'float speed', 'hg::time_ns dt'])
+
+
+def bind_forward_pipeline(gen):
+	gen.add_include('engine/forward_pipeline.h')
+	
+	# ForwardPipeline (inherits Pipeline)
+	forward_pipeline = gen.begin_class('hg::ForwardPipeline')
+	gen.add_base(forward_pipeline, gen.get_conv('hg::Pipeline'))
+	gen.end_class(forward_pipeline)
+
+	gen.bind_function('hg::CreateForwardPipeline', 'hg::ForwardPipeline', ['?int shadow_map_resolution', '?bool spot_16bit_shadow_map'])
+	gen.bind_function('hg::DestroyForwardPipeline', 'void', ['hg::ForwardPipeline &pipeline'])
+
+	# ForwardPipelineLight
+	gen.bind_named_enum('hg::ForwardPipelineLightType', ['FPLT_Point', 'FPLT_Spot', 'FPLT_Linear'])
+
+	forward_pipeline_light = gen.begin_class('hg::ForwardPipelineLight')
+	gen.bind_constructor(forward_pipeline_light, [])
+	gen.bind_members(forward_pipeline_light, [
+		'hg::ForwardPipelineLightType type', 'hg::Mat4 world', 'hg::Color diffuse', 'hg::Color specular',
+		'float radius', 'float inner_angle', 'float outer_angle', 'hg::Vec4 pssm_split', 'float priority'
+	])
+	gen.end_class(forward_pipeline_light)
+
+	bind_std_vector(gen, forward_pipeline_light)
+
+	gen.bind_named_enum('hg::ForwardPipelineShadowType', ['FPST_None', 'FPST_Map'])
+
+	gen.bind_function('hg::MakeForwardPipelinePointLight', 'hg::ForwardPipelineLight', ['const hg::Mat4 &world', 'const hg::Color &diffuse', 'const hg::Color &specular', '?float radius', '?float priority', '?hg::ForwardPipelineShadowType shadow_type', '?float shadow_bias'])
+	gen.bind_function('hg::MakeForwardPipelineSpotLight', 'hg::ForwardPipelineLight', ['const hg::Mat4 &world', 'const hg::Color &diffuse', 'const hg::Color &specular', '?float radius', '?float inner_angle', '?float outer_angle', '?float priority', '?hg::ForwardPipelineShadowType shadow_type', '?float shadow_bias'])
+	gen.bind_function('hg::MakeForwardPipelineLinearLight', 'hg::ForwardPipelineLight', ['const hg::Mat4 &world', 'const hg::Color &diffuse', 'const hg::Color &specular', '?const hg::Vec4& pssm_split', '?float priority', '?hg::ForwardPipelineShadowType shadow_type', '?float shadow_bias'])
 
 	#
-	gen.insert_binding_code('''\
-static void _PolygoniseIsoSurface(uint32_t width, uint32_t height, uint32_t depth, const hg::BinaryData &field, float isolevel, hg::IsoSurface &out, const hg::Vector3 &unit = hg::Vector3::One) { return hg::PolygoniseIsoSurface(width, height, depth, reinterpret_cast<const float *>(field.GetData()), isolevel, out, unit); }
-''')
-	gen.bind_function('PolygoniseIsoSurface', 'void', ['uint32_t width', 'uint32_t height', 'uint32_t depth', 'const hg::BinaryData &field', 'float isolevel', 'hg::IsoSurface &iso', '?const hg::Vector3 &unit'], {'route': lambda args: '_PolygoniseIsoSurface(%s);' % (', '.join(args))})
+	forward_pipeline_lights = gen.begin_class('hg::ForwardPipelineLights')
+	gen.end_class(forward_pipeline_lights)
 
-	gen.bind_function('IsoSurfaceToCoreGeometry', 'void', ['const hg::IsoSurface &iso', 'hg::Geometry &out'], bound_name='IsoSurfaceToGeometry')
-	gen.bind_function('IsoSurfaceToRenderGeometry', 'std::future<void>', ['std::shared_ptr<hg::RenderSystem> render_system', 'std::shared_ptr<hg::IsoSurface> iso', 'std::shared_ptr<hg::RenderGeometry> geo', 'std::shared_ptr<hg::RenderMaterial> mat'])
+	gen.bind_function_overloads('hg::PrepareForwardPipelineLights', expand_std_vector_proto(gen, [('hg::ForwardPipelineLights', ['const std::vector<hg::ForwardPipelineLight> &lights'], [])]))
 
-	gen.insert_binding_code('''\
-static std::future<void> _PolygoniseIsoSurfaceToRenderGeometry(const std::shared_ptr<hg::RenderSystem> &render_system, const std::shared_ptr<hg::RenderGeometry> &geo, const std::shared_ptr<hg::RenderMaterial> &mat, uint32_t width, uint32_t height, uint32_t depth, const hg::BinaryData &field, float isolevel, const std::shared_ptr<hg::IsoSurface> &iso, const hg::Vector3 &unit = hg::Vector3::One) {
-	return hg::PolygoniseIsoSurfaceToRenderGeometry(render_system, geo, mat, width, height, depth, reinterpret_cast<const float *>(field.GetData()), isolevel, iso, unit);
-}
-''')
-	gen.bind_function('PolygoniseIsoSurfaceToRenderGeometry', 
-'std::future<void>', ['const std::shared_ptr<hg::RenderSystem> &render_system', 'const std::shared_ptr<hg::RenderGeometry> &geo', 'const std::shared_ptr<hg::RenderMaterial> &mat', 'uint32_t width', 'uint32_t height', 'uint32_t depth', 'const hg::BinaryData &field', 'float isolevel', 'const std::shared_ptr<hg::IsoSurface> &iso', '?const hg::Vector3 &unit'], {'route': lambda args: '_PolygoniseIsoSurfaceToRenderGeometry(%s);' % (', '.join(args))})
+	# Fog
+	fog = gen.begin_class('hg::ForwardPipelineFog')
+	gen.bind_constructor(fog, [])
+	gen.bind_members(fog, ['float near', 'float far', 'hg::Color color'])
+	gen.end_class(fog)
 
+	# submit model to forward pipeline stage
+	#gen.bind_function('hg::SubmitModelToForwardPipeline', 'void', ['bgfx::ViewId &view_id', 'const hg::Model &mdl', 'const hg::ForwardPipeline &pipeline', 'const hg::PipelineProgram &prg', 'uint32_t prg_variant',
+	#'uint8_t pipeline_stage', 'const hg::Color &ambient', 'const hg::ForwardPipelineLights &lights', 'const hg::ForwardPipelineFog &fog', 'const hg::Mat4 &mtx'], {'arg_in_out': ['view_id']})
+	
+def bind_file(gen):
+	gen.add_include('foundation/file.h')
 
-def bind_plus(gen):
-	gen.add_include('engine/plus.h')
+	gen.bind_named_enum('hg::SeekMode', ['SM_Start', 'SM_Current', 'SM_End'])
 
-	# hg::RenderWindow
-	window_conv = gen.begin_class('hg::RenderWindow')
-	gen.bind_members(window_conv, ['hg::Window window', 'hg::Surface surface'])
-	gen.end_class(window_conv)
+	file = gen.begin_class('hg::File')
+	gen.end_class(file)
 
-	# hg::Plus
-	plus_conv = gen.begin_class('hg::Plus', noncopyable=True)
-
-	gen.bind_method(plus_conv, 'CreateWorkers', 'void', [])
-	gen.bind_method(plus_conv, 'DeleteWorkers', 'void', [])
-
-	gen.bind_method(plus_conv, 'Mount', 'void', ['?const std::string &path'])
-	gen.bind_method(plus_conv, 'MountAs', 'void', ['const std::string &path', 'const std::string &prefix'])
-	gen.bind_method(plus_conv, 'Unmount', 'void', ['const std::string &path'])
-	gen.bind_method(plus_conv, 'UnmountAll', 'void', [])
-
-	gen.bind_method(plus_conv, 'GetRenderer', 'std::shared_ptr<hg::Renderer>', [], {'check_rval': check_bool_rval_lambda(gen, 'no renderer, was RenderInit called succesfully?')})
-	gen.bind_method(plus_conv, 'GetRendererAsync', 'std::shared_ptr<hg::RendererAsync>', [], {'check_rval': check_bool_rval_lambda(gen, 'no renderer, was RenderInit called succesfully?')})
-
-	gen.bind_method(plus_conv, 'GetRenderSystem', 'std::shared_ptr<hg::RenderSystem>', [], {'check_rval': check_bool_rval_lambda(gen, 'no render system, was RenderInit called succesfully?')})
-	gen.bind_method(plus_conv, 'GetRenderSystemAsync', 'std::shared_ptr<hg::RenderSystemAsync>', [], {'check_rval': check_bool_rval_lambda(gen, 'no render system, was RenderInit called succesfully?')})
-
-	gen.bind_method(plus_conv, 'AudioInit', 'bool', [], {'check_rval': check_bool_rval_lambda(gen, 'AudioInit failed, was LoadPlugins called succesfully?')})
-	gen.bind_method(plus_conv, 'AudioUninit', 'void', [])
-
-	gen.bind_method(plus_conv, 'GetMixer', 'std::shared_ptr<hg::Mixer>', [], {'check_rval': check_bool_rval_lambda(gen, 'no mixer, was AudioInit called succesfully?')})
-	gen.bind_method(plus_conv, 'GetMixerAsync', 'std::shared_ptr<hg::MixerAsync>', [], {'check_rval': check_bool_rval_lambda(gen, 'no mixer, was AudioInit called succesfully?')})
-
-	gen.bind_named_enum('hg::Plus::AppEndCondition', ['EndOnEscapePressed', 'EndOnDefaultWindowClosed', 'EndOnAny'], prefix='App')
-
-	gen.bind_method_overloads(plus_conv, 'IsAppEnded', [
-		('bool', [], []),
-		('bool', ['hg::Plus::AppEndCondition flags'], [])
-	])
-
-	gen.insert_binding_code('''\
-static bool _Plus_RenderInit(hg::Plus *plus, int width, int height, int aa = 1, hg::Window::Visibility vis = hg::Window::Windowed, bool debug = false) { return plus->RenderInit(width, height, {}, aa, vis, debug); }
-''')
-	gen.bind_method_overloads(plus_conv, 'RenderInit', [
-		('bool', ['int width', 'int height', '?const std::string &core_path', '?int aa', '?hg::Window::Visibility visibility', '?bool debug'], {'check_rval': check_bool_rval_lambda(gen, 'RenderInit failed, was LoadPlugins called succesfully?')}),
-		('bool', ['int width', 'int height', 'int aa', '?hg::Window::Visibility visibility', '?bool debug'], {'check_rval': check_bool_rval_lambda(gen, 'RenderInit failed, was LoadPlugins called succesfully?'), 'route': lambda args: '_Plus_RenderInit(%s);' % (', '.join(args))})
-	])
-	gen.bind_method(plus_conv, 'RenderUninit', 'void', [])
-
-	gen.bind_method(plus_conv, 'NewRenderWindow', 'hg::RenderWindow', ['int width', 'int height', '?hg::Window::Visibility visibility'])
-	gen.bind_method(plus_conv, 'FreeRenderWindow', 'void', ['hg::RenderWindow &window'])
-
-	gen.bind_method(plus_conv, 'GetRenderWindow', 'hg::RenderWindow', [])
-	gen.bind_method_overloads(plus_conv, 'SetRenderWindow', [
-		('void', ['hg::RenderWindow &window'], {'exception': 'check your program for a missing ImGuiUnlock call'}),
-		('void', [], {'exception': 'check your program for a missing ImGuiUnlock call'})
-	])
-
-	gen.bind_method(plus_conv, 'GetRenderWindowSize', 'hg::tVector2<int>', ['const hg::RenderWindow &window'])
-	gen.bind_method(plus_conv, 'UpdateRenderWindow', 'void', ['const hg::RenderWindow &window'])
-
-	gen.bind_method_overloads(plus_conv, 'SetWindowTitle', [
-		('void', ['const std::string &title'], {}),
-		('void', ['const hg::RenderWindow &window', 'const std::string &title'], {})
-	])
-
-	gen.bind_method(plus_conv, 'InitExtern', 'void', ['std::shared_ptr<hg::Renderer> renderer', 'std::shared_ptr<hg::RendererAsync> renderer_async', 'std::shared_ptr<hg::RenderSystem> render_system', 'std::shared_ptr<hg::RenderSystemAsync> render_system_async'])
-	gen.bind_method(plus_conv, 'UninitExtern', 'void', [])
-
-	gen.bind_method(plus_conv, 'Set2DOriginIsTopLeft', 'void', ['bool top_left'])
-	gen.bind_method(plus_conv, 'SetFixed2DResolution', 'void', ['float w', 'float h'])
-	gen.bind_method(plus_conv, 'GetFixed2DResolution', 'hg::tVector2<float>', [])
-
-	gen.bind_method(plus_conv, 'Commit2D', 'void', [])
-	gen.bind_method(plus_conv, 'Commit3D', 'void', [])
-
-	gen.bind_method(plus_conv, 'GetScreenWidth', 'int', [])
-	gen.bind_method(plus_conv, 'GetScreenHeight', 'int', [])
-
-	gen.bind_method(plus_conv, 'Flip', 'void', [])
-
-	gen.bind_method(plus_conv, 'EndFrame', 'void', [])
-
-	gen.bind_method(plus_conv, 'SetBlend2D', 'void', ['hg::BlendMode mode'])
-	gen.bind_method(plus_conv, 'GetBlend2D', 'hg::BlendMode', [])
-	gen.bind_method(plus_conv, 'SetCulling2D', 'void', ['hg::CullMode mode'])
-	gen.bind_method(plus_conv, 'GetCulling2D', 'hg::CullMode', [])
-
-	gen.bind_method(plus_conv, 'SetBlend3D', 'void', ['hg::BlendMode mode'])
-	gen.bind_method(plus_conv, 'GetBlend3D', 'hg::BlendMode', [])
-	gen.bind_method(plus_conv, 'SetCulling3D', 'void', ['hg::CullMode mode'])
-	gen.bind_method(plus_conv, 'GetCulling3D', 'hg::CullMode', [])
-
-	gen.bind_method(plus_conv, 'SetDepthTest2D', 'void', ['bool enable'])
-	gen.bind_method(plus_conv, 'GetDepthTest2D', 'bool', [])
-	gen.bind_method(plus_conv, 'SetDepthWrite2D', 'void', ['bool enable'])
-	gen.bind_method(plus_conv, 'GetDepthWrite2D', 'bool', [])
-
-	gen.bind_method(plus_conv, 'SetDepthTest3D', 'void', ['bool enable'])
-	gen.bind_method(plus_conv, 'GetDepthTest3D', 'bool', [])
-	gen.bind_method(plus_conv, 'SetDepthWrite3D', 'void', ['bool enable'])
-	gen.bind_method(plus_conv, 'GetDepthWrite3D', 'bool', [])
-
-	gen.bind_method_overloads(plus_conv, 'Clear', [
-		('void', [], []),
-		('void', ['hg::Color color'], [])
-	])
-
-	gen.bind_method_overloads(plus_conv, 'Plot2D', [
-		('void', ['float x', 'float y'], []),
-		('void', ['float x', 'float y', 'hg::Color color'], [])
-	])
-	gen.bind_method_overloads(plus_conv, 'Line2D', [
-		('void', ['float sx', 'float sy', 'float ex', 'float ey'], []),
-		('void', ['float sx', 'float sy', 'float ex', 'float ey', 'hg::Color start_color', 'hg::Color end_color'], [])
-	])
-	gen.bind_method_overloads(plus_conv, 'Triangle2D', [
-		('void', ['float ax', 'float ay', 'float bx', 'float by', 'float cx', 'float cy'], []),
-		('void', ['float ax', 'float ay', 'float bx', 'float by', 'float cx', 'float cy', 'hg::Color a_color', 'hg::Color b_color', 'hg::Color c_color'], [])
-	])
-	gen.bind_method_overloads(plus_conv, 'Quad2D', [
-		('void', ['float ax', 'float ay', 'float bx', 'float by', 'float cx', 'float cy', 'float dx', 'float dy'], []),
-		('void', ['float ax', 'float ay', 'float bx', 'float by', 'float cx', 'float cy', 'float dx', 'float dy', 'hg::Color a_color', 'hg::Color b_color', 'hg::Color c_color', 'hg::Color d_color'], []),
-		('void', ['float ax', 'float ay', 'float bx', 'float by', 'float cx', 'float cy', 'float dx', 'float dy', 'hg::Color a_color', 'hg::Color b_color', 'hg::Color c_color', 'hg::Color d_color', 'std::shared_ptr<hg::Texture> texture'], []),
-		('void', ['float ax', 'float ay', 'float bx', 'float by', 'float cx', 'float cy', 'float dx', 'float dy', 'hg::Color a_color', 'hg::Color b_color', 'hg::Color c_color', 'hg::Color d_color', 'std::shared_ptr<hg::Texture> texture', 'float uv_sx', 'float uv_sy', 'float uv_ex', 'float uv_ey'], [])
-	])
-
-	gen.bind_method_overloads(plus_conv, 'Line3D', [
-		('void', ['float sx', 'float sy', 'float sz', 'float ex', 'float ey', 'float ez'], []),
-		('void', ['float sx', 'float sy', 'float sz', 'float ex', 'float ey', 'float ez', 'hg::Color start_color', 'hg::Color end_color'], [])
-	])
-	gen.bind_method_overloads(plus_conv, 'Triangle3D', [
-		('void', ['float ax', 'float ay', 'float az', 'float bx', 'float by', 'float bz', 'float cx', 'float cy', 'float cz'], []),
-		('void', ['float ax', 'float ay', 'float az', 'float bx', 'float by', 'float bz', 'float cx', 'float cy', 'float cz', 'hg::Color a_color', 'hg::Color b_color', 'hg::Color c_color'], [])
-	])
-	gen.bind_method_overloads(plus_conv, 'Quad3D', [
-		('void', ['float ax', 'float ay', 'float az', 'float bx', 'float by', 'float bz', 'float cx', 'float cy', 'float cz', 'float dx', 'float dy', 'float dz'], []),
-		('void', ['float ax', 'float ay', 'float az', 'float bx', 'float by', 'float bz', 'float cx', 'float cy', 'float cz', 'float dx', 'float dy', 'float dz', 'hg::Color a_color', 'hg::Color b_color', 'hg::Color c_color', 'hg::Color d_color'], []),
-		('void', ['float ax', 'float ay', 'float az', 'float bx', 'float by', 'float bz', 'float cx', 'float cy', 'float cz', 'float dx', 'float dy', 'float dz', 'hg::Color a_color', 'hg::Color b_color', 'hg::Color c_color', 'hg::Color d_color', 'std::shared_ptr<hg::Texture> texture'], []),
-		('void', ['float ax', 'float ay', 'float az', 'float bx', 'float by', 'float bz', 'float cx', 'float cy', 'float cz', 'float dx', 'float dy', 'float dz', 'hg::Color a_color', 'hg::Color b_color', 'hg::Color c_color', 'hg::Color d_color', 'std::shared_ptr<hg::Texture> texture', 'float uv_sx', 'float uv_sy', 'float uv_ex', 'float uv_ey'], [])
-	])
-
-	gen.bind_method(plus_conv, 'SetFont', 'void', ['const std::string &path'])
-	gen.bind_method(plus_conv, 'GetFont', 'const std::string &', [])
-
-	gen.bind_method_overloads(plus_conv, 'Text2D', [
-		('void', ['float x', 'float y', 'const std::string &text'], []),
-		('void', ['float x', 'float y', 'const std::string &text', 'float size'], []),
-		('void', ['float x', 'float y', 'const std::string &text', 'float size', 'hg::Color color'], []),
-		('void', ['float x', 'float y', 'const std::string &text', 'float size', 'hg::Color color', 'const std::string &font_path'], [])
-	])
-	gen.bind_method_overloads(plus_conv, 'Text3D', [
-		('void', ['float x', 'float y', 'float z', 'const std::string &text'], []),
-		('void', ['float x', 'float y', 'float z', 'const std::string &text', 'float size'], []),
-		('void', ['float x', 'float y', 'float z', 'const std::string &text', 'float size', 'hg::Color color'], []),
-		('void', ['float x', 'float y', 'float z', 'const std::string &text', 'float size', 'hg::Color color', 'const std::string &font_path'], [])
-	])
-
-	gen.bind_method(plus_conv, 'GetTextRect', 'hg::Rect<float>', ['const std::string &text', '?float size', '?const std::string &font_path'])
-
-	gen.bind_method_overloads(plus_conv, 'Sprite2D', [
-		('void', ['float x', 'float y', 'float size', 'const std::string &image_path'], []),
-		('void', ['float x', 'float y', 'float size', 'const std::string &image_path', 'hg::Color tint'], []),
-		('void', ['float x', 'float y', 'float size', 'const std::string &image_path', 'hg::Color tint', 'float pivot_x', 'float pivot_y'], []),
-		('void', ['float x', 'float y', 'float size', 'const std::string &image_path', 'hg::Color tint', 'float pivot_x', 'float pivot_y', 'bool flip_h', 'bool flip_v'], [])
-	])
-	gen.bind_method_overloads(plus_conv, 'RotatedSprite2D', [
-		('void', ['float x', 'float y', 'float angle', 'float size', 'const std::string &image_path'], []),
-		('void', ['float x', 'float y', 'float angle', 'float size', 'const std::string &image_path', 'hg::Color tint'], []),
-		('void', ['float x', 'float y', 'float angle', 'float size', 'const std::string &image_path', 'hg::Color tint', 'float pivot_x', 'float pivot_y'], []),
-		('void', ['float x', 'float y', 'float angle', 'float size', 'const std::string &image_path', 'hg::Color tint', 'float pivot_x', 'float pivot_y', 'bool flip_h', 'bool flip_v'], [])
-	])
-	gen.bind_method_overloads(plus_conv, 'Image2D', [
-		('void', ['float x', 'float y', 'float scale', 'const std::string &image_path'], []),
-		('void', ['float x', 'float y', 'float scale', 'const std::string &image_path', 'hg::Color tint'], [])
-	])
-	gen.bind_method_overloads(plus_conv, 'Blit2D', [
-		('void', ['float src_x', 'float src_y', 'float src_w', 'float src_h', 'float dst_x', 'float dst_y', 'float dst_w', 'float dst_h', 'const std::string &image_path'], []),
-		('void', ['float src_x', 'float src_y', 'float src_w', 'float src_h', 'float dst_x', 'float dst_y', 'float dst_w', 'float dst_h', 'const std::string &image_path', 'hg::Color tint'], [])
-	])
-	gen.bind_method_overloads(plus_conv, 'Texture2D', [
-		('void', ['float x', 'float y', 'float scale', 'const std::shared_ptr<hg::Texture> &texture'], []),
-		('void', ['float x', 'float y', 'float scale', 'const std::shared_ptr<hg::Texture> &texture', 'hg::Color tint'], []),
-		('void', ['float x', 'float y', 'float scale', 'const std::shared_ptr<hg::Texture> &texture', 'hg::Color color', 'bool flip_h', 'bool flip_v'], [])
-	])
-
-	gen.bind_method(plus_conv, 'LoadTexture', 'std::shared_ptr<hg::Texture>', ['const std::string &path'])
-	gen.bind_method(plus_conv, 'LoadMaterial', 'std::shared_ptr<hg::RenderMaterial>', ['const std::string &path', '?const std::string &source'])
-	gen.bind_method(plus_conv, 'LoadSurfaceShader', 'std::shared_ptr<hg::SurfaceShader>', ['const std::string &path', '?const std::string &source'])
-	gen.bind_method(plus_conv, 'LoadGeometry', 'std::shared_ptr<hg::RenderGeometry>', ['const std::string &path'])
-	gen.bind_method(plus_conv, 'CreateGeometry', 'std::shared_ptr<hg::RenderGeometry>', ['const std::shared_ptr<hg::Geometry> &geometry', '?bool use_cache'], [])
-
-	gen.bind_method_overloads(plus_conv, 'Geometry2D', [
-		('void', ['float x', 'float y', 'const std::shared_ptr<hg::RenderGeometry> &geometry'], []),
-		('void', ['float x', 'float y', 'const std::shared_ptr<hg::RenderGeometry> &geometry', 'float angle_x', 'float angle_y', 'float angle_z'], []),
-		('void', ['float x', 'float y', 'const std::shared_ptr<hg::RenderGeometry> &geometry', 'float angle_x', 'float angle_y', 'float angle_z', 'float scale'], [])
-	])
-	gen.bind_method_overloads(plus_conv, 'Geometry3D', [
-		('void', ['float x', 'float y', 'float z', 'const std::shared_ptr<hg::RenderGeometry> &geometry'], []),
-		('void', ['float x', 'float y', 'float z',  'const std::shared_ptr<hg::RenderGeometry> &geometry', 'float angle_x', 'float angle_y', 'float angle_z'], []),
-		('void', ['float x', 'float y', 'float z',  'const std::shared_ptr<hg::RenderGeometry> &geometry', 'float angle_x', 'float angle_y', 'float angle_z', 'float scale'], [])
-	])
-
-	gen.bind_method_overloads(plus_conv, 'SetCamera3D', [
-		('void', ['float x', 'float y', 'float z'], []),
-		('void', ['float x', 'float y', 'float z', 'float angle_x', 'float angle_y', 'float angle_z'], []),
-		('void', ['float x', 'float y', 'float z', 'float angle_x', 'float angle_y', 'float angle_z', 'float fov'], []),
-		('void', ['float x', 'float y', 'float z', 'float angle_x', 'float angle_y', 'float angle_z', 'float fov', 'float z_near', 'float z_far'], []),
-		('void', ['const hg::Matrix4 &view', 'const hg::Matrix44 &projection'], [])
-	])
-	gen.bind_method(plus_conv, 'GetCamera3DMatrix', 'hg::Matrix4', [])
-	gen.bind_method(plus_conv, 'GetCamera3DProjectionMatrix', 'hg::Matrix44', [])
-
-	gen.bind_method_overloads(plus_conv, 'CreateCapsule', [
-		('std::shared_ptr<hg::Geometry>', [], []),
-		('std::shared_ptr<hg::Geometry>', ['float radius', 'float height'], []),
-		('std::shared_ptr<hg::Geometry>', ['float radius', 'float height', 'int subdiv_x', 'int subdiv_y', '?const std::string &material_path', '?const std::string &name'], [])
-	])
-	gen.bind_method_overloads(plus_conv, 'CreateCone', [
-		('std::shared_ptr<hg::Geometry>', [], []),
-		('std::shared_ptr<hg::Geometry>', ['float radius', 'float height'], []),
-		('std::shared_ptr<hg::Geometry>', ['float radius', 'float height', 'int subdiv_x', '?const std::string &material_path', '?const std::string &name'], [])
-	])
-	gen.bind_method_overloads(plus_conv, 'CreateCube', [
-		('std::shared_ptr<hg::Geometry>', [], []),
-		('std::shared_ptr<hg::Geometry>', ['float width', 'float height', 'float length', '?const std::string &material_path', '?const std::string &name'], [])
-	])
-	gen.bind_method_overloads(plus_conv, 'CreateCylinder', [
-		('std::shared_ptr<hg::Geometry>', [], []),
-		('std::shared_ptr<hg::Geometry>', ['float radius', 'float height', '?int subdiv_x', '?const std::string &material_path', '?const std::string &name'], [])
-	])
-	gen.bind_method_overloads(plus_conv, 'CreatePlane', [
-		('std::shared_ptr<hg::Geometry>', [], []),
-		('std::shared_ptr<hg::Geometry>', ['float width', 'float length', '?int subdiv', '?const std::string &material_path', '?const std::string &name'], [])
-	])
-	gen.bind_method_overloads(plus_conv, 'CreateSphere', [
-		('std::shared_ptr<hg::Geometry>', [], []),
-		('std::shared_ptr<hg::Geometry>', ['float radius'], []),
-		('std::shared_ptr<hg::Geometry>', ['float radius', 'int subdiv_x', 'int subdiv_y', '?const std::string &material_path', '?const std::string &name'], [])
-	])
-	#std::shared_ptr<Geometry> CreateGeometryFromHeightmap(uint32_t width, uint32_t height, const std::vector<float> &heightmap, float scale = 1, const char *_material_path = nullptr, const char *_name = nullptr);
-
-	gen.bind_method(plus_conv, 'NewScene', 'std::shared_ptr<hg::Scene>', ['?bool use_physics', '?bool use_lua'], [])
-	gen.bind_method(plus_conv, 'LoadScene', 'bool', ['hg::Scene &scene', 'const std::string &path'], [])
-	gen.bind_method(plus_conv, 'UpdateScene', 'void', ['hg::Scene &scene', '?hg::time_ns dt'], [])
-	gen.bind_method(plus_conv, 'AddDummy', 'std::shared_ptr<hg::Node>', ['hg::Scene &scene', '?hg::Matrix4 world'], [])
-	gen.bind_method(plus_conv, 'AddCamera', 'std::shared_ptr<hg::Node>', ['hg::Scene &scene', '?hg::Matrix4 matrix', '?bool orthographic', '?bool set_as_current'], [])
-	gen.bind_method(plus_conv, 'AddLight', 'std::shared_ptr<hg::Node>', ['hg::Scene &scene', '?hg::Matrix4 matrix', '?hg::Light::Model model', '?float range', '?bool shadow', '?hg::Color diffuse', '?hg::Color specular'], [])
-	gen.bind_method(plus_conv, 'AddObject', 'std::shared_ptr<hg::Node>', ['hg::Scene &scene', 'std::shared_ptr<hg::RenderGeometry> geometry', '?hg::Matrix4 matrix', '?bool is_static'], [])
-	gen.bind_method(plus_conv, 'AddGeometry', 'std::shared_ptr<hg::Node>', ['hg::Scene &scene', 'const std::string &geometry_path', '?hg::Matrix4 matrix'], [])
-	gen.bind_method_overloads(plus_conv, 'AddPlane', [
-		('std::shared_ptr<hg::Node>', ['hg::Scene &scene', '?hg::Matrix4 matrix'], []),
-		('std::shared_ptr<hg::Node>', ['hg::Scene &scene', 'hg::Matrix4 matrix', 'float size_x', 'float size_z', '?const std::string &material_path', '?bool use_geometry_cache'], [])
-	])
-	gen.bind_method_overloads(plus_conv, 'AddCube', [
-		('std::shared_ptr<hg::Node>', ['hg::Scene &scene', '?hg::Matrix4 matrix'], []),
-		('std::shared_ptr<hg::Node>', ['hg::Scene &scene', 'hg::Matrix4 matrix', 'float size_x', 'float size_y', 'float size_z', '?const std::string &material_path', '?bool use_geometry_cache'], [])
-	])
-	gen.bind_method_overloads(plus_conv, 'AddSphere', [
-		('std::shared_ptr<hg::Node>', ['hg::Scene &scene', '?hg::Matrix4 matrix', '?float radius'], []),
-		('std::shared_ptr<hg::Node>', ['hg::Scene &scene', 'hg::Matrix4 matrix', 'float radius', 'int subdiv_x', 'int subdiv_y', '?const std::string &material_path', '?bool use_geometry_cache'], [])
-	])
-
-	gen.bind_method_overloads(plus_conv, 'AddEnvironment', [
-		('std::shared_ptr<hg::Environment>', ['hg::Scene &scene'], []),
-		('std::shared_ptr<hg::Environment>', ['hg::Scene &scene', 'hg::Color background_color', 'hg::Color ambient_color'], []),
-		('std::shared_ptr<hg::Environment>', ['hg::Scene &scene', 'hg::Color background_color', 'hg::Color ambient_color', 'hg::Color fog_color', 'float fog_near', 'float fog_far'], [])
-	])
-
-	gen.bind_method_overloads(plus_conv, 'AddPhysicCube', [
-		('std::shared_ptr<hg::Node>', ['std::shared_ptr<hg::RigidBody> &rigid_body', 'hg::Scene &scene'], {'arg_out': ['rigid_body']}),
-		('std::shared_ptr<hg::Node>', ['std::shared_ptr<hg::RigidBody> &rigid_body', 'hg::Scene &scene', 'hg::Matrix4 m'], {'arg_out': ['rigid_body']}),
-		('std::shared_ptr<hg::Node>', ['std::shared_ptr<hg::RigidBody> &rigid_body', 'hg::Scene &scene', 'hg::Matrix4 m', 'float width', 'float height', 'float depth', '?float mass', '?const std::string &material_path'], {'arg_out': ['rigid_body']})
-	])
-	gen.bind_method_overloads(plus_conv, 'AddPhysicPlane', [
-		('std::shared_ptr<hg::Node>', ['std::shared_ptr<hg::RigidBody> &rigid_body', 'hg::Scene &scene'], {'arg_out': ['rigid_body']}),
-		('std::shared_ptr<hg::Node>', ['std::shared_ptr<hg::RigidBody> &rigid_body', 'hg::Scene &scene', 'hg::Matrix4 m'], {'arg_out': ['rigid_body']}),
-		('std::shared_ptr<hg::Node>', ['std::shared_ptr<hg::RigidBody> &rigid_body', 'hg::Scene &scene', 'hg::Matrix4 m', 'float width', 'float length', '?float mass', '?const std::string &material_path'], {'arg_out': ['rigid_body']})
-	])
-	gen.bind_method_overloads(plus_conv, 'AddPhysicSphere', [
-		('std::shared_ptr<hg::Node>', ['std::shared_ptr<hg::RigidBody> &rigid_body', 'hg::Scene &scene'], {'arg_out': ['rigid_body']}),
-		('std::shared_ptr<hg::Node>', ['std::shared_ptr<hg::RigidBody> &rigid_body', 'hg::Scene &scene', 'hg::Matrix4 m'], {'arg_out': ['rigid_body']}),
-		('std::shared_ptr<hg::Node>', ['std::shared_ptr<hg::RigidBody> &rigid_body', 'hg::Scene &scene', 'hg::Matrix4 m', 'float radius', 'int subdiv_x', 'int subdiv_y', '?float mass', '?const std::string &material_path'], {'arg_out': ['rigid_body']})
-	])
-
-	#
-	gen.bind_method(plus_conv, 'GetMouse', 'std::shared_ptr<hg::InputDevice>', [])
-	gen.bind_method(plus_conv, 'GetKeyboard', 'std::shared_ptr<hg::InputDevice>', [])
-
-	gen.bind_method(plus_conv, 'GetMousePos', 'void', ['float &x', 'float &y'], {'arg_out': ['x', 'y']})
-	gen.bind_method(plus_conv, 'GetMouseDt', 'void', ['float &x', 'float &y'], {'arg_out': ['x', 'y']})
-
-	gen.bind_method_overloads(plus_conv, 'MouseButtonDown', [
-		('bool', [], []),
-		('bool', ['hg::Button button'], [])
-	])
-	gen.bind_method(plus_conv, 'KeyDown', 'bool', ['hg::Key key'])
-	gen.bind_method(plus_conv, 'KeyPress', 'bool', ['hg::Key key'])
-	gen.bind_method(plus_conv, 'KeyReleased', 'bool', ['hg::Key key'])
-
-	#
-	gen.bind_method(plus_conv, 'ResetClock', 'void', [])
-	gen.bind_method(plus_conv, 'UpdateClock', 'hg::time_ns', [])
-
-	gen.bind_method(plus_conv, 'GetClockDt', 'hg::time_ns', [])
-	gen.bind_method(plus_conv, 'GetClock', 'hg::time_ns', [])
-
-	gen.end_class(plus_conv)
-
-	gen.insert_binding_code('static hg::Plus &GetPlus() { return hg::g_plus.get(); }')
-	gen.bind_function('GetPlus', 'hg::Plus &', [])
-
-	# hg::FPSController
-	fps_controller = gen.begin_class('hg::FPSController')
-
-	gen.bind_constructor_overloads(fps_controller, [
-		([], []),
-		(['float x', 'float y', 'float z'], []),
-		(['float x', 'float y', 'float z', 'float speed', 'float turbo'], [])
-	])
-
-	gen.bind_method(fps_controller, 'Reset', 'void', ['hg::Vector3 position', 'hg::Vector3 rotation'])
-
-	gen.bind_method(fps_controller, 'SetSmoothFactor', 'void', ['float k_pos', 'float k_rot'])
-
-	gen.bind_method(fps_controller, 'ApplyToNode', 'void', ['hg::Node &node'])
-
-	gen.bind_method(fps_controller, 'Update', 'void', ['hg::time_ns dt'])
-	gen.bind_method(fps_controller, 'UpdateAndApplyToNode', 'void', ['hg::Node &node', 'hg::time_ns dt'])
-
-	gen.bind_method(fps_controller, 'GetPos', 'hg::Vector3', [])
-	gen.bind_method(fps_controller, 'GetRot', 'hg::Vector3', [])
-	gen.bind_method(fps_controller, 'SetPos', 'void', ['const hg::Vector3 &position'])
-	gen.bind_method(fps_controller, 'SetRot', 'void', ['const hg::Vector3 &rotation'])
-
-	gen.bind_method(fps_controller, 'GetSpeed', 'float', [])
-	gen.bind_method(fps_controller, 'SetSpeed', 'void', ['float speed'])
-	gen.bind_method(fps_controller, 'GetTurbo', 'float', [])
-	gen.bind_method(fps_controller, 'SetTurbo', 'void', ['float turbo'])
-
-	gen.end_class(fps_controller)
-
-
-def bind_filesystem(gen):
-	gen.add_include('foundation/filesystem.h')
-	gen.add_include('foundation/std_file_driver.h')
-	gen.add_include('foundation/file_handle.h')
-	gen.add_include('foundation/file_mode.h')
-
-	gen.bind_named_enum('hg::SeekRef', ['SeekStart', 'SeekCurrent', 'SeekEnd'])
-	gen.bind_named_enum('hg::FileMode', ['FileRead', 'FileWrite'])
-	gen.bind_named_enum('hg::FileDriverCaps', ['FileDriverIsCaseSensitive', 'FileDriverCanRead', 'FileDriverCanWrite', 'FileDriverCanSeek', 'FileDriverCanDelete', 'FileDriverCanMkDir'])
-
-	# forward declarations
-	file_driver = gen.begin_class('hg::FileDriver', bound_name='FileDriver_nobind', noncopyable=True, nobind=True)
-	gen.end_class(file_driver)
-
-	file_handle = gen.begin_class('hg::FileHandle', bound_name='FileHandle_nobind', noncopyable=True, nobind=True)
-	gen.end_class(file_handle)
-
-	shared_file_driver = gen.begin_class('std::shared_ptr<hg::FileDriver>', bound_name='FileDriver', features={'proxy': lib.stl.SharedPtrProxyFeature(file_driver)})
-
-	# binding specific API
-	gen.insert_binding_code('''static bool MountFileDriver(std::shared_ptr<hg::FileDriver> driver) {
-	return hg::g_fs.get().Mount(driver);
-}
-static bool MountFileDriver(std::shared_ptr<hg::FileDriver> driver, const std::string &prefix) {
-	return hg::g_fs.get().Mount(driver, prefix);
-}
-	''', 'Filesystem custom API')
-
-	# hg::FileHandle
-	shared_file_handle = gen.begin_class('std::shared_ptr<hg::FileHandle>', bound_name='FileHandle', features={'proxy': lib.stl.SharedPtrProxyFeature(file_handle)})
-
-	gen.bind_method(shared_file_handle, 'GetSize', 'size_t', [], ['proxy'])
-
-	gen.bind_method(shared_file_handle, 'Rewind', 'size_t', [], ['proxy'])
-	gen.bind_method(shared_file_handle, 'IsEOF', 'bool', [], ['proxy'])
-
-	gen.bind_method(shared_file_handle, 'Tell', 'size_t', [], ['proxy'])
-	gen.bind_method(shared_file_handle, 'Seek', 'size_t', ['int offset', 'hg::SeekRef ref'], ['proxy'])
-
-	gen.insert_binding_code('static size_t FileHandle_WriteBinaryData(hg::FileHandle *handle, hg::BinaryData &data) { return handle->Write(data.GetData(), data.GetDataSize()); }')
-	gen.bind_method(shared_file_handle, 'Write', 'size_t', ['hg::BinaryData &data'], {'route': lambda args: 'FileHandle_WriteBinaryData(%s);' % (', '.join(args)), 'proxy': None})
-
-	gen.bind_method(shared_file_handle, 'GetDriver', 'std::shared_ptr<hg::FileDriver>', [], ['proxy'])
-
-	gen.end_class(shared_file_handle)
-
-	# hg::FileDriver
-	gen.bind_method(shared_file_driver, 'FileHash', 'std::string', ['const std::string &path'], ['proxy'])
-
-	gen.bind_method(shared_file_driver, 'MapToAbsolute', 'std::string', ['std::string path'], ['proxy'])
-	gen.bind_method(shared_file_driver, 'MapToRelative', 'std::string', ['std::string path'], ['proxy'])
-
-	gen.bind_method(shared_file_driver, 'GetCaps', 'hg::FileDriverCaps', [], ['proxy'])
-
-	gen.bind_method(shared_file_driver, 'Open', 'std::shared_ptr<hg::FileHandle>', ['const std::string &path', 'hg::FileMode mode'], ['proxy'])
-	gen.bind_method(shared_file_driver, 'Close', 'void', ['hg::FileHandle &handle'], ['proxy'])
-
-	gen.bind_method(shared_file_driver, 'Delete', 'bool', ['const std::string &path'], ['proxy'])
-
-	gen.bind_method(shared_file_driver, 'Tell', 'size_t', ['hg::FileHandle &handle'], ['proxy'])
-	gen.bind_method(shared_file_driver, 'Seek', 'size_t', ['hg::FileHandle &handle', 'int offset', 'hg::SeekRef ref'], ['proxy'])
-	gen.bind_method(shared_file_driver, 'Size', 'size_t', ['hg::FileHandle &handle'], ['proxy'])
-
-	gen.bind_method(shared_file_driver, 'IsEOF', 'bool', ['hg::FileHandle &handle'], ['proxy'])
-
-	#virtual size_t Read(Handle &h, void *buffer_out, size_t size) = 0;
-	#virtual size_t Write(Handle &h, const void *buffer_in, size_t size) = 0;
-
-	#virtual std::vector<DirEntry> Dir(const std::string &path, const std::string &wildcard = "*.*", DirEntry::Type filter = DirEntry::All);
-
-	gen.bind_method(shared_file_driver, 'MkDir', 'bool', ['const std::string &path'], ['proxy'])
-	gen.bind_method(shared_file_driver, 'IsDir', 'bool', ['const std::string &path'], ['proxy'])
-
-	gen.end_class(shared_file_driver)
-
-	# hg::StdFileDriver
-	std_file_driver = gen.begin_class('hg::StdFileDriver', bound_name='StdFileDriver_nobind', nobind=True)
-	gen.end_class(std_file_driver)
-
-	shared_std_file_driver = gen.begin_class('std::shared_ptr<hg::StdFileDriver>', bound_name='StdFileDriver', features={'proxy': lib.stl.SharedPtrProxyFeature(std_file_driver)})
-	gen.add_base(shared_std_file_driver, shared_file_driver)
-
-	gen.bind_constructor_overloads(shared_std_file_driver, [
-		([], ['proxy']),
-		(['const std::string &root_path'], ['proxy']),
-		(['const std::string &root_path', 'bool sandbox'], ['proxy'])
-	])
-	gen.bind_method_overloads(shared_std_file_driver, 'SetRootPath', [
-		('void', ['const std::string &path'], ['proxy']),
-		('void', ['const std::string &path', 'bool sandbox'], ['proxy'])
-	])
-
-	gen.end_class(shared_std_file_driver)
-
-	gen.bind_function_overloads('MountFileDriver', [
-		('bool', ['std::shared_ptr<hg::FileDriver> driver'], []),
-		('bool', ['std::shared_ptr<hg::FileDriver> driver', 'const std::string &prefix'], [])
-	])
-
-	# hg::ZipFileDriver
-	gen.add_include('engine/zip_file_driver.h')
-
-	zip_file_driver = gen.begin_class('hg::ZipFileDriver', bound_name='ZipFileDriver_nobind', noncopyable=True, nobind=True)
-	gen.end_class(zip_file_driver)
-
-	shared_zip_file_driver = gen.begin_class('std::shared_ptr<hg::ZipFileDriver>', bound_name='ZipFileDriver', features={'proxy': lib.stl.SharedPtrProxyFeature(zip_file_driver)})
-	gen.add_base(shared_zip_file_driver, shared_file_driver)
-
-	gen.bind_constructor_overloads(shared_zip_file_driver, [
-		(['std::shared_ptr<hg::FileHandle> archive'], ['proxy']),
-		(['std::shared_ptr<hg::FileHandle> archive', 'const std::string &password'], ['proxy'])
-	])
-	gen.bind_method_overloads(shared_zip_file_driver, 'SetArchive', [
-		('bool', ['std::shared_ptr<hg::FileHandle> archive'], ['proxy']),
-		('bool', ['std::shared_ptr<hg::FileHandle> archive', 'const std::string &password'], ['proxy'])
-	])
-
-	gen.end_class(shared_zip_file_driver)
-
-	# hg::BufferFileDriver
-	gen.add_include('foundation/buffer_file_driver.h')
-
-	buffer_file_driver = gen.begin_class('hg::BufferFileDriver', bound_name='BufferFileDriver_nobind', noncopyable=True, nobind=True)
-	gen.end_class(buffer_file_driver)
-
-	shared_buffer_file_driver = gen.begin_class('std::shared_ptr<hg::BufferFileDriver>', bound_name='BufferFileDriver', features={'proxy': lib.stl.SharedPtrProxyFeature(buffer_file_driver)})
-	gen.add_base(shared_buffer_file_driver, shared_file_driver)
-
-	gen.bind_constructor_overloads(shared_buffer_file_driver, [
-		(['std::shared_ptr<hg::FileDriver> driver'], ['proxy']),
-		(['std::shared_ptr<hg::FileDriver> driver', 'size_t read_buffer_size', 'size_t write_buffer_size'], ['proxy'])
-	])
-	gen.end_class(shared_buffer_file_driver)
-
-	# hg::Filesystem
-	fs = gen.begin_class('hg::Filesystem')
-
-	gen.bind_method_overloads(fs, 'Mount', [
-		('bool', ['std::shared_ptr<hg::FileDriver> driver'], []),
-		('bool', ['std::shared_ptr<hg::FileDriver> driver', 'const std::string &prefix'], [])
-	])
-	gen.bind_method(fs, 'IsPrefixMounted', 'bool', ['const std::string &prefix'])
-
-	gen.bind_method_overloads(fs, 'Unmount', [
-		('void', ['const std::string &prefix'], []),
-		('void', ['const std::shared_ptr<hg::FileDriver> &driver'], [])
-	])
-	gen.bind_method(fs, 'UnmountAll', 'void', [])
-
-	gen.bind_method(fs, 'MapToAbsolute', 'std::string', ['const std::string &path'])
-	gen.bind_method(fs, 'MapToRelative', 'std::string', ['const std::string &path'])
-	gen.bind_method(fs, 'StripPrefix', 'std::string', ['const std::string &path'])
-
-	gen.bind_method(fs, 'Open', 'std::shared_ptr<hg::FileHandle>', ['const std::string &path', 'hg::FileMode mode'])
-	gen.bind_method(fs, 'Close', 'void', ['hg::FileHandle &handle'])
-
-	gen.bind_method(fs, 'MkDir', 'bool', ['const std::string &path'])
-
-	gen.bind_method(fs, 'Exists', 'bool', ['const std::string &path'])
-	gen.bind_method(fs, 'Delete', 'bool', ['const std::string &path'])
-
-	gen.insert_binding_code('''\
-static bool _FileSystem_FileLoad(hg::Filesystem *m, const std::string &path, hg::BinaryData &out) {
-	auto h{m->Open(path)};
-	if (!h)
-		return false;
-	auto size = h->GetSize();
-	out.Reset();
-	out.Grow(size);
-	size_t nread = h->Read(out.GetData(), size);
-	out.Commit(nread);
-	return (nread == size);
-}
-static bool _FileSystem_FileSave(hg::Filesystem *m, const std::string &path, const hg::BinaryData &in) {
-	return m->FileSave(path, in.GetData(), in.GetDataSize());
-}
-''')
-
-	gen.bind_method_overloads(fs, 'FileLoad', expand_std_vector_proto(gen, [
-		('bool', ['const std::string &path', 'std::vector<char> &out'], []),
-		('bool', ['const std::string &path', 'hg::BinaryData &out'], {'route': route_lambda('_FileSystem_FileLoad')})
-	]))
-
-	gen.bind_method_overloads(fs, 'FileSave', expand_std_vector_proto(gen, [
-		('bool', ['const std::string &path', 'const std::vector<char> &in'], []),
-		('bool', ['const std::string &path', 'const hg::BinaryData &in'], {'route': route_lambda('_FileSystem_FileSave')})
-	]))
-
-	gen.bind_method(fs, 'FileSize', 'size_t', ['const std::string &path'])
-	gen.bind_method(fs, 'FileCopy', 'bool', ['const std::string &src', 'const std::string &dst'])
-	gen.bind_method(fs, 'FileMove', 'bool', ['const std::string &src', 'const std::string &dst'])
-
-	gen.bind_method(fs, 'FileToString', 'std::string', ['const std::string &path'])
-	gen.bind_method(fs, 'StringToFile', 'bool', ['const std::string &path', 'const std::string &text'])
-
-	gen.end_class(fs)
-
-	#
-	gen.insert_binding_code('static hg::Filesystem &GetFilesystem() { return hg::g_fs.get(); }')
-	gen.bind_function('GetFilesystem', 'hg::Filesystem &', [])
+	gen.bind_function('hg::Open', 'hg::File', ['const char *path'])
+	gen.bind_function('hg::OpenText', 'hg::File', ['const char *path'])
+	gen.bind_function('hg::OpenWrite', 'hg::File', ['const char *path'])
+	gen.bind_function('hg::OpenWriteText', 'hg::File', ['const char *path'])
+	gen.bind_function('hg::OpenTemp', 'hg::File', ['const char *template_path'])
+	gen.bind_function('hg::Close', 'bool', ['hg::File file'])
+
+	gen.bind_function('hg::IsValid', 'bool', ['hg::File file'])
+	gen.bind_function('hg::IsEOF', 'bool', ['hg::File file'])
+
+	gen.bind_function('hg::GetSize', 'size_t', ['hg::File file'])
+
+	gen.bind_function('hg::Seek', 'bool', ['hg::File file', 'int64_t offset', 'hg::SeekMode mode'])
+	gen.bind_function('hg::Tell', 'size_t', ['hg::File file'])
+
+	gen.bind_function('hg::Rewind', 'void', ['hg::File file'])
+
+	gen.bind_function('hg::IsFile', 'bool', ['const char *path'])
+	gen.bind_function('hg::Unlink', 'bool', ['const char *path'])
+
+	gen.bind_function('hg::Read<uint8_t>', 'uint8_t', ['hg::File file'], bound_name='ReadUInt8')
+	gen.bind_function('hg::Read<uint16_t>', 'uint16_t', ['hg::File file'], bound_name='ReadUInt16')
+	gen.bind_function('hg::Read<uint32_t>', 'uint32_t', ['hg::File file'], bound_name='ReadUInt32')
+	gen.bind_function('hg::Read<float>', 'float', ['hg::File file'], bound_name='ReadFloat')
+	gen.bind_function('hg::Write<uint8_t>', 'bool', ['hg::File file', 'uint8_t value'], bound_name='WriteUInt8')
+	gen.bind_function('hg::Write<uint16_t>', 'bool', ['hg::File file', 'uint16_t value'], bound_name='WriteUInt16')
+	gen.bind_function('hg::Write<uint32_t>', 'bool', ['hg::File file', 'uint32_t value'], bound_name='WriteUInt32')
+	gen.bind_function('hg::Write<float>', 'bool', ['hg::File file', 'float value'], bound_name='WriteFloat')
+
+	gen.bind_function('hg::ReadString', 'std::string', ['hg::File file'])
+	gen.bind_function('hg::WriteString', 'bool', ['hg::File file', 'const std::string &value'])
+
+	gen.bind_function('hg::CopyFile', 'bool', ['const char *src', 'const char *dst'])
+
+	gen.bind_function('hg::FileToString', 'std::string', ['const char *path'])
+	gen.bind_function('hg::StringToFile', 'bool', ['const char *path', 'const char *value'])
+
+
+def bind_path_tools(gen):
+	gen.add_include('foundation/path_tools.h')
+
+	gen.bind_function('hg::IsPathAbsolute', 'bool', ['const std::string &path'])
+	gen.bind_function('hg::PathToDisplay', 'std::string', ['const std::string &path'])
+	gen.bind_function('hg::NormalizePath', 'std::string', ['const std::string &path'])
+
+	gen.bind_function('hg::FactorizePath', 'std::string', ['const std::string &path'])
+	gen.bind_function('hg::CleanPath', 'std::string', ['const std::string &path'])
+
+	gen.bind_function('hg::CutFilePath', 'std::string', ['const std::string &path'])
+	gen.bind_function('hg::CutFileName', 'std::string', ['const std::string &path'])
+	gen.bind_function('hg::CutFileExtension', 'std::string', ['const std::string &path'])
+
+	gen.bind_function('hg::GetFilePath', 'std::string', ['const std::string &path'])
+	gen.bind_function('hg::GetFileName', 'std::string', ['const std::string &path'])
+	gen.bind_function('hg::GetFileExtension', 'std::string', ['const std::string &path'])
+
+	gen.bind_function('hg::HasFileExtension', 'bool', ['const std::string &path'])
+
+	gen.bind_function('hg::PathStartsWith', 'bool', ['const std::string &path', 'const std::string &with'])
+
+	gen.bind_function('hg::PathStripPrefix', 'std::string', ['const std::string &path', 'const std::string &prefix'])
+	gen.bind_function('hg::PathStripSuffix', 'std::string', ['const std::string &path', 'const std::string &suffix'])
+	gen.bind_function('hg::PathJoin', 'std::string', ['const std::vector<std::string> &elements'])
+
+	gen.bind_function('hg::SwapFileExtension', 'std::string', ['const std::string &path', 'const std::string &ext'])
+
+	gen.bind_function('hg::GetCurrentWorkingDirectory', 'std::string', [])
+	gen.bind_function('hg::GetUserFolder', 'std::string', [])
+
+
+def bind_data(gen):
+	gen.add_include('foundation/data.h')
+
+	data = gen.begin_class('hg::Data')
+	gen.bind_constructor(data, [])
+	gen.bind_method(data, 'GetSize', 'size_t', [])
+	gen.bind_method(data, 'Rewind', 'void', [])
+	gen.end_class(data)
+
+	gen.bind_function('hg::LoadDataFromFile', 'bool', ['const char *path', 'hg::Data &data'])
+	gen.bind_function('hg::SaveDataToFile', 'bool', ['const char *path', 'const hg::Data &data'])
+
+
+def bind_dir(gen):
+	gen.add_include('foundation/dir.h')
+
+	gen.bind_named_enum('hg::DirEntryType', ['DE_File', 'DE_Dir', 'DE_Link', 'DE_All'])
+
+	dir_entry = gen.begin_class('hg::DirEntry')
+	gen.bind_members(dir_entry, ['int type', 'std::string name'])
+	gen.end_class(dir_entry)
+
+	bind_std_vector(gen, dir_entry)
+
+	gen.bind_function('hg::ListDir', 'std::vector<hg::DirEntry>', ['const char *path', 'hg::DirEntryType type'])
+	gen.bind_function('hg::ListDirRecursive', 'std::vector<hg::DirEntry>', ['const char *path', 'hg::DirEntryType type'])
+
+	gen.bind_function('hg::MkDir', 'bool', ['const char *path', '?int permissions'])
+	gen.bind_function('hg::RmDir', 'bool', ['const char *path'])
+
+	gen.bind_function('hg::MkTree', 'bool', ['const char *path', '?int permissions'])
+	gen.bind_function('hg::RmTree', 'bool', ['const char *path'])
+
+	gen.bind_function('hg::Exists', 'bool', ['const char *path'])
+	gen.bind_function('hg::IsDir', 'bool', ['const char *path'])
+
+	gen.bind_function('hg::CopyDir', 'bool', ['const char *src', 'const char *dst'])
+	gen.bind_function('hg::CopyDirRecursive', 'bool', ['const char *src', 'const char *dst'])
+
+
+def bind_assets(gen):
+	gen.add_include('engine/assets.h')
+
+	gen.bind_function('hg::AddAssetsFolder', 'bool', ['const char *path'])
+	gen.bind_function('hg::RemoveAssetsFolder', 'void', ['const char *path'])
+
+	gen.bind_function('hg::AddAssetsPackage', 'bool', ['const char *path'])
+	gen.bind_function('hg::RemoveAssetsPackage', 'void', ['const char *path'])
+
+	gen.bind_function('hg::IsAssetFile', 'bool', ['const char *name'])
 
 
 def bind_color(gen):
 	gen.add_include('foundation/color.h')
-	gen.add_include('foundation/color_api.h')
 
 	color = gen.begin_class('hg::Color')
 	color._inline = True  # use inline alloc where possible
@@ -3687,8 +2917,13 @@ def bind_color(gen):
 
 	gen.bind_function('hg::ColorToRGBA32', 'uint32_t', ['const hg::Color &color'])
 	gen.bind_function('hg::ColorFromRGBA32', 'hg::Color', ['uint32_t rgba32'])
+	gen.bind_function('hg::ColorToABGR32', 'uint32_t', ['const hg::Color &color'])
+	gen.bind_function('hg::ColorFromABGR32', 'hg::Color', ['uint32_t rgba32'])
 
 	gen.bind_function('hg::ARGB32ToRGBA32', 'uint32_t', ['uint32_t argb'])
+
+	gen.bind_function('hg::RGBA32', 'uint32_t', ['uint8_t r', 'uint8_t g', 'uint8_t b', '?uint8_t a'])
+	gen.bind_function('hg::ARGB32', 'uint32_t', ['uint8_t r', 'uint8_t g', 'uint8_t b', '?uint8_t a'])
 
 	#inline float Dist2(const Color &i, const Color &j) { return (j.r - i.r) * (j.r - i.r) + (j.g - i.g) * (j.g - i.g) + (j.b - i.b) * (j.b - i.b) + (j.a - i.a) * (j.a - i.a); }
 	#inline float Dist(const Color &i, const Color &j) { return Sqrt(Dist2(i, j)); }
@@ -3698,297 +2933,102 @@ def bind_color(gen):
 	gen.bind_function('hg::ChromaScale', 'hg::Color', ['const hg::Color &color', 'float k'])
 	gen.bind_function('hg::AlphaScale', 'hg::Color', ['const hg::Color &color', 'float k'])
 
-	#Color Clamp(const Color &c, float min, float max);
-	#Color Clamp(const Color &c, const Color &min, const Color &max);
-	#Color ClampMagnitude(const Color &c, float min, float max);
+	gen.bind_function('hg::Clamp', 'hg::Color', ['const hg::Color &color', 'float min', 'float max'])
+	gen.bind_function('hg::Clamp', 'hg::Color', ['const hg::Color &color', 'const hg::Color &min', 'const hg::Color &max'])
 
-	gen.bind_function('hg::ColorFromVector3', 'hg::Color', ['const hg::Vector3 &v'])
-	gen.bind_function('hg::ColorFromVector4', 'hg::Color', ['const hg::Vector4 &v'])
+	gen.bind_function('hg::ColorFromVector3', 'hg::Color', ['const hg::Vec3 &v'])
+	gen.bind_function('hg::ColorFromVector4', 'hg::Color', ['const hg::Vec4 &v'])
+
+	gen.bind_function('hg::ColorI', 'hg::Color', ['int r', 'int g', 'int b', '?int a'])
+
+	gen.bind_function('hg::ToHLS', 'hg::Color', ['const hg::Color &color'])
+	gen.bind_function('hg::FromHLS', 'hg::Color', ['const hg::Color &color'])
+
+	gen.bind_function('hg::SetSaturation', 'hg::Color', ['const hg::Color &color', 'float saturation'])
 
 	bind_std_vector(gen, color)
-
-
-def bind_font_engine(gen):
-	gen.add_include('engine/font_engine.h')
-
-	font_engine = gen.begin_class('hg::FontEngine', noncopyable=True)
-
-	gen.bind_constructor(font_engine, [])
-
-	gen.bind_method(font_engine, 'SetFont', 'bool', ['const char *path', '?bool autohint'])
-	gen.bind_method(font_engine, 'SetSize', 'void', ['float size'])
-	
-	gen.insert_binding_code('static hg::Rect<int> _GetGlyphInfo(hg::FontEngine *engine, char32_t codepoint, hg::tVector2<float> &advance) { hg::GlyphInfo nfo = engine->GetGlyphInfo(codepoint); advance = nfo.advance; return nfo.rect; }')
-	gen.bind_method(font_engine, 'GetGlyphInfo', 'hg::Rect<int>', ['char32_t codepoint', 'hg::tVector2<float> &advance'], {'route': route_lambda('_GetGlyphInfo'), 'arg_out': ['advance']})
-	
-	gen.bind_method_overloads(font_engine, 'GetTextRect', [
-		('hg::Rect<float>', ['const char *utf8', 'float x', 'float y'], []),
-		('hg::Rect<float>', ['const char32_t *codepoints', 'uint32_t count', 'float x', 'float y'], [])
-	])
-	
-	gen.bind_method(font_engine, 'GetKerning', 'bool', ['char32_t first_codepoint', 'char32_t second_codepoint', 'float &kerning_x', 'float &kerning_y'], {'arg_out': ['kerning_x', 'kerning_y']})
-
-	gen.end_class(font_engine)
 
 
 def bind_picture(gen):
 	gen.add_include('engine/picture.h')
 
-	gen.bind_named_enum('hg::PictureFormat', ['PictureGray8', 'PictureGray16', 'PictureGrayF', 'PictureRGB555', 'PictureRGB565', 'PictureRGB8', 'PictureBGR8', 'PictureRGBA8', 'PictureBGRA8', 'PictureARGB8', 'PictureABGR8', 'PictureRGB16', 'PictureBGR16', 'PictureRGBA16', 'PictureBGRA16', 'PictureARGB16', 'PictureABGR16', 'PictureRGBF', 'PictureBGRF', 'PictureRGBAF', 'PictureBGRAF', 'PictureARGBF', 'PictureABGRF', 'PictureInvalidFormat'])
-
-	gen.bind_named_enum('hg::BrushMode', ['BrushNone', 'BrushSolid'])
-	gen.bind_named_enum('hg::PenMode', ['PenNone', 'PenSolid'])
-	gen.bind_named_enum('hg::PenCap', ['ButtCap', 'SquareCap', 'RoundCap'])
-	gen.bind_named_enum('hg::LineJoin', ['MiterJoin', 'MiterJoinRevert', 'RoundJoin', 'BevelJoin', 'MiterJoinRound'])
-	gen.bind_named_enum('hg::InnerJoin', ['InnerBevel', 'InnerMiter', 'InnerJag', 'InnerRound'])
-
-	gen.bind_named_enum('hg::PictureFilter', ['FilterNearest', 'FilterBilinear', 'FilterHanning', 'FilterHamming', 'FilterHermite', 'FilterQuadric', 'FilterBicubic', 'FilterKaiser', 'FilterCatrom', 'FilterMitchell', 'FilterSpline16', 'FilterSpline36', 'FilterGaussian', 'FilterBessel', 'FilterSinc36', 'FilterSinc64', 'FilterSinc256', 'FilterLanczos36', 'FilterLanczos64', 'FilterLanczos256', 'FilterBlackman36', 'FilterBlackman64', 'FilterBlackman256'])
+	gen.bind_named_enum('hg::PictureFormat', ['PF_RGB24', 'PF_RGBA32', 'PF_RGBA32F'])
 
 	# hg::Picture
-	picture = gen.begin_class('hg::Picture', bound_name='Picture_nobind', nobind=True)
+	picture = gen.begin_class('hg::Picture')
+
+	gen.bind_constructor_overloads(picture, [
+		([], []),
+		(['const hg::Picture &picture'], []),
+		(['uint16_t width', 'uint16_t height', 'hg::PictureFormat format'], []),
+		(['void *data', 'uint16_t width', 'uint16_t height', 'hg::PictureFormat format'], [])
+	])
+	
+	gen.bind_method(picture, 'GetWidth', 'uint32_t', [], [])
+	gen.bind_method(picture, 'GetHeight', 'uint32_t', [], [])
+	gen.bind_method(picture, 'GetFormat', 'hg::PictureFormat', [], [])
+
+	gen.insert_binding_code('''
+static intptr_t _Picture_GetData(hg::Picture *picture) {
+	return reinterpret_cast<intptr_t>(picture->GetData());
+}
+static hg::Color _Picture_GetPixelRGBA(hg::Picture *picture, uint16_t x, uint16_t y) {
+	return hg::GetPixelRGBA(*picture, x, y);
+}
+static void _Picture_SetPixelRGBA(hg::Picture *picture, uint16_t x, uint16_t y, const hg::Color &col) {
+	hg::SetPixelRGBA(*picture, x, y, col);
+}
+''')	
+	gen.bind_method(picture, 'GetData', 'intptr_t', [], {'route': route_lambda('_Picture_GetData')})	
+	gen.bind_method(picture, 'SetData', 'void', ['void *data', 'uint16_t width', 'uint16_t height', 'hg::PictureFormat format'], [])
+	gen.bind_method(picture, 'CopyData', 'void', ['const void *data', 'uint16_t width', 'uint16_t height', 'hg::PictureFormat format'], [])
+	
+	gen.bind_method(picture, 'GetPixelRGBA', 'hg::Color', ['uint16_t x', 'uint16_t y'], {'route': route_lambda('_Picture_GetPixelRGBA') })	
+	gen.bind_method(picture, 'SetPixelRGBA', 'void', ['uint16_t x', 'uint16_t y', 'const hg::Color &col'], {'route': route_lambda('_Picture_SetPixelRGBA') })	
+
 	gen.end_class(picture)
+	
+	# I/O
+	gen.bind_function('LoadJPG', 'bool', ['hg::Picture &pict', 'const char *path'])
+	gen.bind_function('LoadPNG', 'bool', ['hg::Picture &pict', 'const char *path'])
+	gen.bind_function('LoadGIF', 'bool', ['hg::Picture &pict', 'const char *path'])
+	gen.bind_function('LoadPSD', 'bool', ['hg::Picture &pict', 'const char *path'])
+	gen.bind_function('LoadTGA', 'bool', ['hg::Picture &pict', 'const char *path'])
+	gen.bind_function('LoadBMP', 'bool', ['hg::Picture &pict', 'const char *path'])
 
-	shared_picture = gen.begin_class('std::shared_ptr<hg::Picture>', bound_name='Picture', features={'proxy': lib.stl.SharedPtrProxyFeature(picture)})
+	gen.bind_function('LoadPicture', 'bool', ['hg::Picture &pict', 'const char *path'])
 
-	gen.bind_constructor_overloads(shared_picture, [
-		([], ['proxy']),
-		(['const hg::Picture &picture'], ['proxy']),
-		(['uint32_t width', 'uint32_t height', 'hg::PictureFormat format'], ['proxy'])
-	])
-
-	gen.bind_method(shared_picture, 'GetWidth', 'uint32_t', [], ['proxy'])
-	gen.bind_method(shared_picture, 'GetHeight', 'uint32_t', [], ['proxy'])
-	gen.bind_method(shared_picture, 'GetCenter', 'hg::tVector2<float>', [], ['proxy'])
-	gen.bind_method(shared_picture, 'GetStride', 'size_t', [], ['proxy'])
-	gen.bind_method(shared_picture, 'GetFormat', 'hg::PictureFormat', [], ['proxy'])
-
-	gen.bind_method(shared_picture, 'GetRect', 'hg::Rect<int>', [], ['proxy'])
-
-	gen.bind_method_overloads(shared_picture, 'AllocAs', [
-		('bool', ['uint32_t width', 'uint32_t height', 'hg::PictureFormat format'], ['proxy']),
-		('bool', ['const hg::Picture &picture'], ['proxy'])
-	])
-	gen.bind_method(shared_picture, 'Free', 'void', [], ['proxy'])
-
-	#uint8_t *GetData() const { return (uint8_t *)data.data(); }
-	#uint8_t *GetDataAt(int x, int y) const;
-	gen.bind_method(shared_picture, 'GetDataSize', 'size_t', [], ['proxy'])
-
-	gen.bind_method(shared_picture, 'ClearClipping', 'void', [], ['proxy'])
-	gen.bind_method(shared_picture, 'SetClipping', 'void', ['int start_x', 'int start_y', 'int end_x', 'int end_y'], ['proxy'])
-
-	gen.bind_method_overloads(shared_picture, 'ClearRGBA', [
-		('void', ['float r', 'float g', 'float b'], ['proxy']),
-		('void', ['float r', 'float g', 'float b', 'float a'], ['proxy'])
-	])
-	gen.bind_method(shared_picture, 'GetPixelRGBA', 'hg::Vector4', ['int x', 'int y'], ['proxy'])
-	gen.bind_method_overloads(shared_picture, 'PutPixelRGBA', [
-		('void', ['int x', 'int y', 'float r', 'float g', 'float b'], ['proxy']),
-		('void', ['int x', 'int y', 'float r', 'float g', 'float b', 'float a'], ['proxy'])
-	])
-	gen.bind_method_overloads(shared_picture, 'BlendPixelRGBA', [
-		('void', ['int x', 'int y', 'float r', 'float g', 'float b'], ['proxy']),
-		('void', ['int x', 'int y', 'float r', 'float g', 'float b', 'float a'], ['proxy'])
-	])
-
-	gen.bind_method_overloads(shared_picture, 'SetFillColorRGBA', [
-		('void', ['float r', 'float g', 'float b'], ['proxy']),
-		('void', ['float r', 'float g', 'float b', 'float a'], ['proxy'])
-	])
-	gen.bind_method_overloads(shared_picture, 'SetPenColorRGBA', [
-		('void', ['float r', 'float g', 'float b'], ['proxy']),
-		('void', ['float r', 'float g', 'float b', 'float a'], ['proxy'])
-	])
-
-	gen.bind_method(shared_picture, 'BlitCopy', 'bool', ['const hg::Picture &src', 'hg::Rect<int> src_rect', 'hg::tVector2<int> dst_pos'], ['proxy'])
-	gen.bind_method_overloads(shared_picture, 'Blit', [
-		('bool', ['const hg::Picture &src', 'hg::Rect<int> src_rect', 'hg::tVector2<int> dst_pos'], ['proxy']),
-		('bool', ['const hg::Picture &src', 'hg::Rect<int> src_rect', 'hg::Rect<int> dst_rect'], ['proxy']),
-		('bool', ['const hg::Picture &src', 'hg::Rect<int> src_rect', 'hg::Rect<int> dst_rect', 'hg::PictureFilter filter'], ['proxy'])
-	])
-	gen.bind_method_overloads(shared_picture, 'BlitTransform', [
-		('bool', ['const hg::Picture &src', 'hg::Rect<int> dst_rect', 'const hg::Matrix3 &m'], ['proxy']),
-		('bool', ['const hg::Picture &src', 'hg::Rect<int> dst_rect', 'const hg::Matrix3 &m', 'hg::PictureFilter filter'], ['proxy'])
-	])
-
-	gen.bind_method(shared_picture, 'Flip', 'void', ['bool horizontal', 'bool vertical'], ['proxy'])
-	gen.bind_method(shared_picture, 'Reframe', 'bool', ['int32_t top', 'int32_t bottom', 'int32_t left', 'int32_t right'], ['proxy'])
-	gen.bind_method(shared_picture, 'Crop', 'bool', ['int32_t start_x', 'int32_t start_y', 'int32_t end_x', 'int32_t end_y'], ['proxy'])
-
-	gen.bind_method_overloads(shared_picture, 'Resize', [
-		('bool', ['uint32_t width', 'uint32_t height'], ['proxy']),
-		('bool', ['uint32_t width', 'uint32_t height', 'hg::PictureFilter filter'], ['proxy'])
-	])
-
-	gen.bind_method(shared_picture, 'Convert', 'bool', ['hg::PictureFormat format'], ['proxy'])
-
-	gen.bind_method(shared_picture, 'SetFillMode', 'void', ['hg::BrushMode brush_mode'], ['proxy'])
-	gen.bind_method(shared_picture, 'SetPenMode', 'void', ['hg::PenMode pen_mode'], ['proxy'])
-	gen.bind_method(shared_picture, 'SetPenWidth', 'void', ['float width'], ['proxy'])
-	gen.bind_method(shared_picture, 'SetPenCap', 'void', ['hg::PenCap cap'], ['proxy'])
-	gen.bind_method(shared_picture, 'SetLineJoin', 'void', ['hg::LineJoin join'], ['proxy'])
-	gen.bind_method(shared_picture, 'SetInnerJoin', 'void', ['hg::InnerJoin join'], ['proxy'])
-
-	gen.bind_method(shared_picture, 'MoveTo', 'void', ['float x', 'float y'], ['proxy'])
-	gen.bind_method(shared_picture, 'LineTo', 'void', ['float x', 'float y'], ['proxy'])
-	gen.bind_method(shared_picture, 'ClosePolygon', 'void', [], ['proxy'])
-	gen.bind_method(shared_picture, 'AddRoundedRect', 'void', ['float start_x', 'float start_y', 'float end_x', 'float end_y', 'float radius'], ['proxy'])
-	gen.bind_method(shared_picture, 'AddEllipse', 'void', ['float x', 'float y', 'float radius_x', 'float radius_y'], ['proxy'])
-	gen.bind_method(shared_picture, 'AddCircle', 'void', ['float x', 'float y', 'float radius'], ['proxy'])
-	gen.bind_method(shared_picture, 'DrawPath', 'void', [], ['proxy'])
-
-	gen.bind_method(shared_picture, 'DrawLine', 'void', ['float start_x', 'float start_y', 'float end_x', 'float end_y'], ['proxy'])
-	gen.bind_method(shared_picture, 'DrawRect', 'void', ['float start_x', 'float start_y', 'float end_x', 'float end_y'], ['proxy'])
-	gen.bind_method(shared_picture, 'DrawRoundedRect', 'void', ['float start_x', 'float start_y', 'float end_x', 'float end_y', 'float radius'], ['proxy'])
-	gen.bind_method(shared_picture, 'DrawEllipse', 'void', ['float x', 'float y', 'float radius_x', 'float radius_y'], ['proxy'])
-	gen.bind_method(shared_picture, 'DrawCircle', 'void', ['float x', 'float y', 'float radius'], ['proxy'])
-
-	gen.bind_method(shared_picture, 'DrawGlyph', 'void', ['hg::FontEngine &font_engine', 'char32_t glyph_utf32', 'float x', 'float y'], ['proxy'])
-	gen.bind_method(shared_picture, 'DrawText', 'void', ['hg::FontEngine &font_engine', 'const std::string &text', 'float x', 'float y'], ['proxy'])
-
-	gen.bind_method_overloads(shared_picture, 'Compare', [
-		('bool', ['const hg::Picture &picture'], ['proxy']),
-		('bool', ['const hg::Picture &picture', 'float threshold'], ['proxy'])
-	])
-
-	gen.end_class(shared_picture)
-
-	#
-	gen.add_include('engine/picture_io.h')
-
-	gen.insert_binding_code('''
-static bool LoadPicture(std::shared_ptr<hg::Picture> &picture, const char *path) {
-	return hg::g_picture_io.get().Load(*picture, path);
-}
-''')
-	gen.bind_function('LoadPicture', 'bool', ['std::shared_ptr<hg::Picture> &picture', 'const char *path'])
-
-	gen.insert_binding_code('''
-static bool SavePicture(std::shared_ptr<hg::Picture> &picture, const std::string &path, const std::string &codec_name, const std::string &parm = "") {
-	return hg::g_picture_io.get().Save(*picture, path.c_str(), codec_name.c_str(), parm.empty() ? nullptr : parm.c_str());
-}
-''')
-	gen.bind_function('SavePicture', 'bool', ['std::shared_ptr<hg::Picture> &picture', 'const std::string &path', 'const std::string &codec_name', '?const std::string &parm'])
-
-
-def bind_document(gen):
-	gen.add_include('foundation/document.h')
-	gen.add_include('foundation/binary_document.h')
-	gen.add_include('foundation/xml_document.h')
-	gen.add_include('foundation/json_document.h')
-
-	gen.bind_named_enum('hg::DocumentFormat', ['DocumentFormatUnknown', 'DocumentFormatXML', 'DocumentFormatJSON', 'DocumentFormatBinary'])
-
-	doc_reader = gen.begin_class('hg::DocumentReader', bound_name='DocumentReader_nobind', nobind=True, noncopyable=True)
-	gen.end_class(doc_reader)
-
-	shared_doc_reader = gen.begin_class('std::shared_ptr<hg::DocumentReader>', bound_name='DocumentReader', features={'proxy': lib.stl.SharedPtrProxyFeature(doc_reader)})
-	gen.bind_method(shared_doc_reader, 'GetScopeName', 'std::string', [], ['proxy'])
-	gen.bind_method(shared_doc_reader, 'GetChildCount', 'uint32_t', ['?const char *name'], ['proxy'])
-
-	gen.bind_method(shared_doc_reader, 'EnterScope', 'bool', ['const char *name'], ['proxy'])
-	gen.bind_method(shared_doc_reader, 'EnterScopeMultiple', 'bool', ['const char *name'], ['proxy'])
-	gen.bind_method(shared_doc_reader, 'ExitScopeMultiple', 'bool', ['uint32_t count'], ['proxy'])
-
-	gen.bind_method(shared_doc_reader, 'EnterFirstChild', 'bool', [], ['proxy'])
-	gen.bind_method(shared_doc_reader, 'EnterSibling', 'bool', [], ['proxy'])
-	gen.bind_method(shared_doc_reader, 'ExitScope', 'bool', [], ['proxy'])
-
-	gen.bind_method(shared_doc_reader, 'Read', 'bool', ['const std::string &name', 'bool &v'], {'proxy': None, 'arg_out': ['v']}, 'ReadBool')
-	gen.bind_method(shared_doc_reader, 'Read', 'bool', ['const std::string &name', 'char &v'], {'proxy': None, 'arg_out': ['v']}, 'ReadInt8')
-	gen.bind_method(shared_doc_reader, 'Read', 'bool', ['const std::string &name', 'uint8_t &v'], {'proxy': None, 'arg_out': ['v']}, 'ReadUInt8')
-	gen.bind_method(shared_doc_reader, 'Read', 'bool', ['const std::string &name', 'short &v'], {'proxy': None, 'arg_out': ['v']}, 'ReadInt16')
-	gen.bind_method(shared_doc_reader, 'Read', 'bool', ['const std::string &name', 'uint16_t &v'], {'proxy': None, 'arg_out': ['v']}, 'ReadUInt16')
-	gen.bind_method(shared_doc_reader, 'Read', 'bool', ['const std::string &name', 'int32_t &v'], {'proxy': None, 'arg_out': ['v']}, 'ReadInt32')
-	gen.bind_method(shared_doc_reader, 'Read', 'bool', ['const std::string &name', 'uint32_t &v'], {'proxy': None, 'arg_out': ['v']}, 'ReadUInt32')
-	gen.bind_method(shared_doc_reader, 'Read', 'bool', ['const std::string &name', 'float &v'], {'proxy': None, 'arg_out': ['v']}, 'ReadFloat')
-	gen.bind_method(shared_doc_reader, 'Read', 'bool', ['const std::string &name', 'std::string &v'], {'proxy': None, 'arg_out': ['v']}, 'ReadString')
-
-	gen.bind_method(shared_doc_reader, 'HasBinarySupport', 'bool', [], ['proxy'])
-
-	gen.bind_method(shared_doc_reader, 'Load', 'bool', ['const std::string &path'], ['proxy'])
-	gen.end_class(shared_doc_reader)
-
-	gen.insert_binding_code('''
-static std::shared_ptr<hg::DocumentReader> _CreateBinaryDocumentReader() { return std::shared_ptr<hg::DocumentReader>(new hg::BinaryDocumentReader); }
-static std::shared_ptr<hg::DocumentReader> _CreateJSONDocumentReader() { return std::shared_ptr<hg::DocumentReader>(new hg::JSONDocumentReader); }
-static std::shared_ptr<hg::DocumentReader> _CreateXMLDocumentReader() { return std::shared_ptr<hg::DocumentReader>(new hg::XMLDocumentReader); }
-''')
-	gen.bind_function('CreateBinaryDocumentReader', 'std::shared_ptr<hg::DocumentReader>', [], {'route': route_lambda('_CreateBinaryDocumentReader')})
-	gen.bind_function('CreateJSONDocumentReader', 'std::shared_ptr<hg::DocumentReader>', [], {'route': route_lambda('_CreateJSONDocumentReader')})
-	gen.bind_function('CreateXMLDocumentReader', 'std::shared_ptr<hg::DocumentReader>', [], {'route': route_lambda('_CreateXMLDocumentReader')})
-
-	#
-	doc_writer = gen.begin_class('hg::DocumentWriter', bound_name='DocumentWriter_nobind', nobind=True, noncopyable=True)
-	gen.end_class(doc_writer)
-
-	shared_doc_writer = gen.begin_class('std::shared_ptr<hg::DocumentWriter>', bound_name='DocumentWriter', features={'proxy': lib.stl.SharedPtrProxyFeature(doc_writer)})
-
-	gen.bind_method(shared_doc_writer, 'EnterScope', 'bool', ['const std::string &name'], ['proxy'])
-	gen.bind_method(shared_doc_writer, 'EnterScopeMultiple', 'bool', ['const std::string &name'], ['proxy'])
-	gen.bind_method(shared_doc_writer, 'ExitScopeMultiple', 'bool', ['uint32_t count'], ['proxy'])
-	gen.bind_method(shared_doc_writer, 'ExitScope', 'bool', [], ['proxy'])
-
-	gen.bind_method(shared_doc_writer, 'Write', 'bool', ['const std::string &name', 'bool v'], ['proxy'], 'WriteBool')
-	gen.bind_method(shared_doc_writer, 'Write', 'bool', ['const std::string &name', 'char v'], ['proxy'], 'WriteInt8')
-	gen.bind_method(shared_doc_writer, 'Write', 'bool', ['const std::string &name', 'uint8_t v'], ['proxy'], 'WriteUInt8')
-	gen.bind_method(shared_doc_writer, 'Write', 'bool', ['const std::string &name', 'short v'], ['proxy'], 'WriteInt16')
-	gen.bind_method(shared_doc_writer, 'Write', 'bool', ['const std::string &name', 'uint16_t v'], ['proxy'], 'WriteUInt16')
-	gen.bind_method(shared_doc_writer, 'Write', 'bool', ['const std::string &name', 'int32_t v'], ['proxy'], 'WriteInt32')
-	gen.bind_method(shared_doc_writer, 'Write', 'bool', ['const std::string &name', 'uint32_t v'], ['proxy'], 'WriteUInt32')
-	gen.bind_method(shared_doc_writer, 'Write', 'bool', ['const std::string &name', 'float v'], ['proxy'], 'WriteFloat')
-	gen.bind_method(shared_doc_writer, 'Write', 'bool', ['const std::string &name', 'const std::string &v'], ['proxy'], 'WriteString')
-
-	gen.bind_method(shared_doc_writer, 'HasBinarySupport', 'bool', [], ['proxy'])
-
-	gen.bind_method(shared_doc_writer, 'Save', 'bool', ['const std::string &path'], ['proxy'])
-	gen.end_class(shared_doc_writer)
-
-	gen.insert_binding_code('''
-static std::shared_ptr<hg::DocumentWriter> _CreateBinaryDocumentWriter() { return std::shared_ptr<hg::DocumentWriter>(new hg::BinaryDocumentWriter); }
-static std::shared_ptr<hg::DocumentWriter> _CreateJSONDocumentWriter() { return std::shared_ptr<hg::DocumentWriter>(new hg::JSONDocumentWriter); }
-static std::shared_ptr<hg::DocumentWriter> _CreateXMLDocumentWriter() { return std::shared_ptr<hg::DocumentWriter>(new hg::XMLDocumentWriter); }
-''')
-	gen.bind_function('CreateBinaryDocumentWriter', 'std::shared_ptr<hg::DocumentWriter>', [], {'route': route_lambda('_CreateBinaryDocumentWriter')})
-	gen.bind_function('CreateJSONDocumentWriter', 'std::shared_ptr<hg::DocumentWriter>', [], {'route': route_lambda('_CreateJSONDocumentWriter')})
-	gen.bind_function('CreateXMLDocumentWriter', 'std::shared_ptr<hg::DocumentWriter>', [], {'route': route_lambda('_CreateXMLDocumentWriter')})
-
-	#
-	gen.bind_function('hg::GetDocumentReadFormat', 'hg::DocumentFormat', ['const std::string &path'])
-	gen.bind_function('hg::GetDocumentWriteFormat', 'hg::DocumentFormat', ['const std::string &path'])
-
-	gen.bind_function('hg::GetDocumentFormatFromString', 'hg::DocumentFormat', ['const std::string &document'])
+	gen.bind_function('SavePNG', 'bool', ['hg::Picture &pict', 'const char *path'])
+	gen.bind_function('SaveTGA', 'bool', ['hg::Picture &pict', 'const char *path'])
+	gen.bind_function('SaveBMP', 'bool', ['hg::Picture &pict', 'const char *path'])
 
 
 def bind_math(gen):
-	gen.begin_class('hg::Vector3')
-	gen.begin_class('hg::Vector4')
-	gen.begin_class('hg::Matrix3')
-	gen.begin_class('hg::Matrix4')
-	gen.begin_class('hg::Matrix44')
+	gen.begin_class('hg::Vec3')
+	gen.begin_class('hg::Vec4')
+	gen.begin_class('hg::Mat3')
+	gen.begin_class('hg::Mat4')
+	gen.begin_class('hg::Mat44')
 	gen.begin_class('hg::Quaternion')
 
 	# math
 	gen.add_include('foundation/rect.h')
 	gen.add_include('foundation/math.h')
 
-	gen.bind_named_enum('hg::RotationOrder', [
-		'RotationOrderZYX',
-		'RotationOrderYZX',
-		'RotationOrderZXY',
-		'RotationOrderXZY',
-		'RotationOrderYXZ',
-		'RotationOrderXYZ',
-		'RotationOrderXY',
-		'RotationOrder_Default'
-		], storage_type='uint8_t')
+	gen.bind_named_enum('hg::RotationOrder', ['RO_ZYX', 'RO_YZX', 'RO_ZXY', 'RO_XZY', 'RO_YXZ', 'RO_XYZ', 'RO_XY', 'RO_Default'], storage_type='uint8_t')
+	gen.bind_named_enum('hg::Axis', ['A_X', 'A_Y', 'A_Z', 'A_RotX', 'A_RotY', 'A_RotZ', 'A_Last'], storage_type='uint8_t')
 
-	gen.bind_named_enum('hg::Axis', ['AxisX', 'AxisY', 'AxisZ', 'AxisRotX', 'AxisRotY', 'AxisRotZ', 'AxisLast'], storage_type='uint8_t')
-
-	gen.bind_function('hg::LinearInterpolate<float>', 'float', ['float y0', 'float y1', 'float t'])
-	gen.bind_function('hg::CosineInterpolate<float>', 'float', ['float y0', 'float y1', 'float t'])
-	gen.bind_function('hg::CubicInterpolate<float>', 'float', ['float y0', 'float y1', 'float y2', 'float y3', 'float t'])
-	gen.bind_function('hg::HermiteInterpolate<float>', 'float', ['float y0', 'float y1', 'float y2', 'float y3', 'float t', 'float tension', 'float bias'])
+	gen.bind_function('hg::LinearInterpolate<float>', 'float', ['float y0', 'float y1', 'float t'], bound_name='LinearInterpolate')
+	gen.bind_function('hg::CosineInterpolate<float>', 'float', ['float y0', 'float y1', 'float t'], bound_name='CosineInterpolate')
+	gen.insert_binding_code('''
+static const float _CubicInterpolateImpl(float y0, float y1, float y2, float y3, float t) { return hg::CubicInterpolate<float>(y0, y1, y2, y3, t); }
+static const hg::Vec3 _CubicInterpolateImpl(const hg::Vec3& v0, const hg::Vec3& v1, const hg::Vec3& v2, const hg::Vec3& v3, float t) { return hg::CubicInterpolate<hg::Vec3>(v0, v1, v2, v3, t); }	
+''')
+	gen.bind_function_overloads('_CubicInterpolateImpl', [
+		('float', ['float y0', 'float y1', 'float y2', 'float y3', 'float t'], []),
+        ('hg::Vec3', ['const hg::Vec3& v0', 'const hg::Vec3& v1', 'const hg::Vec3& v2', 'const hg::Vec3& v3', 'float t'], [])
+	], bound_name='CubicInterpolate')
+	gen.bind_function('hg::HermiteInterpolate<float>', 'float', ['float y0', 'float y1', 'float y2', 'float y3', 'float t', 'float tension', 'float bias'], bound_name='HermiteInterpolate')
 
 	gen.bind_function('hg::ReverseRotationOrder', 'hg::RotationOrder', ['hg::RotationOrder rotation_order'])
 
@@ -3996,142 +3036,150 @@ def bind_math(gen):
 	gen.add_include('foundation/minmax.h')
 
 	minmax = gen.begin_class('hg::MinMax')
+	#minmax._inline = True
 
-	gen.bind_members(minmax, ['hg::Vector3 mn', 'hg::Vector3 mx'])
+	gen.bind_members(minmax, ['hg::Vec3 mn', 'hg::Vec3 mx'])
 	gen.bind_constructor_overloads(minmax, [
 		([], []),
-		(['const hg::Vector3 &min', 'const hg::Vector3 &max'], [])
+		(['const hg::Vec3 &min', 'const hg::Vec3 &max'], [])
 	])
-	gen.bind_method(minmax, 'GetArea', 'float', [])
-	gen.bind_method(minmax, 'GetCenter', 'hg::Vector3', [])
 
-	gen.bind_arithmetic_op(minmax, '*', 'hg::MinMax', ['const hg::Matrix4 &m'])
 	gen.bind_comparison_ops(minmax, ['==', '!='], ['const hg::MinMax &minmax'])
 
 	gen.end_class(minmax)
 
-	#void GetMinMaxVertices(const MinMax &minmax, Vector3 out[8]);
-	gen.bind_function('hg::ComputeMinMaxBoundingSphere', 'void', ['const hg::MinMax &minmax', 'hg::Vector3 &origin', 'float &radius'], {'arg_out': ['origin', 'radius']})
+	gen.bind_function('GetArea', 'float', ['const hg::MinMax &minmax'])
+	gen.bind_function('GetCenter', 'hg::Vec3', ['const hg::MinMax &minmax'])
+
+	gen.bind_function('hg::ComputeMinMaxBoundingSphere', 'void', ['const hg::MinMax &minmax', 'hg::Vec3 &origin', 'float &radius'], {'arg_out': ['origin', 'radius']})
 
 	gen.bind_function_overloads('hg::Overlap', [
 		('bool', ['const hg::MinMax &minmax_a', 'const hg::MinMax &minmax_b'], []),
 		('bool', ['const hg::MinMax &minmax_a', 'const hg::MinMax &minmax_b', 'hg::Axis axis'], [])
 	])
-	gen.bind_function('hg::Contains', 'bool', ['const hg::MinMax &minmax', 'const hg::Vector3 &position'])
+	gen.bind_function('hg::Contains', 'bool', ['const hg::MinMax &minmax', 'const hg::Vec3 &position'])
 
 	gen.bind_function_overloads('hg::Union', [
 		('hg::MinMax', ['const hg::MinMax &minmax_a', 'const hg::MinMax &minmax_b'], []),
-		('hg::MinMax', ['const hg::MinMax &minmax', 'const hg::Vector3 &position'], [])
+		('hg::MinMax', ['const hg::MinMax &minmax', 'const hg::Vec3 &position'], [])
 	])
 
-	gen.bind_function('hg::IntersectRay', 'bool', ['const hg::MinMax &minmax', 'const hg::Vector3 &origin', 'const hg::Vector3 &direction', 'float &t_min', 'float &t_max'], {'arg_out': ['t_min', 't_max']})
+	gen.bind_function('hg::IntersectRay', 'bool', ['const hg::MinMax &minmax', 'const hg::Vec3 &origin', 'const hg::Vec3 &direction', 'float &t_min', 'float &t_max'], {'arg_out': ['t_min', 't_max']})
 
-	gen.bind_function('hg::ClassifyLine', 'bool', ['const hg::MinMax &minmax', 'const hg::Vector3 &position', 'const hg::Vector3 &direction', 'hg::Vector3 &intersection', 'hg::Vector3 *normal'], {'arg_out': ['intersection', 'normal']})
-	gen.bind_function('hg::ClassifySegment', 'bool', ['const hg::MinMax &minmax', 'const hg::Vector3 &p0', 'const hg::Vector3 &p1', 'hg::Vector3 &intersection', 'hg::Vector3 *normal'], {'arg_out': ['intersection', 'normal']})
+	gen.bind_function('hg::ClassifyLine', 'bool', ['const hg::MinMax &minmax', 'const hg::Vec3 &position', 'const hg::Vec3 &direction', 'hg::Vec3 &intersection', 'hg::Vec3 *normal'], {'arg_out': ['intersection', 'normal']})
+	gen.bind_function('hg::ClassifySegment', 'bool', ['const hg::MinMax &minmax', 'const hg::Vec3 &p0', 'const hg::Vec3 &p1', 'hg::Vec3 &intersection', 'hg::Vec3 *normal'], {'arg_out': ['intersection', 'normal']})
 
-	gen.bind_function('MinMaxFromPositionSize', 'hg::MinMax', ['const hg::Vector3 &position', 'const hg::Vector3 &size'])
+	gen.bind_function('MinMaxFromPositionSize', 'hg::MinMax', ['const hg::Vec3 &position', 'const hg::Vec3 &size'])
 
-	# hg::Vector2<T>
+	# hg::Vec2<T>
 	gen.add_include('foundation/vector2.h')
 
 	def bind_vector2_T(T, bound_name):
-		vector2 = gen.begin_class('hg::tVector2<%s>'%T, bound_name=bound_name)
-		gen.bind_static_members(vector2, ['const hg::tVector2<%s> Zero'%T, 'const hg::tVector2<%s> One'%T])
+		vector2 = gen.begin_class('hg::tVec2<%s>'%T, bound_name=bound_name)
+		vector2._inline = True
+
+		gen.bind_static_members(vector2, ['const hg::tVec2<%s> Zero'%T, 'const hg::tVec2<%s> One'%T])
 
 		gen.bind_members(vector2, ['%s x'%T, '%s y'%T])
 
 		gen.bind_constructor_overloads(vector2, [
 			([], []),
 			(['%s x'%T, '%s y'%T], []),
-			(['const hg::tVector2<%s> &v'%T], []),
-			(['const hg::Vector3 &v'], []),
-			(['const hg::Vector4 &v'], [])
+			(['const hg::tVec2<%s> &v'%T], []),
+			(['const hg::Vec3 &v'], []),
+			(['const hg::Vec4 &v'], [])
 		])
 
 		gen.bind_arithmetic_ops_overloads(vector2, ['+', '-', '/'], [
-			('hg::tVector2<%s>'%T, ['const hg::tVector2<%s> &v'%T], []),
-			('hg::tVector2<%s>'%T, ['const %s k'%T], [])
+			('hg::tVec2<%s>'%T, ['const hg::tVec2<%s> &v'%T], []),
+			('hg::tVec2<%s>'%T, ['const %s k'%T], [])
 		])
 		gen.bind_arithmetic_op_overloads(vector2, '*', [
-			('hg::tVector2<%s>'%T, ['const hg::tVector2<%s> &v'%T], []),
-			('hg::tVector2<%s>'%T, ['const %s k'%T], []),
-			('hg::tVector2<%s>'%T, ['const hg::Matrix3 &m'], [])
+			('hg::tVec2<%s>'%T, ['const hg::tVec2<%s> &v'%T], []),
+			('hg::tVec2<%s>'%T, ['const %s k'%T], [])
 		])
 		gen.bind_inplace_arithmetic_ops_overloads(vector2, ['+=', '-=', '*=', '/='], [
-			(['const hg::tVector2<%s> &v'%T], []),
+			(['const hg::tVec2<%s> &v'%T], []),
 			(['const %s k'%T], [])
 		])
 
-		gen.bind_method(vector2, 'Min', 'hg::tVector2<%s>'%T, ['const hg::tVector2<%s> &v'%T])
-		gen.bind_method(vector2, 'Max', 'hg::tVector2<%s>'%T, ['const hg::tVector2<%s> &v'%T])
-
-		gen.bind_method(vector2, 'Len2', T, [])
-		gen.bind_method(vector2, 'Len', T, [])
-
-		gen.bind_method(vector2, 'Dot', T, ['const hg::tVector2<%s> &v'%T])
-
-		gen.bind_method(vector2, 'Normalize', 'void', [])
-		gen.bind_method(vector2, 'Normalized', 'hg::tVector2<%s>'%T, [])
-
-		gen.bind_method(vector2, 'Reversed', 'hg::tVector2<%s>'%T, [])
-
-		gen.bind_static_method(vector2, 'Dist2', T, ['const hg::tVector2<%s> &a'%T, 'const hg::tVector2<%s> &b'%T])
-		gen.bind_static_method(vector2, 'Dist', T, ['const hg::tVector2<%s> &a'%T, 'const hg::tVector2<%s> &b'%T])
-
-		gen.insert_binding_code('static void _Vector2_%s_Set(hg::tVector2<%s> *v, %s x, %s y) { v->x = x; v->y = y; }'%(T, T, T, T))
+		gen.insert_binding_code('static void _Vector2_%s_Set(hg::tVec2<%s> *v, %s x, %s y) { v->x = x; v->y = y; }'%(T, T, T, T))
 		gen.bind_method(vector2, 'Set', 'void', ['%s x'%T, '%s y'%T], {'route': route_lambda('_Vector2_%s_Set'%T)})
 
 		gen.end_class(vector2)
+
+		gen.bind_function('hg::Min', 'hg::tVec2<%s>'%T, ['const hg::tVec2<%s> &a'%T, 'const hg::tVec2<%s> &b'%T])
+		gen.bind_function('hg::Max', 'hg::tVec2<%s>'%T, ['const hg::tVec2<%s> &a'%T, 'const hg::tVec2<%s> &b'%T])
+
+		gen.bind_function('hg::Len2', T, ['const hg::tVec2<%s> &v'%T])
+		gen.bind_function('hg::Len', T, ['const hg::tVec2<%s> &v'%T])
+
+		gen.bind_function('hg::Dot', T, ['const hg::tVec2<%s> &a'%T, 'const hg::tVec2<%s> &b'%T])
+
+		gen.bind_function('hg::Normalize', 'hg::tVec2<%s>'%T, ['const hg::tVec2<%s> &v'%T])
+		gen.bind_function('hg::Reverse', 'hg::tVec2<%s>'%T, ['const hg::tVec2<%s> &a'%T])
+
+		gen.bind_function('hg::Dist2', T, ['const hg::tVec2<%s> &a'%T, 'const hg::tVec2<%s> &b'%T])
+		gen.bind_function('hg::Dist', T, ['const hg::tVec2<%s> &a'%T, 'const hg::tVec2<%s> &b'%T])
+
+		bind_std_vector(gen, vector2)
+
 		return vector2
 
-	vector2 = bind_vector2_T('float', 'Vector2')
-	ivector2 = bind_vector2_T('int', 'IntVector2')
+	vector2 = bind_vector2_T('float', 'Vec2')
+	ivector2 = bind_vector2_T('int', 'iVec2')
 
-	# hg::Vector4
+	# hg::Vec4
 	gen.add_include('foundation/vector4.h')
 
-	vector4 = gen.begin_class('hg::Vector4')
+	vector4 = gen.begin_class('hg::Vec4')
 	vector4._inline = True
 	gen.bind_members(vector4, ['float x', 'float y', 'float z', 'float w'])
 
 	gen.bind_constructor_overloads(vector4, [
 		([], []),
-		(['float x', 'float y', 'float z', 'float w'], []),
-		(['const hg::tVector2<float> &v'], []),
-		(['const hg::tVector2<int> &v'], []),
-		(['const hg::Vector3 &v'], []),
-		(['const hg::Vector4 &v'], [])
+		(['float x', 'float y', 'float z', '?float w'], []),
+		(['const hg::tVec2<float> &v'], []),
+		(['const hg::tVec2<int> &v'], []),
+		(['const hg::Vec3 &v'], []),
+		(['const hg::Vec4 &v'], [])
 	])
 
 	gen.bind_arithmetic_ops_overloads(vector4, ['+', '-', '/'], [
-		('hg::Vector4', ['hg::Vector4 &v'], []),
-		('hg::Vector4', ['float k'], [])
+		('hg::Vec4', ['hg::Vec4 &v'], []),
+		('hg::Vec4', ['float k'], [])
 	])
 	gen.bind_arithmetic_ops_overloads(vector4, ['*'], [
-		('hg::Vector4', ['hg::Vector4 &v'], []),
-		('hg::Vector4', ['float k'], []),
-		('hg::Vector4', ['const hg::Matrix4 &m'], []),
-		('hg::Vector4', ['const hg::Matrix44 &m'], [])
+		('hg::Vec4', ['hg::Vec4 &v'], []),
+		('hg::Vec4', ['float k'], [])
 	])
 
 	gen.bind_inplace_arithmetic_ops_overloads(vector4, ['+=', '-=', '*=', '/='], [
-		(['hg::Vector4 &v'], []),
+		(['hg::Vec4 &v'], []),
 		(['float k'], [])
 	])
 
-	gen.bind_method(vector4, 'Abs', 'hg::Vector4', [])
-
-	gen.bind_method(vector4, 'Normalized', 'hg::Vector4', [])
-
-	gen.insert_binding_code('static void _Vector4_Set(hg::Vector4 *v, float x, float y, float z, float w = 1.f) { v->x = x; v->y = y; v->z = z; v->w = w; }')
+	gen.insert_binding_code('static void _Vector4_Set(hg::Vec4 *v, float x, float y, float z, float w = 1.f) { v->x = x; v->y = y; v->z = z; v->w = w; }')
 	gen.bind_method(vector4, 'Set', 'void', ['float x', 'float y', 'float z', '?float w'], {'route': route_lambda('_Vector4_Set')})
 
 	gen.end_class(vector4)
+
+	gen.bind_function('hg::Abs', 'hg::Vec4', ['const hg::Vec4 &v'])
+
+	gen.bind_function('hg::Normalize', 'hg::Vec4', ['const hg::Vec4 &v'])
+		
+	gen.bind_function_overloads('hg::RandomVec4', [
+		('hg::Vec4', ['float min', 'float max'], []),
+		('hg::Vec4', ['const hg::Vec4 &min', 'const hg::Vec4 &max'], [])
+	])
+
+	bind_std_vector(gen, vector4)
 
 	# hg::Quaternion
 	gen.add_include('foundation/quaternion.h')
 
 	quaternion = gen.begin_class('hg::Quaternion')
+	quaternion._inline = True
 
 	gen.bind_members(quaternion, ['float x', 'float y', 'float z', 'float w'])
 
@@ -4153,288 +3201,325 @@ def bind_math(gen):
 	])
 	gen.bind_inplace_arithmetic_op(quaternion, '/=', ['float v'])
 
-	gen.bind_method(quaternion, 'Inversed', 'hg::Quaternion', [])
-	gen.bind_method(quaternion, 'Normalized', 'hg::Quaternion', [])
-	gen.bind_method(quaternion, 'ToMatrix3', 'hg::Matrix3', [])
-	gen.bind_method(quaternion, 'ToEuler', 'hg::Vector3', ['?hg::RotationOrder rotation_order'])
-
-	gen.bind_static_method(quaternion, 'Distance', 'float', ['const hg::Quaternion &a', 'const hg::Quaternion &b'])
-	gen.bind_static_method(quaternion, 'Slerp', 'hg::Quaternion', ['float t', 'const hg::Quaternion &a', 'const hg::Quaternion &b'])
-
-	gen.bind_static_method(quaternion, 'FromEuler', 'hg::Quaternion', ['float x', 'float y', 'float z', '?hg::RotationOrder rotation_order'])
-	gen.bind_static_method(quaternion, 'LookAt', 'hg::Quaternion', ['const hg::Vector3 &at'])
-	gen.bind_static_method(quaternion, 'FromMatrix3', 'hg::Quaternion', ['const hg::Matrix3 &m'])
-	gen.bind_static_method(quaternion, 'FromAxisAngle', 'hg::Quaternion', ['float angle', 'const hg::Vector3 &axis'])
-
 	gen.end_class(quaternion)
 
-	# hg::Matrix3
+	gen.bind_function('hg::Normalize', 'hg::Quaternion', ['const hg::Quaternion &q'])
+	gen.bind_function('hg::Inverse', 'hg::Quaternion', ['const hg::Quaternion &q'])
+
+	gen.bind_function('hg::Len2', 'float', ['const hg::Quaternion &q'])
+	gen.bind_function('hg::Len', 'float', ['const hg::Quaternion &q'])
+
+	gen.bind_function('hg::Dist', 'float', ['const hg::Quaternion &a', 'const hg::Quaternion &b'])
+	gen.bind_function('hg::Slerp', 'hg::Quaternion', ['const hg::Quaternion &a', 'const hg::Quaternion &b', 'float t'])
+
+	gen.bind_function_overloads('hg::QuaternionFromEuler', [
+		('hg::Quaternion', ['float x', 'float y', 'float z', '?hg::RotationOrder rotation_order'], []),
+		('hg::Quaternion', ['hg::Vec3 &euler', '?hg::RotationOrder rotation_order'], [])
+	])
+	gen.bind_function('hg::QuaternionLookAt', 'hg::Quaternion', ['const hg::Vec3 &at'])
+	gen.bind_function('hg::QuaternionFromMatrix3', 'hg::Quaternion', ['const hg::Mat3 &m'])
+	gen.bind_function('hg::QuaternionFromAxisAngle', 'hg::Quaternion', ['float angle', 'const hg::Vec3 &axis'])
+
+	gen.bind_function('hg::ToMatrix3', 'hg::Mat3', ['const hg::Quaternion &q'])
+	gen.bind_function('hg::ToEuler', 'hg::Vec3', ['const hg::Quaternion &q', '?hg::RotationOrder rotation_order'])
+
+	# hg::Mat3
 	gen.add_include('foundation/matrix3.h')
 
-	matrix3 = gen.begin_class('hg::Matrix3')
-	gen.bind_static_members(matrix3, ['const hg::Matrix3 Zero', 'const hg::Matrix3 Identity'])
+	matrix3 = gen.begin_class('hg::Mat3')
+	gen.bind_static_members(matrix3, ['const hg::Mat3 Zero', 'const hg::Mat3 Identity'])
 
 	gen.bind_constructor_overloads(matrix3, [
 		([], []),
-		(['const hg::Matrix4 &m'], []),
-		(['const hg::Vector3 &x', 'const hg::Vector3 &y', 'const hg::Vector3 &z'], [])
+		(['const hg::Mat4 &m'], []),
+		(['const hg::Vec3 &x', 'const hg::Vec3 &y', 'const hg::Vec3 &z'], [])
 	])
 
-	gen.bind_comparison_ops(matrix3, ['==', '!='], ['const hg::Matrix3 &m'])
+	gen.bind_comparison_ops(matrix3, ['==', '!='], ['const hg::Mat3 &m'])
 
-	gen.bind_arithmetic_ops(matrix3, ['+', '-'], 'hg::Matrix3', ['hg::Matrix3 &m'])
+	gen.bind_arithmetic_ops(matrix3, ['+', '-'], 'hg::Mat3', ['hg::Mat3 &m'])
 	gen.bind_arithmetic_op_overloads(matrix3, '*', [
-		('hg::Matrix3', ['const float v'], []),
-		('hg::tVector2<float>', ['const hg::tVector2<float> &v'], []),
-		('hg::Vector3', ['const hg::Vector3 &v'], []),
-		('hg::Vector4', ['const hg::Vector4 &v'], []),
-		('hg::Matrix3', ['const hg::Matrix3 &m'], [])
+		('hg::Mat3', ['const float v'], []),
+		('hg::tVec2<float>', ['const hg::tVec2<float> &v'], []),
+		('hg::Vec3', ['const hg::Vec3 &v'], []),
+		('hg::Vec4', ['const hg::Vec4 &v'], []),
+		('hg::Mat3', ['const hg::Mat3 &m'], [])
 	])
-	gen.bind_inplace_arithmetic_ops(matrix3, ['+=', '-='], ['const hg::Matrix3 &m'])
+	gen.bind_inplace_arithmetic_ops(matrix3, ['+=', '-='], ['const hg::Mat3 &m'])
 	gen.bind_inplace_arithmetic_op_overloads(matrix3, '*=', [
 		(['const float k'], []),
-		(['const hg::Matrix3 &m'], [])
+		(['const hg::Mat3 &m'], [])
 	])
-
-	gen.bind_method(matrix3, 'Det', 'float', [])
-	gen.bind_method(matrix3, 'Inverse', 'bool', ['hg::Matrix3 &I'], {'arg_out': ['I']})
-
-	gen.bind_method(matrix3, 'Transposed', 'hg::Matrix3', [])
-
-	gen.bind_method(matrix3, 'GetRow', 'hg::Vector3', ['uint32_t n'])
-	gen.bind_method(matrix3, 'GetColumn', 'hg::Vector3', ['uint32_t n'])
-	gen.bind_method(matrix3, 'SetRow', 'void', ['uint32_t n', 'const hg::Vector3 &row'])
-	gen.bind_method(matrix3, 'SetColumn', 'void', ['uint32_t n', 'const hg::Vector3 &column'])
-
-	gen.bind_method(matrix3, 'GetX', 'hg::Vector3', [])
-	gen.bind_method(matrix3, 'GetY', 'hg::Vector3', [])
-	gen.bind_method(matrix3, 'GetZ', 'hg::Vector3', [])
-	gen.bind_method(matrix3, 'GetTranslation', 'hg::Vector3', [])
-	gen.bind_method(matrix3, 'GetScale', 'hg::Vector3', [])
-
-	gen.bind_method(matrix3, 'SetX', 'void', ['const hg::Vector3 &X'])
-	gen.bind_method(matrix3, 'SetY', 'void', ['const hg::Vector3 &Y'])
-	gen.bind_method(matrix3, 'SetZ', 'void', ['const hg::Vector3 &Z'])
-	gen.bind_method_overloads(matrix3, 'SetTranslation', [
-		('void', ['const hg::Vector3 &T'], []),
-		('void', ['const hg::tVector2<float> &T'], [])
-	])
-	gen.bind_method(matrix3, 'SetScale', 'void', ['const hg::Vector3 &S'])
-
-	gen.bind_method(matrix3, 'Set', 'void', ['const hg::Vector3 &X', 'const hg::Vector3 &Y', 'const hg::Vector3 &Z'])
-
-	gen.bind_method(matrix3, 'Normalized', 'hg::Matrix3', [])
-	gen.bind_method(matrix3, 'Orthonormalized', 'hg::Matrix3', [])
-	gen.bind_method_overloads(matrix3, 'ToEuler', [
-		('hg::Vector3', [], []),
-		('hg::Vector3', ['hg::RotationOrder rotation_order'], [])
-	])
-
-	gen.bind_static_method(matrix3, 'VectorMatrix', 'hg::Matrix3', ['const hg::Vector3 &V'])
-	gen.bind_static_method_overloads(matrix3, 'TranslationMatrix', [
-		('hg::Matrix3', ['const hg::tVector2<float> &T'], []),
-		('hg::Matrix3', ['const hg::Vector3 &T'], [])
-	])
-	gen.bind_static_method_overloads(matrix3, 'ScaleMatrix', [
-		('hg::Matrix3', ['const hg::tVector2<float> &S'], []),
-		('hg::Matrix3', ['const hg::Vector3 &S'], [])
-	])
-	gen.bind_static_method(matrix3, 'CrossProductMatrix', 'hg::Matrix3', ['const hg::Vector3 &V'])
-
-	gen.bind_static_method(matrix3, 'RotationMatrixXAxis', 'hg::Matrix3', ['float angle'])
-	gen.bind_static_method(matrix3, 'RotationMatrixYAxis', 'hg::Matrix3', ['float angle'])
-	gen.bind_static_method(matrix3, 'RotationMatrixZAxis', 'hg::Matrix3', ['float angle'])
-
-	gen.bind_static_method(matrix3, 'RotationMatrix2D', 'hg::Matrix3', ['float angle', 'const hg::tVector2<float> &pivot'])
-
-	gen.bind_static_method_overloads(matrix3, 'FromEuler', [
-		('hg::Matrix3', ['float x', 'float y', 'float z'], []),
-		('hg::Matrix3', ['float x', 'float y', 'float z', 'hg::RotationOrder rotation_order'], []),
-		('hg::Matrix3', ['const hg::Vector3 &euler'], []),
-		('hg::Matrix3', ['const hg::Vector3 &euler', 'hg::RotationOrder rotation_order'], [])
-	])
-
-	gen.bind_static_method(matrix3, 'LookAt', 'hg::Matrix3', ['const hg::Vector3 &front', '?const hg::Vector3 &up'])
 
 	gen.end_class(matrix3)
 
-	gen.bind_function('hg::RotationMatrixXZY', 'hg::Matrix3', ['float x', 'float y', 'float z'])
-	gen.bind_function('hg::RotationMatrixZYX', 'hg::Matrix3', ['float x', 'float y', 'float z'])
-	gen.bind_function('hg::RotationMatrixXYZ', 'hg::Matrix3', ['float x', 'float y', 'float z'])
-	gen.bind_function('hg::RotationMatrixZXY', 'hg::Matrix3', ['float x', 'float y', 'float z'])
-	gen.bind_function('hg::RotationMatrixYZX', 'hg::Matrix3', ['float x', 'float y', 'float z'])
-	gen.bind_function('hg::RotationMatrixYXZ', 'hg::Matrix3', ['float x', 'float y', 'float z'])
-	gen.bind_function('hg::RotationMatrixXY', 'hg::Matrix3', ['float x', 'float y'])
+	gen.bind_function('hg::Det', 'float', ['const hg::Mat3 &m'])
+	gen.bind_function('hg::Inverse', 'bool', ['const hg::Mat3 &m', 'hg::Mat3 &I'], {'arg_out': ['I']})
 
-	# hg::Matrix4
+	gen.bind_function('hg::Transpose', 'hg::Mat3', ['const hg::Mat3 &m'])
+
+	gen.bind_function('hg::GetRow', 'hg::Vec3', ['const hg::Mat3 &m', 'uint32_t n'])
+	gen.bind_function('hg::GetColumn', 'hg::Vec3', ['const hg::Mat3 &m', 'uint32_t n'])
+	gen.bind_function('hg::SetRow', 'void', ['hg::Mat3 &m', 'uint32_t n', 'const hg::Vec3 &row'])
+	gen.bind_function('hg::SetColumn', 'void', ['hg::Mat3 &m', 'uint32_t n', 'const hg::Vec3 &column'])
+
+	gen.bind_function('hg::GetX', 'hg::Vec3', ['const hg::Mat3 &m'])
+	gen.bind_function('hg::GetY', 'hg::Vec3', ['const hg::Mat3 &m'])
+	gen.bind_function('hg::GetZ', 'hg::Vec3', ['const hg::Mat3 &m'])
+	gen.bind_function('hg::GetTranslation', 'hg::Vec3', ['const hg::Mat3 &m'])
+	gen.bind_function('hg::GetScale', 'hg::Vec3', ['const hg::Mat3 &m'])
+
+	gen.bind_function('hg::SetX', 'void', ['hg::Mat3 &m', 'const hg::Vec3 &X'])
+	gen.bind_function('hg::SetY', 'void', ['hg::Mat3 &m', 'const hg::Vec3 &Y'])
+	gen.bind_function('hg::SetZ', 'void', ['hg::Mat3 &m', 'const hg::Vec3 &Z'])
+	gen.bind_function_overloads('hg::SetTranslation', [
+		('void', ['hg::Mat3 &m', 'const hg::Vec3 &T'], []),
+		('void', ['hg::Mat3 &m', 'const hg::tVec2<float> &T'], [])
+	])
+	gen.bind_function('hg::SetScale', 'void', ['hg::Mat3 &m', 'const hg::Vec3 &S'])
+	gen.bind_function('hg::SetAxises', 'void', ['hg::Mat3 &m', 'const hg::Vec3 &X', 'const hg::Vec3 &Y', 'const hg::Vec3 &Z'])
+
+	gen.bind_function('hg::Normalize', 'hg::Mat3', ['const hg::Mat3 &m'])
+	gen.bind_function('hg::Orthonormalize', 'hg::Mat3', ['const hg::Mat3 &m'])
+	gen.bind_function_overloads('hg::ToEuler', [
+		('hg::Vec3', ['const hg::Mat3 &m'], []),
+		('hg::Vec3', ['const hg::Mat3 &m', 'hg::RotationOrder rotation_order'], [])
+	])
+
+	gen.bind_function('hg::VectorMat3', 'hg::Mat3', ['const hg::Vec3 &V'])
+	gen.bind_function_overloads('hg::TranslationMat3', [
+		('hg::Mat3', ['const hg::tVec2<float> &T'], []),
+		('hg::Mat3', ['const hg::Vec3 &T'], [])
+	])
+	gen.bind_function_overloads('hg::ScaleMat3', [
+		('hg::Mat3', ['const hg::tVec2<float> &S'], []),
+		('hg::Mat3', ['const hg::Vec3 &S'], [])
+	])
+	gen.bind_function('hg::CrossProductMat3', 'hg::Mat3', ['const hg::Vec3 &V'])
+
+	gen.bind_function('hg::RotationMatX', 'hg::Mat3', ['float angle'])
+	gen.bind_function('hg::RotationMatY', 'hg::Mat3', ['float angle'])
+	gen.bind_function('hg::RotationMatZ', 'hg::Mat3', ['float angle'])
+
+	gen.bind_function('hg::RotationMat2D', 'hg::Mat3', ['float angle', 'const hg::tVec2<float> &pivot'])
+
+	gen.bind_function_overloads('hg::RotationMat3', [
+		('hg::Mat3', ['float x', 'float y', 'float z'], []),
+		('hg::Mat3', ['float x', 'float y', 'float z', 'hg::RotationOrder rotation_order'], []),
+		('hg::Mat3', ['const hg::Vec3 &euler'], []),
+		('hg::Mat3', ['const hg::Vec3 &euler', 'hg::RotationOrder rotation_order'], [])
+	])
+
+	gen.bind_function('hg::Mat3LookAt', 'hg::Mat3', ['const hg::Vec3 &front', '?const hg::Vec3 &up'])
+
+	gen.bind_function('hg::RotationMatXZY', 'hg::Mat3', ['float x', 'float y', 'float z'])
+	gen.bind_function('hg::RotationMatZYX', 'hg::Mat3', ['float x', 'float y', 'float z'])
+	gen.bind_function('hg::RotationMatXYZ', 'hg::Mat3', ['float x', 'float y', 'float z'])
+	gen.bind_function('hg::RotationMatZXY', 'hg::Mat3', ['float x', 'float y', 'float z'])
+	gen.bind_function('hg::RotationMatYZX', 'hg::Mat3', ['float x', 'float y', 'float z'])
+	gen.bind_function('hg::RotationMatYXZ', 'hg::Mat3', ['float x', 'float y', 'float z'])
+	gen.bind_function('hg::RotationMatXY', 'hg::Mat3', ['float x', 'float y'])
+
+	# hg::Mat4
 	gen.add_include('foundation/matrix4.h')
 
-	matrix4 = gen.begin_class('hg::Matrix4')
-	gen.bind_static_members(matrix4, ['const hg::Matrix4 Zero', 'const hg::Matrix4 Identity'])
+	matrix4 = gen.begin_class('hg::Mat4')
+	gen.bind_static_members(matrix4, ['const hg::Mat4 Zero', 'const hg::Mat4 Identity'])
+	
+	gen.insert_binding_code('static hg::Mat4 *_Mat4_Copy(const hg::Mat4 &m) { return new hg::Mat4(m); }')
 
 	gen.bind_constructor_overloads(matrix4, [
 		([], []),
-		(['const hg::Matrix3 &m'], [])
+		(['const hg::Mat4 &m'], {'route': route_lambda('_Mat4_Copy')}),
+		(['float m00', 'float m10', 'float m20', 'float m01', 'float m11', 'float m21', 'float m02', 'float m12', 'float m22', 'float m03', 'float m13', 'float m23'], []),
+		(['const hg::Mat3 &m'], [])
 	])
 
-	gen.bind_comparison_ops(matrix4, ['==', '!='], ['const hg::Matrix4 &m'])
+	gen.bind_comparison_ops(matrix4, ['==', '!='], ['const hg::Mat4 &m'])
 
-	gen.bind_arithmetic_ops(matrix4, ['+', '-'], 'hg::Matrix4', ['hg::Matrix4 &m'])
+	gen.bind_arithmetic_ops(matrix4, ['+', '-'], 'hg::Mat4', ['hg::Mat4 &m'])
 	gen.bind_arithmetic_op_overloads(matrix4, '*', [
-		('hg::Matrix4', ['const float v'], []),
-		('hg::Matrix4', ['const hg::Matrix4 &m'], []),
-		('hg::Vector3', ['const hg::Vector3 &v'], []),
-		('hg::Vector4', ['const hg::Vector4 &v'], []),
-		('hg::Matrix44', ['const hg::Matrix44 &m'], [])
+		('hg::Mat4', ['const float v'], []),
+		('hg::Mat4', ['const hg::Mat4 &m'], []),
+		('hg::Vec3', ['const hg::Vec3 &v'], []),
+		('hg::Vec4', ['const hg::Vec4 &v'], []),
+		('hg::Mat44', ['const hg::Mat44 &m'], []),
+		('hg::MinMax', ['const hg::MinMax &minmax'], []),
 	])
-
-	gen.bind_method(matrix4, 'GetRow', 'hg::Vector3', ['uint32_t n'])
-	gen.bind_method(matrix4, 'GetColumn', 'hg::Vector4', ['uint32_t n'])
-	gen.bind_method(matrix4, 'SetRow', 'void', ['uint32_t n', 'const hg::Vector3 &v'])
-	gen.bind_method(matrix4, 'SetColumn', 'void', ['uint32_t n', 'const hg::Vector4 &v'])
-
-	gen.bind_method(matrix4, 'GetX', 'hg::Vector3', [])
-	gen.bind_method(matrix4, 'GetY', 'hg::Vector3', [])
-	gen.bind_method(matrix4, 'GetZ', 'hg::Vector3', [])
-	gen.bind_method(matrix4, 'GetT', 'hg::Vector3', [])
-	gen.bind_method(matrix4, 'GetTranslation', 'hg::Vector3', [])
-	gen.bind_method(matrix4, 'GetRotation', 'hg::Vector3', ['?hg::RotationOrder rotation_order'])
-	gen.bind_method(matrix4, 'GetRotationMatrix', 'hg::Matrix3', [])
-	gen.bind_method(matrix4, 'GetScale', 'hg::Vector3', [])
-
-	gen.bind_method(matrix4, 'SetX', 'void', ['const hg::Vector3 &X'])
-	gen.bind_method(matrix4, 'SetY', 'void', ['const hg::Vector3 &Y'])
-	gen.bind_method(matrix4, 'SetZ', 'void', ['const hg::Vector3 &Z'])
-	gen.bind_method(matrix4, 'SetTranslation', 'void', ['const hg::Vector3 &T'])
-	gen.bind_method(matrix4, 'SetScale', 'void', ['const hg::Vector3 &scale'])
-
-	gen.bind_method(matrix4, 'Inverse', 'bool', ['hg::Matrix4 &out'])
-	gen.bind_method(matrix4, 'InversedFast', 'hg::Matrix4', [])
-
-	gen.bind_method(matrix4, 'Orthonormalized', 'hg::Matrix4', [])
-
-	gen.bind_static_method_overloads(matrix4, 'LerpAsOrthonormalBase', [
-		('hg::Matrix4', ['const hg::Matrix4 &from', 'const hg::Matrix4 &to', 'float k'], []),
-		('hg::Matrix4', ['const hg::Matrix4 &from', 'const hg::Matrix4 &to', 'float k', 'bool fast'], [])
-	])
-
-	#void Decompose(Vector3 *position, Vector3 *scale = nullptr, Matrix3 *rotation = nullptr) const;
-	gen.bind_method(matrix4, 'Decompose', 'void', ['hg::Vector3 *position', 'hg::Vector3 *scale', 'hg::Vector3 *rotation', '?hg::RotationOrder rotation_order'], {'arg_out': ['position', 'scale', 'rotation']})
-
-	gen.bind_method(matrix4, 'LookAt', 'hg::Matrix4', ['const hg::Vector3 &at', '?const hg::Vector3 &up'])
-
-	gen.bind_static_method(matrix4, 'TranslationMatrix', 'hg::Matrix4', ['const hg::Vector3 &t'])
-	gen.bind_static_method_overloads(matrix4, 'RotationMatrix', [
-		('hg::Matrix4', ['const hg::Vector3 &euler'], []),
-		('hg::Matrix4', ['const hg::Vector3 &euler', 'hg::RotationOrder order'], [])
-	])
-	gen.bind_static_method_overloads(matrix4, 'ScaleMatrix', [
-		('hg::Matrix4', ['const hg::Vector3 &scale'], []),
-		('hg::Matrix4', ['float scale'], [])
-	])
-	gen.bind_static_method_overloads(matrix4, 'TransformationMatrix', [
-		('hg::Matrix4', ['const hg::Vector3 &position', 'const hg::Vector3 &rotation'], []),
-		('hg::Matrix4', ['const hg::Vector3 &euler', 'const hg::Vector3 &rotation', 'const hg::Vector3 &scale'], []),
-		('hg::Matrix4', ['const hg::Vector3 &position', 'const hg::Matrix3 &rotation'], []),
-		('hg::Matrix4', ['const hg::Vector3 &euler', 'const hg::Matrix3 &rotation', 'const hg::Vector3 &scale'], [])
-	])
-	gen.bind_static_method(matrix4, 'LookToward', 'hg::Matrix4', ['const hg::Vector3 &position', 'const hg::Vector3 &direction', '?const hg::Vector3 &scale'])
-	gen.bind_static_method(matrix4, 'LookTowardUp', 'hg::Matrix4', ['const hg::Vector3 &position', 'const hg::Vector3 &direction', 'const hg::Vector3 &up', '?const hg::Vector3 &scale'])
 
 	gen.end_class(matrix4)
 
-	# hg::Matrix44
-	gen.add_include('foundation/matrix44.h')
+	gen.bind_function('hg::GetRow', 'hg::Vec4', ['const hg::Mat4 &m', 'unsigned int n'])
+	gen.bind_function('hg::GetColumn', 'hg::Vec3', ['const hg::Mat4 &m', 'unsigned int n'])
+	gen.bind_function('hg::SetRow', 'void', ['const hg::Mat4 &m', 'unsigned int n', 'const hg::Vec4 &v'])
+	gen.bind_function('hg::SetColumn', 'void', ['const hg::Mat4 &m', 'unsigned int n', 'const hg::Vec3 &v'])
 
-	matrix44 = gen.begin_class('hg::Matrix44')
-	gen.bind_static_members(matrix44, ['const hg::Matrix44 Zero', 'const hg::Matrix44 Identity'])
+	gen.bind_function('hg::GetX', 'hg::Vec3', ['const hg::Mat4 &m'])
+	gen.bind_function('hg::GetY', 'hg::Vec3', ['const hg::Mat4 &m'])
+	gen.bind_function('hg::GetZ', 'hg::Vec3', ['const hg::Mat4 &m'])
 
-	gen.bind_arithmetic_op_overloads(matrix44, '*', [
-		('hg::Matrix44', ['const hg::Matrix4 &m'], []),
-		('hg::Matrix44', ['const hg::Matrix44 &m'], [])
+	gen.bind_function('hg::GetT', 'hg::Vec3', ['const hg::Mat4 &m'])
+	gen.bind_function('hg::GetTranslation', 'hg::Vec3', ['const hg::Mat4 &m'])
+	gen.bind_function('hg::GetR', 'hg::Vec3', ['const hg::Mat4 &m', '?hg::RotationOrder rotation_order'])
+	gen.bind_function('hg::GetRotation', 'hg::Vec3', ['const hg::Mat4 &m', '?hg::RotationOrder rotation_order'])
+	gen.bind_function('hg::GetRMatrix', 'hg::Mat3', ['const hg::Mat4 &m'])
+	gen.bind_function('hg::GetRotationMatrix', 'hg::Mat3', ['const hg::Mat4 &m'])
+	gen.bind_function('hg::GetS', 'hg::Vec3', ['const hg::Mat4 &m'])
+	gen.bind_function('hg::GetScale', 'hg::Vec3', ['const hg::Mat4 &m'])
+
+	gen.bind_function('hg::SetX', 'void', ['const hg::Mat4 &m', 'const hg::Vec3 &X'])
+	gen.bind_function('hg::SetY', 'void', ['const hg::Mat4 &m', 'const hg::Vec3 &Y'])
+	gen.bind_function('hg::SetZ', 'void', ['const hg::Mat4 &m', 'const hg::Vec3 &Z'])
+
+	gen.bind_function('hg::SetT', 'void', ['const hg::Mat4 &m', 'const hg::Vec3 &T'])
+	gen.bind_function('hg::SetTranslation', 'void', ['const hg::Mat4 &m', 'const hg::Vec3 &T'])
+	gen.bind_function('hg::SetS', 'void', ['const hg::Mat4 &m', 'const hg::Vec3 &scale'])
+	gen.bind_function('hg::SetScale', 'void', ['const hg::Mat4 &m', 'const hg::Vec3 &scale'])
+
+	gen.bind_function('hg::Inverse', 'bool', ['const hg::Mat4 &m', 'hg::Mat4 &I'], {'arg_out': ['I']})
+	gen.bind_function('hg::InverseFast', 'hg::Mat4', ['const hg::Mat4 &m'])
+
+	gen.bind_function('hg::Orthonormalize', 'hg::Mat4', ['const hg::Mat4 &m'])
+	gen.bind_function('hg::LerpAsOrthonormalBase', 'hg::Mat4', ['const hg::Mat4 &from', 'const hg::Mat4 &to', 'float k', '?bool fast'])
+
+	gen.bind_function('hg::Decompose', 'void', ['const hg::Mat4 &m', 'hg::Vec3 *position', 'hg::Vec3 *rotation', 'hg::Vec3 *scale', '?hg::RotationOrder rotation_order'], {'arg_out': ['position', 'rotation', 'scale']})
+
+	gen.bind_function('hg::Mat4LookAt', 'hg::Mat4', ['const hg::Vec3 &position', 'const hg::Vec3 &at', '?const hg::Vec3 &scale'])
+	gen.bind_function('hg::Mat4LookAtUp', 'hg::Mat4', ['const hg::Vec3 &position', 'const hg::Vec3 &at', 'const hg::Vec3 &up', '?const hg::Vec3 &scale'])
+
+	gen.bind_function('hg::Mat4LookToward', 'hg::Mat4', ['const hg::Vec3 &position', 'const hg::Vec3 &direction', '?const hg::Vec3 &scale'])
+	gen.bind_function('hg::Mat4LookTowardUp', 'hg::Mat4', ['const hg::Vec3 &position', 'const hg::Vec3 &direction', 'const hg::Vec3 &up', '?const hg::Vec3 &scale'])
+
+	gen.bind_function('hg::TranslationMat4', 'hg::Mat4', ['const hg::Vec3 &t'])
+	gen.bind_function_overloads('hg::RotationMat4', [
+		('hg::Mat4', ['const hg::Vec3 &euler'], []),
+		('hg::Mat4', ['const hg::Vec3 &euler', 'hg::RotationOrder order'], [])
+	])
+	gen.bind_function_overloads('hg::ScaleMat4', [
+		('hg::Mat4', ['const hg::Vec3 &scale'], []),
+		('hg::Mat4', ['float scale'], [])
+	])
+	gen.bind_function_overloads('hg::TransformationMat4', [
+		('hg::Mat4', ['const hg::Vec3 &pos', 'const hg::Vec3 &rot', '?const hg::Vec3 &scale'], []),
+		('hg::Mat4', ['const hg::Vec3 &pos', 'const hg::Mat3 &rot', '?const hg::Vec3 &scale'], [])
 	])
 
-	gen.bind_method(matrix44, 'Inverse', 'hg::Matrix44', ['bool &result'], {'arg_out': ['result']})
+	bind_std_vector(gen, matrix4)
+	
+	# hg::Mat44
+	gen.add_include('foundation/matrix44.h')
 
-	gen.bind_method(matrix44, 'GetRow', 'hg::Vector4', ['uint32_t idx'])
-	gen.bind_method(matrix44, 'GetColumn', 'hg::Vector4', ['uint32_t idx'])
-	gen.bind_method(matrix44, 'SetRow', 'void', ['uint32_t idx', 'const hg::Vector4 &v'])
-	gen.bind_method(matrix44, 'SetColumn', 'void', ['uint32_t idx', 'const hg::Vector4 &v'])
+	matrix44 = gen.begin_class('hg::Mat44')
+	gen.bind_static_members(matrix44, ['const hg::Mat44 Zero', 'const hg::Mat44 Identity'])
+	
+	gen.bind_constructor_overloads(matrix44, [
+		([], []),
+		(['float m00', 'float m10', 'float m20', 'float m30',
+		'float m01', 'float m11', 'float m21', 'float m31',
+		'float m02', 'float m12', 'float m22', 'float m32',
+		'float m03', 'float m13', 'float m23', 'float m33'], [])
+	])
+
+	gen.bind_arithmetic_op_overloads(matrix44, '*', [
+		('hg::Mat44', ['const hg::Mat4 &m'], []),
+		('hg::Mat44', ['const hg::Mat44 &m'], []),
+		('hg::Vec3', ['const hg::Vec3 &v'], []),
+		('hg::Vec4', ['const hg::Vec4 &v'], [])
+	])
 
 	gen.end_class(matrix44)
 
-	# hg::Vector3
-	gen.add_include('foundation/vector3.h')
-	gen.add_include('foundation/vector3_api.h')
+	gen.bind_function('hg::Inverse', 'hg::Mat44', ['const hg::Mat44 &m', 'bool &result'], {'arg_out': ['result']})
 
-	vector3 = gen.begin_class('hg::Vector3')
+	gen.bind_function('hg::GetRow', 'hg::Vec4', ['const hg::Mat44 &m', 'uint32_t idx'])
+	gen.bind_function('hg::GetColumn', 'hg::Vec4', ['const hg::Mat44 &m', 'uint32_t idx'])
+	gen.bind_function('hg::SetRow', 'void', ['const hg::Mat44 &m', 'uint32_t idx', 'const hg::Vec4 &v'])
+	gen.bind_function('hg::SetColumn', 'void', ['const hg::Mat44 &m', 'uint32_t idx', 'const hg::Vec4 &v'])
+
+	# hg::Vec3
+	gen.add_include('foundation/vector3.h')
+
+	vector3 = gen.begin_class('hg::Vec3')
 	vector3._inline = True
 
-	gen.bind_static_members(vector3, ['const hg::Vector3 Zero', 'const hg::Vector3 One', 'const hg::Vector3 Left', 'const hg::Vector3 Right', 'const hg::Vector3 Up', 'const hg::Vector3 Down', 'const hg::Vector3 Front', 'const hg::Vector3 Back'])
+	gen.bind_static_members(vector3, ['const hg::Vec3 Zero', 'const hg::Vec3 One', 'const hg::Vec3 Left', 'const hg::Vec3 Right', 'const hg::Vec3 Up', 'const hg::Vec3 Down', 'const hg::Vec3 Front', 'const hg::Vec3 Back'])
 	gen.bind_members(vector3, ['float x', 'float y', 'float z'])
 
 	gen.bind_constructor_overloads(vector3, [
 		([], []),
 		(['float x', 'float y', 'float z'], []),
-		(['const hg::tVector2<float> &v'], []),
-		(['const hg::tVector2<int> &v'], []),
-		(['const hg::Vector3 &v'], []),
-		(['const hg::Vector4 &v'], [])
+		(['const hg::tVec2<float> &v'], []),
+		(['const hg::tVec2<int> &v'], []),
+		(['const hg::Vec3 &v'], []),
+		(['const hg::Vec4 &v'], [])
 	])
 
-	gen.bind_function('hg::Vector3FromVector4', 'hg::Vector3', ['const hg::Vector4 &v'])
+	gen.bind_function('hg::MakeVec3', 'hg::Vec3', ['const hg::Vec4 &v'])
 
-	gen.bind_arithmetic_ops_overloads(vector3, ['+', '-', '/'], [('hg::Vector3', ['hg::Vector3 &v'], []), ('hg::Vector3', ['float k'], [])])
+	gen.bind_arithmetic_ops_overloads(vector3, ['+', '-', '/'], [('hg::Vec3', ['hg::Vec3 &v'], []), ('hg::Vec3', ['float k'], [])])
 	gen.bind_arithmetic_ops_overloads(vector3, ['*'], [
-		('hg::Vector3', ['const hg::Vector3 &v'], []),
-		('hg::Vector3', ['float k'], []),
-		('hg::Vector3', ['const hg::Matrix3 &m'], []),
-		('hg::Vector3', ['const hg::Matrix4 &m'], []),
-		('hg::Vector3', ['const hg::Matrix44 &m'], [])
+		('hg::Vec3', ['const hg::Vec3 &v'], []),
+		('hg::Vec3', ['float k'], [])
 	])
 
 	gen.bind_inplace_arithmetic_ops_overloads(vector3, ['+=', '-=', '*=', '/='], [
-		(['hg::Vector3 &v'], []),
+		(['hg::Vec3 &v'], []),
 		(['float k'], [])
 	])
-	gen.bind_comparison_ops(vector3, ['==', '!='], ['const hg::Vector3 &v'])
+	gen.bind_comparison_ops(vector3, ['==', '!='], ['const hg::Vec3 &v'])
 
-	gen.bind_function('hg::Dot', 'float', ['const hg::Vector3 &u', 'const hg::Vector3 &v'])
-	gen.bind_function('hg::Cross', 'hg::Vector3', ['const hg::Vector3 &u', 'const hg::Vector3 &v'])
-
-	gen.bind_method(vector3, 'Reverse', 'void', [])
-	gen.bind_method(vector3, 'Inverse', 'void', [])
-	gen.bind_method(vector3, 'Normalize', 'void', [])
-	gen.bind_method(vector3, 'Normalized', 'hg::Vector3', [])
-	gen.bind_method_overloads(vector3, 'Clamped', [('hg::Vector3', ['float min', 'float max'], []), ('hg::Vector3', ['const hg::Vector3 &min', 'const hg::Vector3 &max'], [])])
-	gen.bind_method(vector3, 'ClampedMagnitude', 'hg::Vector3', ['float min', 'float max'])
-	gen.bind_method(vector3, 'Reversed', 'hg::Vector3', [])
-	gen.bind_method(vector3, 'Inversed', 'hg::Vector3', [])
-	gen.bind_method(vector3, 'Abs', 'hg::Vector3', [])
-	gen.bind_method(vector3, 'Sign', 'hg::Vector3', [])
-	gen.bind_method(vector3, 'Maximum', 'hg::Vector3', ['const hg::Vector3 &left', 'const hg::Vector3 &right'])
-	gen.bind_method(vector3, 'Minimum', 'hg::Vector3', ['const hg::Vector3 &left', 'const hg::Vector3 &right'])
-
-	gen.bind_function('hg::Reflect', 'hg::Vector3', ['const hg::Vector3 &v', 'const hg::Vector3 &normal'])
-	gen.bind_function_overloads('hg::Refract', [
-		('hg::Vector3', ['const hg::Vector3 &v', 'const hg::Vector3 &normal'], []),
-		('hg::Vector3', ['const hg::Vector3 &v', 'const hg::Vector3 &normal', 'float index_of_refraction_in', 'float index_of_refraction_out'], [])
-	])
-
-	gen.bind_method(vector3, 'Len2', 'float', [])
-	gen.bind_method(vector3, 'Len', 'float', [])
-	gen.bind_method(vector3, 'Floor', 'hg::Vector3', [])
-	gen.bind_method(vector3, 'Ceil', 'hg::Vector3', [])
-
-	gen.insert_binding_code('static void _Vector3_Set(hg::Vector3 *v, float x, float y, float z) { v->x = x; v->y = y; v->z = z; }')
+	gen.insert_binding_code('static void _Vector3_Set(hg::Vec3 *v, float x, float y, float z) { v->x = x; v->y = y; v->z = z; }')
 	gen.bind_method(vector3, 'Set', 'void', ['float x', 'float y', 'float z'], {'route': route_lambda('_Vector3_Set')})
 
 	gen.end_class(vector3)
 
-	gen.bind_function_overloads('hg::RandomVector3', [
-		('hg::Vector3', ['float min', 'float max'], []),
-		('hg::Vector3', ['const hg::Vector3 &min', 'const hg::Vector3 &max'], [])
+	gen.bind_function_overloads('hg::RandomVec3', [
+		('hg::Vec3', ['float min', 'float max'], []),
+		('hg::Vec3', ['const hg::Vec3 &min', 'const hg::Vec3 &max'], [])
 	])
+
+	gen.bind_function('hg::BaseToEuler', 'hg::Vec3', ['const hg::Vec3 &z'])
+	gen.bind_function('hg::BaseToEuler', 'hg::Vec3', ['const hg::Vec3 &z', 'const hg::Vec3 &y'])
+
+	gen.bind_function('hg::Dist2', 'float', ['const hg::Vec3 &a', 'const hg::Vec3 &b'])
+	gen.bind_function('hg::Dist', 'float', ['const hg::Vec3 &a', 'const hg::Vec3 &b'])
+
+	gen.bind_function('hg::Len2', 'float', ['const hg::Vec3 &v'])
+	gen.bind_function('hg::Len', 'float', ['const hg::Vec3 &v'])
+
+	gen.bind_function('hg::Min', 'hg::Vec3', ['const hg::Vec3 &a', 'const hg::Vec3 &b'])
+	gen.bind_function('hg::Max', 'hg::Vec3', ['const hg::Vec3 &a', 'const hg::Vec3 &b'])
+
+	gen.bind_function('hg::Dot', 'float', ['const hg::Vec3 &a', 'const hg::Vec3 &b'])
+	gen.bind_function('hg::Cross', 'hg::Vec3', ['const hg::Vec3 &a', 'const hg::Vec3 &b'])
+
+	gen.bind_function('hg::Reverse', 'hg::Vec3', ['const hg::Vec3 &v'])
+	gen.bind_function('hg::Inverse', 'hg::Vec3', ['const hg::Vec3 &v'])
+
+	gen.bind_function('hg::Normalize', 'hg::Vec3', ['const hg::Vec3 &v'])
+
+	gen.bind_function('hg::Clamp', 'hg::Vec3', ['const hg::Vec3 &v', 'float min', 'float max'])
+	gen.bind_function('hg::Clamp', 'hg::Vec3', ['const hg::Vec3 &v', 'const hg::Vec3 &min', 'const hg::Vec3 &max'])
+	gen.bind_function('hg::ClampLen', 'hg::Vec3', ['const hg::Vec3 &v', 'float min', 'float max'])
+
+	gen.bind_function('hg::Abs', 'hg::Vec3', ['const hg::Vec3 &v'])
+	gen.bind_function('hg::Sign', 'hg::Vec3', ['const hg::Vec3 &v'])
+
+	gen.bind_function('hg::Reflect', 'hg::Vec3', ['const hg::Vec3 &v', 'const hg::Vec3 &n'])
+	gen.bind_function('hg::Refract', 'hg::Vec3', ['const hg::Vec3 &v', 'const hg::Vec3 &n', '?float k_in', '?float k_out'])
+
+	gen.bind_function('hg::Floor', 'hg::Vec3', ['const hg::Vec3 &v'])
+	gen.bind_function('hg::Ceil', 'hg::Vec3', ['const hg::Vec3 &v'])
+
+	gen.bind_function('hg::FaceForward', 'hg::Vec3', ['const hg::Vec3 &v', 'const hg::Vec3 &d'])
+
+	gen.bind_function('hg::Deg3', 'hg::Vec3', ['float x', 'float y', 'float z'])
+	gen.bind_function('hg::Rad3', 'hg::Vec3', ['float x', 'float y', 'float z'])
+
+	gen.bind_function('hg::Vec3I', 'hg::Vec3', ['int x', 'int y', 'int z'])
+	gen.bind_function('hg::Vec4I', 'hg::Vec4', ['int x', 'int y', 'int z', '?int w'])
+
+	bind_std_vector(gen, vector3)
 
 	# hg::Rect<T>
 	def bind_rect_T(T, bound_name):
@@ -4445,517 +3530,205 @@ def bind_math(gen):
 
 		gen.bind_constructor_overloads(rect, [
 			([], []),
-			(['%s usx'%T, '%s usy'%T], []),
-			(['%s usx'%T, '%s usy'%T, '%s uex'%T, '%s uey'%T], []),
+			(['%s x'%T, '%s y'%T], []),
+			(['%s sx'%T, '%s sy'%T, '%s ex'%T, '%s ey'%T], []),
 			(['const hg::Rect<%s> &rect'%T], [])
 		])
 
-		gen.bind_method(rect, 'GetX', T, [])
-		gen.bind_method(rect, 'GetY', T, [])
-		gen.bind_method(rect, 'SetX', 'void', ['%s x'%T])
-		gen.bind_method(rect, 'SetY', 'void', ['%s y'%T])
-
-		gen.bind_method(rect, 'GetWidth', T, [])
-		gen.bind_method(rect, 'GetHeight', T, [])
-		gen.bind_method(rect, 'SetWidth', 'void', ['%s width'%T])
-		gen.bind_method(rect, 'SetHeight', 'void', ['%s height'%T])
-
-		gen.bind_method(rect, 'GetSize', 'hg::tVector2<%s>'%T, [])
-
-		gen.bind_method(rect, 'Inside', 'bool', ['%s x'%T, '%s y'%T])
-
-		gen.bind_method(rect, 'FitsInside', 'bool', ['const hg::Rect<%s> &rect'%T])
-		gen.bind_method(rect, 'Intersects', 'bool', ['const hg::Rect<%s> &rect'%T])
-
-		gen.bind_method(rect, 'Intersection', 'hg::Rect<%s>'%T, ['const hg::Rect<%s> &rect'%T])
-
-		gen.bind_method(rect, 'Grow', 'hg::Rect<%s>'%T, ['%s border'%T])
-
-		gen.bind_method(rect, 'Offset', 'hg::Rect<%s>'%T, ['%s x'%T, '%s y'%T])
-		gen.bind_method(rect, 'Cropped', 'hg::Rect<%s>'%T, ['%s osx'%T, '%s osy'%T, '%s oex'%T, '%s oey'%T])
-
-		gen.bind_static_method(rect, 'FromWidthHeight', 'hg::Rect<%s>'%T, ['%s x'%T, '%s y'%T, '%s w'%T, '%s h'%T])
-
 		gen.end_class(rect)
+
+		gen.bind_function('hg::GetX', T, ['const hg::Rect<%s> &rect' % T])
+		gen.bind_function('hg::GetY', T, ['const hg::Rect<%s> &rect' % T])
+		gen.bind_function('hg::SetX', 'void', ['hg::Rect<%s> &rect' % T, '%s x' % T])
+		gen.bind_function('hg::SetY', 'void', ['hg::Rect<%s> &rect' % T, '%s y' % T])
+
+		gen.bind_function('hg::GetWidth', T, ['const hg::Rect<%s> &rect' % T])
+		gen.bind_function('hg::GetHeight', T, ['const hg::Rect<%s> &rect' % T])
+		gen.bind_function('hg::SetWidth', 'void', ['hg::Rect<%s> &rect' % T, '%s width' % T])
+		gen.bind_function('hg::SetHeight', 'void', ['hg::Rect<%s> &rect' % T, '%s height' % T])
+
+		gen.bind_function('hg::GetSize', 'hg::tVec2<%s>'%T, ['const hg::Rect<%s> &rect' % T])
+
+		gen.bind_function('hg::Inside', 'bool', ['const hg::Rect<%s> &rect' % T, 'hg::tVec2<int> &v'])
+		gen.bind_function('hg::Inside', 'bool', ['const hg::Rect<%s> &rect' % T, 'hg::tVec2<float> &v'])
+		gen.bind_function('hg::Inside', 'bool', ['const hg::Rect<%s> &rect' % T, 'hg::Vec3 &v'])
+		gen.bind_function('hg::Inside', 'bool', ['const hg::Rect<%s> &rect' % T, 'hg::Vec4 &v'])
+
+		gen.bind_function('hg::FitsInside', 'bool', ['const hg::Rect<%s> &a' % T, 'const hg::Rect<%s> &b' % T])
+		gen.bind_function('hg::Intersects', 'bool', ['const hg::Rect<%s> &a' % T, 'const hg::Rect<%s> &b' % T])
+
+		gen.bind_function('hg::Intersection', 'hg::Rect<%s>'%T, ['const hg::Rect<%s> &a' % T, 'const hg::Rect<%s> &b' % T])
+
+		gen.bind_function('hg::Grow', 'hg::Rect<%s>'%T, ['const hg::Rect<%s> &rect' % T, '%s border'%T])
+
+		gen.bind_function('hg::Offset', 'hg::Rect<%s>'%T, ['const hg::Rect<%s> &rect' % T, '%s x'%T, '%s y'%T])
+		gen.bind_function('hg::Crop', 'hg::Rect<%s>'%T, ['const hg::Rect<%s> &rect' % T, '%s left'%T, '%s top'%T, '%s right'%T, '%s bottom'%T])
+
+		gen.bind_function('hg::MakeRectFromWidthHeight', 'hg::Rect<%s>'%T, ['%s x'%T, '%s y'%T, '%s w'%T, '%s h'%T])
 
 	bind_rect_T('float', 'Rect')
 	bind_rect_T('int', 'IntRect')
 
-	gen.bind_function('ToFloatRect', 'hg::Rect<float>', ['const hg::Rect<int> &rect'])
-	gen.bind_function('ToIntRect', 'hg::Rect<int>', ['const hg::Rect<float> &rect'])
+	gen.bind_function('hg::ToFloatRect', 'hg::Rect<float>', ['const hg::Rect<int> &rect'])
+	gen.bind_function('hg::ToIntRect', 'hg::Rect<int>', ['const hg::Rect<float> &rect'])
 
 	# hg::Plane
 	gen.add_include('foundation/plane.h')
-	
-	gen.insert_binding_code('''\
-static void _Plane_Set(hg::Plane *p, const hg::Vector3 &p0, const hg::Vector3 &p1, const hg::Vector3 &p2, const hg::Matrix4 *transform=nullptr) {
-	hg::Vector3 frame[3] = { p0, p1, p2};
-	p->Set(frame, transform);
-}''')
 
-	plane = gen.begin_class('hg::Plane')
-	gen.bind_constructor_overloads(plane, [
-		([], []),
-		(['const hg::Vector3 &p', 'const hg::Vector3 &n', '?const hg::Matrix4 *transform'], []),
-	])
-	gen.bind_members(plane, ['hg::Vector3 n', 'float d'])
-	gen.bind_method(plane, 'DistanceToPlane', 'float', ['const hg::Vector3& p'], [])
-	gen.bind_method_overloads(plane, 'Set', [
-		('void', ['const hg::Vector3 &p', 'const hg::Vector3 &n', '?const hg::Matrix4 *transform'], []),
-		('void', ['const hg::Vector3 &p0', 'const hg::Vector3 &p1', 'const hg::Vector3 &p2', '?const hg::Matrix4 *transform'], {'route': route_lambda('_Plane_Set')}),
-	])
-	gen.end_class(plane)
+	gen.typedef('hg::Plane', 'hg::Vec4')
 
-	# hg::AxisLock
-	gen.add_include('foundation/axis_lock.h')
-	gen.insert_binding_code('''
-namespace Binding {
-enum AxisLock {
-	X = hg::AxisLock::LockX,
-	Y = hg::AxisLock::LockY,
-	Z = hg::AxisLock::LockZ, 
-	RotX = hg::AxisLock::LockRotX,
-	RotY = hg::AxisLock::LockRotY,
-	RotZ = hg::AxisLock::LockRotZ
-};
-}
-''')
-	gen.bind_named_enum('Binding::AxisLock', ['X', 'Y', 'Z', 'RotX', 'RotY', 'RotZ'], 'uint8_t', bound_name='AxisLock', prefix='AxisLock')
-
-	# math futures
-	lib.stl.bind_future_T(gen, 'hg::tVector2<float>', 'FutureVector2')
-	lib.stl.bind_future_T(gen, 'hg::tVector2<int>', 'FutureIntVector2')
-	lib.stl.bind_future_T(gen, 'hg::Vector3', 'FutureVector3')
-	lib.stl.bind_future_T(gen, 'hg::Vector4', 'FutureVector4')
-	lib.stl.bind_future_T(gen, 'hg::Matrix3', 'FutureMatrix3')
-	lib.stl.bind_future_T(gen, 'hg::Matrix4', 'FutureMatrix4')
-	lib.stl.bind_future_T(gen, 'hg::Matrix44', 'FutureMatrix44')
-	lib.stl.bind_future_T(gen, 'hg::Rect<float>', 'FutureFloatRect')
-	lib.stl.bind_future_T(gen, 'hg::Rect<int>', 'FutureIntRect')
+	gen.bind_function('hg::MakePlane', 'hg::Plane', ['const hg::Vec3 &p', 'const hg::Vec3 &n', '?const hg::Mat4 &m'])
+	gen.bind_function('hg::DistanceToPlane', 'float', ['const hg::Plane &plane', 'const hg::Vec3 &p'])
 
 	# math std::vector
-	bind_std_vector(gen, vector2)
-	bind_std_vector(gen, ivector2)
-	bind_std_vector(gen, vector3)
-	bind_std_vector(gen, vector4)
-	bind_std_vector(gen, matrix3)
-	bind_std_vector(gen, matrix4)
-	bind_std_vector(gen, matrix44)
+	#bind_std_vector(gen, vector2)
+	#bind_std_vector(gen, ivector2)
+	#bind_std_vector(gen, vector3)
+	#bind_std_vector(gen, vector4)
+	#bind_std_vector(gen, matrix3)
+	#bind_std_vector(gen, matrix4)
+	#bind_std_vector(gen, matrix44)
 
-	# globals
-	gen.bind_function_overloads('hg::Dist', [
-		('float', ['const hg::Vector3 &a', 'const hg::Vector3 &b'], [])
-	])
-	gen.bind_function_overloads('hg::Dist2', [
-		('float', ['const hg::Vector3 &a', 'const hg::Vector3 &b'], [])
-	])
+	
+	gen.bind_function('hg::Abs', 'float', ['float v'])
+	gen.bind_function('hg::Abs', 'int', ['int v'])
+
+	gen.bind_function('hg::Min', 'float', ['float a', 'float b'])
+	gen.bind_function('hg::Min', 'int', ['int a', 'int b'])
+
+	gen.bind_function('hg::Max', 'float', ['float a', 'float b'])
+	gen.bind_function('hg::Max', 'int', ['int a', 'int b'])
+
+	gen.bind_function('hg::Clamp', 'float', ['float v', 'float min', 'float max'])
+	gen.bind_function('hg::Clamp', 'int', ['int v', 'int min', 'int max'])
+
+	gen.bind_function('hg::Wrap', 'float', ['float v', 'float start', 'float end'])
+	gen.bind_function('hg::Wrap', 'int', ['int v', 'int start', 'int end'])
+
+	gen.bind_function('hg::Lerp', 'int', ['int a', 'int b', 'float t'])
+	gen.bind_function('hg::Lerp', 'float', ['float a', 'float b', 'float t'])
+	gen.bind_function('hg::Lerp', 'hg::Vec3', ['const hg::Vec3 &a', 'const hg::Vec3 &b', 'float t'])
+	gen.bind_function('hg::Lerp', 'hg::Vec4', ['const hg::Vec4 &a', 'const hg::Vec4 &b', 'float t'])
+
+	gen.bind_function('hg::Quantize', 'float', ['float v', 'float q'])
+	gen.bind_function('hg::IsFinite', 'bool', ['float v'])
+
+	gen.bind_function('hg::Deg', 'float', ['float degrees'])
+	gen.bind_function('hg::Rad', 'float', ['float radians'])
+
+	gen.bind_function('hg::DegreeToRadian', 'float', ['float degrees'])
+	gen.bind_function('hg::RadianToDegree', 'float', ['float radians'])
+
+	gen.bind_function('hg::Sec', 'float', ['float seconds'])
+	gen.bind_function('hg::Ms', 'float', ['float milliseconds'])
+
+	gen.bind_function('hg::Km', 'float', ['float km'])
+	gen.bind_function('hg::Mtr', 'float', ['float m'])
+	gen.bind_function('hg::Cm', 'float', ['float cm'])
+	gen.bind_function('hg::Mm', 'float', ['float mm'])
+	gen.bind_function('hg::Inch', 'float', ['float inch'])
+
+
+def bind_rand(gen):
+	gen.add_include('foundation/rand.h')
+
+	gen.bind_function('hg::Seed', 'void', ['uint32_t seed'])
+	gen.bind_function('hg::Rand', 'uint32_t', ['?uint32_t range'])
+
+	gen.bind_function('hg::FRand', 'float', ['?float range'])
+	gen.bind_function('hg::FRRand', 'float', ['?float range_start', '?float range_end'])
 
 
 def bind_frustum(gen):
 	gen.add_include('foundation/frustum.h')
 
-	gen.bind_named_enum('hg::Frustum::Type', ['Perspective', 'Orthographic'], 'uint8_t', bound_name='FrustumType', prefix='Frustum')
+	gen.insert_binding_code('''
+static const hg::Vec4 &_Frustum_GetTop(hg::Frustum *fs) { return (*fs)[hg::FP_Top]; }
+static void _Frustum_SetTop(hg::Frustum *fs, const hg::Vec4 &plane) { (*fs)[hg::FP_Top] = plane; }
+static const hg::Vec4 &_Frustum_GetBottom(hg::Frustum *fs) { return (*fs)[hg::FP_Bottom]; }
+static void _Frustum_SetBottom(hg::Frustum *fs, const hg::Vec4 &plane) { (*fs)[hg::FP_Bottom] = plane; }
+static const hg::Vec4 &_Frustum_GetLeft(hg::Frustum *fs) { return (*fs)[hg::FP_Left]; }
+static void _Frustum_SetLeft(hg::Frustum *fs, const hg::Vec4 &plane) { (*fs)[hg::FP_Left] = plane; }
+static const hg::Vec4 &_Frustum_GetRight(hg::Frustum *fs) { return (*fs)[hg::FP_Right]; }
+static void _Frustum_SetRight(hg::Frustum *fs, const hg::Vec4 &plane) { (*fs)[hg::FP_Right] = plane; }
+static const hg::Vec4 &_Frustum_GetNear(hg::Frustum *fs) { return (*fs)[hg::FP_Near]; }
+static void _Frustum_SetNear(hg::Frustum *fs, const hg::Vec4 &plane) { (*fs)[hg::FP_Near] = plane; }
+static const hg::Vec4 &_Frustum_GetFar(hg::Frustum *fs) { return (*fs)[hg::FP_Far]; }
+static void _Frustum_SetFar(hg::Frustum *fs, const hg::Vec4 &plane) { (*fs)[hg::FP_Far] = plane; }
+''')
 
 	frustum = gen.begin_class('hg::Frustum')
-	gen.bind_members(frustum, ['hg::Frustum::Type type', 'float fov_size', 'hg::tVector2<float> aspect_ratio', 'float znear', 'float zfar', 'hg::Matrix4 world'])
+	gen.bind_method(frustum, 'GetTop', 'hg::Vec4', [], {'route': route_lambda('_Frustum_GetTop')})
+	gen.bind_method(frustum, 'SetTop', 'void', ['const hg::Vec4 &plane'], {'route': route_lambda('_Frustum_SetTop')})
+	gen.bind_method(frustum, 'GetBottom', 'hg::Vec4', [], {'route': route_lambda('_Frustum_GetBottom')})
+	gen.bind_method(frustum, 'SetBottom', 'void', ['const hg::Vec4 &plane'], {'route': route_lambda('_Frustum_SetBottom')})
+	gen.bind_method(frustum, 'GetLeft', 'hg::Vec4', [], {'route': route_lambda('_Frustum_GetLeft')})
+	gen.bind_method(frustum, 'SetLeft', 'void', ['const hg::Vec4 &plane'], {'route': route_lambda('_Frustum_SetLeft')})
+	gen.bind_method(frustum, 'GetRight', 'hg::Vec4', [], {'route': route_lambda('_Frustum_GetRight')})
+	gen.bind_method(frustum, 'SetRight', 'void', ['const hg::Vec4 &plane'], {'route': route_lambda('_Frustum_SetRight')})
+	gen.bind_method(frustum, 'GetNear', 'hg::Vec4', [], {'route': route_lambda('_Frustum_GetNear')})
+	gen.bind_method(frustum, 'SetNear', 'void', ['const hg::Vec4 &plane'], {'route': route_lambda('_Frustum_SetNear')})
+	gen.bind_method(frustum, 'GetFar', 'hg::Vec4', [], {'route': route_lambda('_Frustum_GetFar')})
+	gen.bind_method(frustum, 'SetFar', 'void', ['const hg::Vec4 &plane'], {'route': route_lambda('_Frustum_SetFar')})
 	gen.end_class(frustum)
 
-	gen.insert_binding_code('''
-static const hg::Plane &_FrustumPlanes_GetTop(hg::FrustumPlanes *fsplanes) { return fsplanes->plane[hg::FrustumPlaneTop]; }
-static void _FrustumPlanes_SetTop(hg::FrustumPlanes *fsplanes, const hg::Plane &plane) { fsplanes->plane[hg::FrustumPlaneTop] = plane; }
-static const hg::Plane &_FrustumPlanes_GetBottom(hg::FrustumPlanes *fsplanes) { return fsplanes->plane[hg::FrustumPlaneBottom]; }
-static void _FrustumPlanes_SetBottom(hg::FrustumPlanes *fsplanes, const hg::Plane &plane) { fsplanes->plane[hg::FrustumPlaneBottom] = plane; }
-static const hg::Plane &_FrustumPlanes_GetLeft(hg::FrustumPlanes *fsplanes) { return fsplanes->plane[hg::FrustumPlaneLeft]; }
-static void _FrustumPlanes_SetLeft(hg::FrustumPlanes *fsplanes, const hg::Plane &plane) { fsplanes->plane[hg::FrustumPlaneLeft] = plane; }
-static const hg::Plane &_FrustumPlanes_GetRight(hg::FrustumPlanes *fsplanes) { return fsplanes->plane[hg::FrustumPlaneRight]; }
-static void _FrustumPlanes_SetRight(hg::FrustumPlanes *fsplanes, const hg::Plane &plane) { fsplanes->plane[hg::FrustumPlaneRight] = plane; }
-static const hg::Plane &_FrustumPlanes_GetNear(hg::FrustumPlanes *fsplanes) { return fsplanes->plane[hg::FrustumPlaneNear]; }
-static void _FrustumPlanes_SetNear(hg::FrustumPlanes *fsplanes, const hg::Plane &plane) { fsplanes->plane[hg::FrustumPlaneNear] = plane; }
-static const hg::Plane &_FrustumPlanes_GetFar(hg::FrustumPlanes *fsplanes) { return fsplanes->plane[hg::FrustumPlaneFar]; }
-static void _FrustumPlanes_SetFar(hg::FrustumPlanes *fsplanes, const hg::Plane &plane) { fsplanes->plane[hg::FrustumPlaneFar] = plane; }
-''')
+	gen.bind_function('hg::MakeFrustum', 'hg::Frustum', ['const hg::Mat44 &projection', '?const hg::Mat4 &mtx'])
 
-	frustum_planes = gen.begin_class('hg::FrustumPlanes')
-	gen.bind_method(frustum_planes, 'GetTop', 'hg::Plane', [], {'route': route_lambda('_FrustumPlanes_GetTop')})
-	gen.bind_method(frustum_planes, 'SetTop', 'void', ['const hg::Plane &plane'], {'route': route_lambda('_FrustumPlanes_SetTop')})
-	gen.bind_method(frustum_planes, 'GetBottom', 'hg::Plane', [], {'route': route_lambda('_FrustumPlanes_GetBottom')})
-	gen.bind_method(frustum_planes, 'SetBottom', 'void', ['const hg::Plane &plane'], {'route': route_lambda('_FrustumPlanes_SetBottom')})
-	gen.bind_method(frustum_planes, 'GetLeft', 'hg::Plane', [], {'route': route_lambda('_FrustumPlanes_GetLeft')})
-	gen.bind_method(frustum_planes, 'SetLeft', 'void', ['const hg::Plane &plane'], {'route': route_lambda('_FrustumPlanes_SetLeft')})
-	gen.bind_method(frustum_planes, 'GetRight', 'hg::Plane', [], {'route': route_lambda('_FrustumPlanes_GetRight')})
-	gen.bind_method(frustum_planes, 'SetRight', 'void', ['const hg::Plane &plane'], {'route': route_lambda('_FrustumPlanes_SetRight')})
-	gen.bind_method(frustum_planes, 'GetNear', 'hg::Plane', [], {'route': route_lambda('_FrustumPlanes_GetNear')})
-	gen.bind_method(frustum_planes, 'SetNear', 'void', ['const hg::Plane &plane'], {'route': route_lambda('_FrustumPlanes_SetNear')})
-	gen.bind_method(frustum_planes, 'GetFar', 'hg::Plane', [], {'route': route_lambda('_FrustumPlanes_GetFar')})
-	gen.bind_method(frustum_planes, 'SetFar', 'void', ['const hg::Plane &plane'], {'route': route_lambda('_FrustumPlanes_SetFar')})
-	gen.end_class(frustum_planes)
+	gen.bind_function('hg::TransformFrustum', 'hg::Frustum', ['const hg::Frustum &frustum', 'const hg::Mat4 &mtx'])
 
-	gen.bind_function('hg::MakePerspectiveFrustum', 'hg::Frustum', ['float znear', 'float zfar', 'float fov', 'const hg::tVector2<float> &ar', 'const hg::Matrix4 &m'])
-	gen.bind_function('hg::MakeOrthographicFrustum', 'hg::Frustum', ['float znear', 'float zfar', 'float size', 'const hg::tVector2<float> &ar', 'const hg::Matrix4 &m'])
-	gen.bind_function('hg::BuildFrustumPlanes', 'hg::FrustumPlanes', ['const hg::Frustum &frustum'])
-	
-	gen.insert_binding_code('''\
-static void BuildFrustumVertices(const hg::Frustum &frustum, hg::Vector3 &v0, hg::Vector3 &v1, hg::Vector3 &v2, hg::Vector3 &v3, hg::Vector3 &v4, hg::Vector3 &v5, hg::Vector3 &v6, hg::Vector3 &v7) {
-	auto vertices = hg::BuildFrustumVertices(frustum);
-	v0 = vertices[0]; v1 = vertices[1]; v2 = vertices[2]; v3 = vertices[3];
-	v4 = vertices[4]; v5 = vertices[5]; v6 = vertices[6]; v7 = vertices[7];
-}
-''')
-	gen.bind_function('BuildFrustumVertices', 'void', ['const hg::Frustum &frustum','hg::Vector3 &v0', 'hg::Vector3 &v1', 'hg::Vector3 &v2', 'hg::Vector3 &v3', 'hg::Vector3 &v4', 'hg::Vector3 &v5', 'hg::Vector3 &v6', 'hg::Vector3 &v7'], {'arg_out': ['v0','v1','v2','v3','v4','v5','v6','v7']})
-	gen.bind_function('hg::BuildFrustumPlanesFromProjectionMatrix', 'hg::FrustumPlanes', ['const hg::Matrix44 &projection'])
-
-	gen.bind_named_enum('hg::Visibility', ['Outside', 'Inside', 'Clipped'], 'uint8_t', bound_name='Visibility')
-	gen.bind_function('hg::ClassifyPoint', 'hg::Visibility', ['const hg::FrustumPlanes &frustum', 'uint32_t count', 'const hg::Vector3 *points', '?float distance'])
-	gen.bind_function('hg::ClassifySphere', 'hg::Visibility', ['const hg::FrustumPlanes &frustum', 'const hg::Vector3 &origin', 'float radius'])
-	gen.bind_function('hg::ClassifyMinMax', 'hg::Visibility', ['const hg::FrustumPlanes &frustum', 'const hg::MinMax &minmax'])
-
-
-def bind_mixer(gen):
-	gen.add_include('engine/mixer.h')
-
-	# hg::AudioFormat
-	gen.bind_named_enum('hg::AudioFormat::Encoding', ['PCM', 'WiiADPCM'], 'uint8_t', bound_name='AudioFormatEncoding', prefix='AudioFormat')
-	gen.bind_named_enum('hg::AudioFormat::Type', ['Integer', 'Float'], 'uint8_t', bound_name='AudioFormatType', prefix='AudioType')
-
-	audio_format = gen.begin_class('hg::AudioFormat')
-	gen.bind_constructor_overloads(audio_format, [
-			([], []),
-			(['hg::AudioFormat::Encoding encoding'], []),
-			(['hg::AudioFormat::Encoding encoding', 'uint8_t channels'], []),
-			(['hg::AudioFormat::Encoding encoding', 'uint8_t channels', 'uint32_t frequency'], []),
-			(['hg::AudioFormat::Encoding encoding', 'uint8_t channels', 'uint32_t frequency', 'uint8_t resolution'], []),
-			(['hg::AudioFormat::Encoding encoding', 'uint8_t channels', 'uint32_t frequency', 'uint8_t resolution', 'hg::AudioFormat::Type type'], [])
-		])
-	gen.bind_members(audio_format, ['hg::AudioFormat::Encoding encoding', 'uint8_t channels', 'uint32_t frequency', 'uint8_t resolution', 'hg::AudioFormat::Type type'])
-	gen.end_class(audio_format)
-
-	# hg::AudioData
-	gen.bind_named_enum('hg::AudioData::State', ['Ready', 'Ended', 'Disconnected'], bound_name='AudioDataState', prefix='AudioData')
-
-	audio_data = gen.begin_class('hg::AudioData', bound_name='AudioData_nobind', noncopyable=True, nobind=True)
-	gen.end_class(audio_data)
-
-	shared_audio_data = gen.begin_class('std::shared_ptr<hg::AudioData>', bound_name='AudioData', features={'proxy': lib.stl.SharedPtrProxyFeature(audio_data)})
-
-	gen.bind_method(shared_audio_data, 'GetFormat', 'hg::AudioFormat', [], ['proxy'])
-
-	gen.bind_method(shared_audio_data, 'Open', 'bool', ['const std::string &path'], ['proxy'])
-	gen.bind_method(shared_audio_data, 'Close', 'void', [], ['proxy'])
-
-	gen.bind_method(shared_audio_data, 'GetState', 'hg::AudioData::State', [], ['proxy'])
-
-	gen.bind_method(shared_audio_data, 'Seek', 'bool', ['hg::time_ns t'], ['proxy'])
-
-	gen.insert_binding_code('''\
-static size_t AudioData_GetFrameToBinaryData(hg::AudioData *audio_data, hg::BinaryData &frame, hg::time_ns &frame_timestamp) {
-	frame.Reset();
-	frame.Grow(audio_data->GetFrameSize());
-	size_t size = audio_data->GetFrame(frame.GetData(), frame_timestamp);
-	frame.Commit(size);
-	return size;
-}
-''', 'AudioData class extension')
-
-	gen.bind_method(shared_audio_data, 'GetFrame', 'size_t', ['hg::BinaryData &frame', 'hg::time_ns &frame_timestamp'], {'proxy': None, 'arg_out': ['frame_timestamp'], 'route': lambda args: 'AudioData_GetFrameToBinaryData(%s);' % (', '.join(args))})
-	gen.bind_method(shared_audio_data, 'GetFrameSize', 'size_t', [], ['proxy'])
-
-	gen.bind_method(shared_audio_data, 'SetTransform', 'void', ['const hg::Matrix4 &m'], ['proxy'])
-	gen.bind_method(shared_audio_data, 'GetDataSize', 'size_t', [], ['proxy'])
-
-	gen.end_class(shared_audio_data)
-
-	gen.insert_binding_code('''\
-static size_t AudioData_ExtractAudioData(hg::AudioData* source, hg::BinaryData &frame) {
-	std::vector<char> buffer;
-	size_t size = ExtractAudioData(*source, buffer);
-
-	frame.Reset();
-	frame.Write(&buffer[0], size);
-	frame.Commit(size);
-	return size;
-}
-''')
-	gen.bind_function('ExtractAudioData', 'size_t', ['hg::AudioData *source', 'hg::BinaryData &data'], {'route':  route_lambda('AudioData_ExtractAudioData')})
-
-	# hg::AudioIO
-	gen.add_include('engine/audio_io.h')
-
-	audio_io = gen.begin_class('hg::AudioIO', noncopyable=True)
-	gen.bind_method(audio_io, 'Open', 'std::shared_ptr<hg::AudioData>', ['const std::string &path', '?const std::string &codec_name'])
-	gen.bind_method(audio_io, 'GetSupportedExt', 'std::string', [])
-	gen.end_class(audio_io)
-
-	gen.insert_binding_code('static hg::AudioIO &GetAudioIO() { return hg::g_audio_io.get(); }')
-	gen.bind_function('GetAudioIO', 'hg::AudioIO &', [])
-
-	# hg::audio
-	gen.bind_named_enum('hg::MixerLoopMode', ['MixerNoLoop', 'MixerRepeat', 'MixerLoopInvalidChannel'], 'uint8_t')
-	gen.bind_named_enum('hg::MixerPlayState', ['MixerStopped', 'MixerPlaying', 'MixerPaused', 'MixerStateInvalidChannel'], 'uint8_t')
-
-	gen.typedef('hg::MixerChannel', 'int32_t')
-	gen.typedef('hg::MixerPriority', 'uint8_t')
-
-	#
-	mixer_channel_state = gen.begin_class('hg::MixerChannelState')
-	gen.bind_constructor_overloads(mixer_channel_state, [
-		([], []),
-		(['float volume'], []),
-		(['float volume', 'bool direct'], []),
-		(['hg::MixerPriority priority', '?float volume', '?hg::MixerLoopMode loop_mode', '?float pitch', '?bool direct'], [])
-	])
-	gen.bind_members(mixer_channel_state, ['hg::MixerPriority priority', 'hg::MixerLoopMode loop_mode', 'float volume', 'float pitch', 'bool direct'])
-	gen.end_class(mixer_channel_state)
-
-	mixer_channel_location = gen.begin_class('hg::MixerChannelLocation')
-	gen.bind_constructor_overloads(mixer_channel_location, [
-		([], []),
-		(['const hg::Vector3 &pos'], [])
-	])
-	gen.bind_members(mixer_channel_location, ['hg::Vector3 position', 'hg::Vector3 velocity'])
-	gen.end_class(mixer_channel_location)
-
-	#
-	sound = gen.begin_class('hg::Sound', bound_name='Sound_nobind', noncopyable=True, nobind=True)
-	gen.end_class(sound)
-
-	shared_sound = gen.begin_class('std::shared_ptr<hg::Sound>', bound_name='Sound', features={'proxy': lib.stl.SharedPtrProxyFeature(sound)})
-	gen.bind_constructor(shared_sound, ['?const std::string &name'], ['proxy'])
-	gen.bind_method(shared_sound, 'GetName', 'const std::string &', [], ['proxy'])
-	gen.bind_method(shared_sound, 'IsReady', 'bool', [], ['proxy'])
-	gen.bind_method(shared_sound, 'SetReady', 'void', [], ['proxy'])
-	gen.bind_method(shared_sound, 'SetNotReady', 'void', [], ['proxy'])
-	gen.end_class(shared_sound)
-
-	# hg::Mixer
-	audio_mixer = gen.begin_class('hg::Mixer', bound_name='Mixer_nobind', noncopyable=True, nobind=True)
-	gen.end_class(audio_mixer)
-
-	shared_audio_mixer = gen.begin_class('std::shared_ptr<hg::Mixer>', bound_name='Mixer', features={'proxy': lib.stl.SharedPtrProxyFeature(audio_mixer)})
-
-	gen.bind_static_members(shared_audio_mixer, [
-		'const hg::MixerChannelState DefaultState', 'const hg::MixerChannelState RepeatState',
-		'const hg::MixerChannelLocation DefaultLocation', 'const hg::MixerPriority DefaultPriority',
-		'const hg::MixerChannel ChannelError'], ['proxy'])
-
-	gen.bind_method(shared_audio_mixer, 'Open', 'bool', [], ['proxy'])
-	gen.bind_method(shared_audio_mixer, 'Close', 'void', [], ['proxy'])
-
-	gen.bind_method(shared_audio_mixer, 'GetMasterVolume', 'float', [], ['proxy'])
-	gen.bind_method(shared_audio_mixer, 'SetMasterVolume', 'void', ['float volume'], ['proxy'])
-
-	gen.bind_method(shared_audio_mixer, 'EnableSpatialization', 'bool', ['bool enable'], ['proxy'])
-
-	gen.bind_method_overloads(shared_audio_mixer, 'Start', [
-		('hg::MixerChannel', ['hg::Sound &sound'], ['proxy']),
-		('hg::MixerChannel', ['hg::Sound &sound', 'hg::MixerChannelState state'], ['proxy']),
-		('hg::MixerChannel', ['hg::Sound &sound', 'hg::MixerChannelLocation location'], ['proxy']),
-		('hg::MixerChannel', ['hg::Sound &sound', 'hg::MixerChannelLocation location', 'hg::MixerChannelState state'], ['proxy'])
-	])
-	gen.bind_method_overloads(shared_audio_mixer, 'StreamData', [
-		('hg::MixerChannel', ['std::shared_ptr<hg::AudioData> data'], ['proxy']),
-		('hg::MixerChannel', ['std::shared_ptr<hg::AudioData> data', 'bool paused'], ['proxy']),
-		('hg::MixerChannel', ['std::shared_ptr<hg::AudioData> data', 'bool paused', 'hg::time_ns t_start'], ['proxy']),
-		('hg::MixerChannel', ['std::shared_ptr<hg::AudioData> data', 'hg::MixerChannelState state'], ['proxy']),
-		('hg::MixerChannel', ['std::shared_ptr<hg::AudioData> data', 'hg::MixerChannelState state', 'bool paused'], ['proxy']),
-		('hg::MixerChannel', ['std::shared_ptr<hg::AudioData> data', 'hg::MixerChannelState state', 'bool paused', 'hg::time_ns t_start'], ['proxy']),
-		('hg::MixerChannel', ['std::shared_ptr<hg::AudioData> data', 'hg::MixerChannelLocation location'], ['proxy']),
-		('hg::MixerChannel', ['std::shared_ptr<hg::AudioData> data', 'hg::MixerChannelLocation location', 'bool paused'], ['proxy']),
-		('hg::MixerChannel', ['std::shared_ptr<hg::AudioData> data', 'hg::MixerChannelLocation location', 'bool paused', 'hg::time_ns t_start'], ['proxy']),
-		('hg::MixerChannel', ['std::shared_ptr<hg::AudioData> data', 'hg::MixerChannelLocation location', 'hg::MixerChannelState state'], ['proxy']),
-		('hg::MixerChannel', ['std::shared_ptr<hg::AudioData> data', 'hg::MixerChannelLocation location', 'hg::MixerChannelState state', 'bool paused'], ['proxy']),
-		('hg::MixerChannel', ['std::shared_ptr<hg::AudioData> data', 'hg::MixerChannelLocation location', 'hg::MixerChannelState state', 'bool paused', 'hg::time_ns t_start'], ['proxy'])
-	])
-
-	gen.bind_method(shared_audio_mixer, 'GetPlayState', 'hg::MixerPlayState', ['hg::MixerChannel channel'], ['proxy'])
-
-	gen.bind_method(shared_audio_mixer, 'GetChannelState', 'hg::MixerChannelState', ['hg::MixerChannel channel'], ['proxy'])
-	gen.bind_method(shared_audio_mixer, 'SetChannelState', 'void', ['hg::MixerChannel channel', 'hg::MixerChannelState state'], ['proxy'])
-
-	gen.bind_method(shared_audio_mixer, 'GetChannelLocation', 'hg::MixerChannelLocation', ['hg::MixerChannel channel'], ['proxy'])
-	gen.bind_method(shared_audio_mixer, 'SetChannelLocation', 'void', ['hg::MixerChannel channel', 'hg::MixerChannelLocation location'], ['proxy'])
-
-	gen.bind_method(shared_audio_mixer, 'GetChannelTimestamp', 'hg::time_ns', ['hg::MixerChannel channel'], ['proxy'])
-
-	gen.bind_method(shared_audio_mixer, 'Stop', 'void', ['hg::MixerChannel channel'], ['proxy'])
-	gen.bind_method(shared_audio_mixer, 'Pause', 'void', ['hg::MixerChannel channel'], ['proxy'])
-	gen.bind_method(shared_audio_mixer, 'Resume', 'void', ['hg::MixerChannel channel'], ['proxy'])
-	gen.bind_method(shared_audio_mixer, 'StopAll', 'void', [], ['proxy'])
-
-	gen.bind_method(shared_audio_mixer, 'SetStreamLoopPoint', 'void', ['hg::MixerChannel channel', 'hg::time_ns t'], ['proxy'])
-	gen.bind_method(shared_audio_mixer, 'SeekStream', 'void', ['hg::MixerChannel channel', 'hg::time_ns t'], ['proxy'])
-	gen.bind_method(shared_audio_mixer, 'GetStreamBufferingPercentage', 'int', ['hg::MixerChannel channel'], ['proxy'])
-
-	gen.bind_method(shared_audio_mixer, 'SetChannelStreamDataTransform', 'void', ['hg::MixerChannel channel', 'const hg::Matrix4 &transform'], ['proxy'])
-	gen.bind_method(shared_audio_mixer, 'FlushChannelBuffers', 'void', ['hg::MixerChannel channel'], ['proxy'])
-
-	gen.bind_method(shared_audio_mixer, 'GetListener', 'hg::Matrix4', [], ['proxy'])
-	gen.bind_method(shared_audio_mixer, 'SetListener', 'void', ['const hg::Matrix4 &transform'], ['proxy'])
-
-	gen.bind_method_overloads(shared_audio_mixer, 'Stream', [
-		('hg::MixerChannel', ['const std::string &path', '?bool paused', '?hg::time_ns t_start'], ['proxy']),
-		('hg::MixerChannel', ['const std::string &path', 'hg::MixerChannelState state', '?bool paused', '?hg::time_ns t_start'], ['proxy']),
-		('hg::MixerChannel', ['const std::string &path', 'hg::MixerChannelLocation location', '?bool paused', '?hg::time_ns t_start'], ['proxy']),
-		('hg::MixerChannel', ['const std::string &path', 'hg::MixerChannelLocation location', 'hg::MixerChannelState state', '?bool paused', '?hg::time_ns t_start'], ['proxy'])
-	])
-
-	gen.bind_method_overloads(shared_audio_mixer, 'LoadSoundData', [
-		('std::shared_ptr<hg::Sound>', ['std::shared_ptr<hg::AudioData> data'], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'LoadSoundData failed')}),
-		('std::shared_ptr<hg::Sound>', ['std::shared_ptr<hg::AudioData> data', 'const std::string &path'], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'LoadSoundData failed')})
-	])
-
-	gen.bind_method(shared_audio_mixer, 'LoadSound', 'std::shared_ptr<hg::Sound>', ['const std::string &path'], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'LoadSound failed')})
-	gen.bind_method(shared_audio_mixer, 'FreeSound', 'void', ['hg::Sound &sound'], ['proxy'])
-
-	gen.end_class(shared_audio_mixer)
-
-	gen.insert_binding_code('''static std::shared_ptr<hg::Mixer> CreateMixer(const std::string &name) { return hg::g_mixer_factory.get().Instantiate(name); }
-static std::shared_ptr<hg::Mixer> CreateMixer() { return hg::g_mixer_factory.get().Instantiate(); }
-	''', 'Mixer custom API')
-
-	gen.bind_function('CreateMixer', 'std::shared_ptr<hg::Mixer>', ['?const std::string &name'], {'check_rval': check_bool_rval_lambda(gen, 'CreateMixer failed, was LoadPlugins called succesfully?')})
-
-	# hg::MixerAsync
-	gen.add_include('engine/mixer_async.h')
-
-	mixer_async = gen.begin_class('hg::MixerAsync', bound_name='MixerAsync_nobind', noncopyable=True, nobind=True)
-	gen.end_class(mixer_async)
-
-	shared_mixer_async = gen.begin_class('std::shared_ptr<hg::MixerAsync>', bound_name='MixerAsync', features={'proxy': lib.stl.SharedPtrProxyFeature(mixer_async)})
-
-	gen.bind_constructor(shared_mixer_async, ['std::shared_ptr<hg::Mixer> mixer'], ['proxy'])
-
-	gen.bind_method(shared_mixer_async, 'Open', 'std::future<bool>', [], ['proxy'])
-	gen.bind_method(shared_mixer_async, 'Close', 'std::future<void>', [], ['proxy'])
-
-	gen.bind_method(shared_mixer_async, 'EnableSpatialization', 'std::future<bool>', ['bool enable'], ['proxy'])
-
-	gen.bind_method(shared_mixer_async, 'GetMasterVolume', 'std::future<float>', [], ['proxy'])
-	gen.bind_method(shared_mixer_async, 'SetMasterVolume', 'void', ['float volume'], ['proxy'])
-
-	lib.stl.bind_future_T(gen, 'hg::MixerChannel', 'FutureMixerChannel')
-	lib.stl.bind_future_T(gen, 'hg::MixerChannelState', 'FutureMixerChannelState')
-	lib.stl.bind_future_T(gen, 'hg::MixerChannelLocation', 'FutureMixerChannelLocation')
-	lib.stl.bind_future_T(gen, 'hg::MixerPlayState', 'FutureMixerPlayState')
-
-	gen.bind_method_overloads(shared_mixer_async, 'Start', [
-		('std::future<hg::MixerChannel>', ['std::shared_ptr<hg::Sound> sound'], ['proxy']),
-		('std::future<hg::MixerChannel>', ['std::shared_ptr<hg::Sound> sound', 'hg::MixerChannelState state'], ['proxy']),
-		('std::future<hg::MixerChannel>', ['std::shared_ptr<hg::Sound> sound', 'hg::MixerChannelLocation location'], ['proxy']),
-		('std::future<hg::MixerChannel>', ['std::shared_ptr<hg::Sound> sound', 'hg::MixerChannelLocation location', 'hg::MixerChannelState state'], ['proxy'])
-	])
-	gen.bind_method_overloads(shared_mixer_async, 'Stream', [
-		('std::future<hg::MixerChannel>', ['const std::string &path', '?bool paused', '?hg::time_ns t_start'], ['proxy']),
-		('std::future<hg::MixerChannel>', ['const std::string &path', 'hg::MixerChannelState state', '?bool paused', '?hg::time_ns t_start'], ['proxy']),
-		('std::future<hg::MixerChannel>', ['const std::string &path', 'hg::MixerChannelLocation location', '?bool paused', '?hg::time_ns t_start'], ['proxy']),
-		('std::future<hg::MixerChannel>', ['const std::string &path', 'hg::MixerChannelLocation location', 'hg::MixerChannelState state', '?bool paused', '?hg::time_ns t_start'], ['proxy'])
-	])
-
-	gen.bind_method(shared_mixer_async, 'GetPlayState', 'std::future<hg::MixerPlayState>', ['hg::MixerChannel channel'], ['proxy'])
-
-	gen.bind_method(shared_mixer_async, 'GetChannelState', 'std::future<hg::MixerChannelState>', ['hg::MixerChannel channel'], ['proxy'])
-	gen.bind_method(shared_mixer_async, 'SetChannelState', 'void', ['hg::MixerChannel channel', 'hg::MixerChannelState state'], ['proxy'])
-
-	gen.bind_method(shared_mixer_async, 'GetChannelLocation', 'std::future<hg::MixerChannelLocation>', ['hg::MixerChannel channel'], ['proxy'])
-	gen.bind_method(shared_mixer_async, 'SetChannelLocation', 'void', ['hg::MixerChannel channel', 'hg::MixerChannelLocation location'], ['proxy'])
-
-	gen.bind_method(shared_mixer_async, 'GetChannelTimestamp', 'std::future<hg::time_ns>', ['hg::MixerChannel channel'], ['proxy'])
-
-	gen.bind_method(shared_mixer_async, 'Stop', 'void', ['hg::MixerChannel channel'], ['proxy'])
-	gen.bind_method(shared_mixer_async, 'Pause', 'void', ['hg::MixerChannel channel'], ['proxy'])
-	gen.bind_method(shared_mixer_async, 'Resume', 'void', ['hg::MixerChannel channel'], ['proxy'])
-	gen.bind_method(shared_mixer_async, 'StopAll', 'void', [], ['proxy'])
-
-	gen.bind_method(shared_mixer_async, 'SetStreamLoopPoint', 'void', ['hg::MixerChannel channel', 'hg::time_ns t'], ['proxy'])
-	gen.bind_method(shared_mixer_async, 'SeekStream', 'void', ['hg::MixerChannel channel', 'hg::time_ns t'], ['proxy'])
-	gen.bind_method(shared_mixer_async, 'GetStreamBufferingPercentage', 'std::future<int>', ['hg::MixerChannel channel'], ['proxy'])
-
-	gen.bind_method(shared_mixer_async, 'SetChannelStreamDataTransform', 'void', ['hg::MixerChannel channel', 'const hg::Matrix4 &transform'], ['proxy'])
-	gen.bind_method(shared_mixer_async, 'FlushChannelBuffers', 'void', ['hg::MixerChannel channel'], ['proxy'])
-
-	gen.bind_method(shared_mixer_async, 'GetListener', 'std::future<hg::Matrix4>', [], ['proxy'])
-	gen.bind_method(shared_mixer_async, 'SetListener', 'void', ['const hg::Matrix4 &transform'], ['proxy'])
-
-	gen.bind_method(shared_mixer_async, 'LoadSound', 'std::shared_ptr<hg::Sound>', ['const std::string &path'], {'proxy': None, 'check_rval': check_bool_rval_lambda(gen, 'LoadSound failed')})
-	gen.bind_method(shared_mixer_async, 'FreeSound', 'void', ['const std::shared_ptr<hg::Sound> &sound'], ['proxy'])
-
-	gen.end_class(shared_mixer_async)
-
-
-def bind_movie(gen):
-	gen.add_include('engine/movie.h')
-
-	# hg::Movie
-	gen.bind_named_enum('hg::Movie::FrameFormat', ['YUV3PlanesHalfChroma', 'ExternalOES'], bound_name='MovieFrameFormat')
-
-	movie = gen.begin_class('hg::Movie', bound_name='Movie_nobind', noncopyable=True, nobind=True)
-	gen.end_class(movie)
-
-	shared_movie = gen.begin_class('std::shared_ptr<hg::Movie>', bound_name='Movie', features={'proxy': lib.stl.SharedPtrProxyFeature(movie)})
-
-	gen.bind_method(shared_movie, 'Open', 'bool', ['std::shared_ptr<hg::Renderer> renderer', 'std::shared_ptr<hg::Mixer> mixer', 'const std::string &filename', '?bool paused'], ['proxy'])
-	gen.bind_method(shared_movie, 'Play', 'bool', [], ['proxy'])
-	gen.bind_method(shared_movie, 'Pause', 'bool', [], ['proxy'])
-	gen.bind_method(shared_movie, 'Close', 'bool', [], ['proxy'])
-
-	gen.bind_method(shared_movie, 'GetDuration', 'hg::time_ns', [], ['proxy'])
-	gen.bind_method(shared_movie, 'GetTimeStamp', 'hg::time_ns', [], ['proxy'])
-	gen.bind_method(shared_movie, 'Seek', 'bool', ['hg::time_ns t'], ['proxy'])
-	gen.bind_method(shared_movie, 'IsEnded', 'bool', [], ['proxy'])
-	gen.bind_method(shared_movie, 'GetFormat', 'hg::Movie::FrameFormat', [], ['proxy'])
-	gen.bind_method(shared_movie, 'GetFrame', 'bool', ['std::vector<std::shared_ptr<hg::Texture>> &planes'], {'proxy':None, 'arg_out': ['planes']})
-	
-	gen.end_class(shared_movie)
-	# [todo] GetFrame
-	
-	gen.insert_binding_code('''static std::shared_ptr<hg::Movie> CreateMovie(const std::string &name) { return hg::g_movie_factory.get().Instantiate(name); }
-static std::shared_ptr<hg::Movie> CreateMovie() { return hg::g_movie_factory.get().Instantiate(); }
-	''', 'Movie custom API')
-
-	gen.bind_function('CreateMovie', 'std::shared_ptr<hg::Movie>', ['?const std::string &name'], {'check_rval': check_bool_rval_lambda(gen, 'CreateMovie failed, was LoadPlugins called succesfully?')})
+	gen.bind_named_enum('hg::Visibility', ['V_Outside', 'V_Inside', 'V_Clipped'], 'uint8_t')
+	gen.bind_function('hg::TestVisibility', 'hg::Visibility', ['const hg::Frustum &frustum', 'uint32_t count', 'const hg::Vec3 *points', '?float distance'])
+	gen.bind_function('hg::TestVisibility', 'hg::Visibility', ['const hg::Frustum &frustum', 'const hg::Vec3 &origin', 'float radius'])
+	gen.bind_function('hg::TestVisibility', 'hg::Visibility', ['const hg::Frustum &frustum', 'const hg::MinMax &minmax'])
 
 
 def bind_imgui(gen):
-	gen.add_include('engine/imgui.h')
-	gen.add_include('engine/imgui_hg_ext.h')
+	gen.add_include('foundation/format.h')
+	gen.add_include('engine/dear_imgui.h')
+	gen.add_include('imgui/imgui.h', True)
 
-	imvec2 = gen.begin_class('ImVec2')
-	gen.bind_constructor_overloads(imvec2, [
-		([], []),
-		(['float x', 'float y'], [])
-	])
-	gen.bind_members(imvec2, ['float x', 'float y'])
-	gen.end_class(imvec2)
-
-	imvec4 = gen.begin_class('ImVec4')
-	gen.bind_constructor_overloads(imvec4, [
-		([], []),
-		(['float x', 'float y', 'float z', 'float w'], [])
-	])
-	gen.bind_members(imvec4, ['float x', 'float y', 'float z', 'float w'])
-	gen.end_class(imvec4)
+	dear_imgui_context = gen.begin_class('hg::DearImguiContext')
+	gen.end_class(dear_imgui_context)
 
 	gen.bind_named_enum('ImGuiWindowFlags', [
 		'ImGuiWindowFlags_NoTitleBar', 'ImGuiWindowFlags_NoResize', 'ImGuiWindowFlags_NoMove', 'ImGuiWindowFlags_NoScrollbar', 'ImGuiWindowFlags_NoScrollWithMouse',
 		'ImGuiWindowFlags_NoCollapse', 'ImGuiWindowFlags_AlwaysAutoResize', 'ImGuiWindowFlags_NoSavedSettings', 'ImGuiWindowFlags_NoInputs',
 		'ImGuiWindowFlags_MenuBar', 'ImGuiWindowFlags_HorizontalScrollbar', 'ImGuiWindowFlags_NoFocusOnAppearing', 'ImGuiWindowFlags_NoBringToFrontOnFocus',
-		'ImGuiWindowFlags_AlwaysVerticalScrollbar', 'ImGuiWindowFlags_AlwaysHorizontalScrollbar', 'ImGuiWindowFlags_AlwaysUseWindowPadding'
+		'ImGuiWindowFlags_AlwaysVerticalScrollbar', 'ImGuiWindowFlags_AlwaysHorizontalScrollbar', 'ImGuiWindowFlags_AlwaysUseWindowPadding', 'ImGuiWindowFlags_NoDocking'
+	], 'int', namespace='')
+
+	gen.bind_named_enum('ImGuiPopupFlags', [
+		'ImGuiPopupFlags_None',
+		'ImGuiPopupFlags_MouseButtonLeft', 'ImGuiPopupFlags_MouseButtonRight', 'ImGuiPopupFlags_MouseButtonMiddle',
+		'ImGuiPopupFlags_NoOpenOverExistingPopup', 'ImGuiPopupFlags_NoOpenOverItems', 'ImGuiPopupFlags_AnyPopupId', 'ImGuiPopupFlags_AnyPopupLevel', 'ImGuiPopupFlags_AnyPopup'
 	], 'int', namespace='')
 
 	gen.bind_named_enum('ImGuiCond', ['ImGuiCond_Always', 'ImGuiCond_Once', 'ImGuiCond_FirstUseEver', 'ImGuiCond_Appearing'], 'int', namespace='')
 
-	gen.bind_named_enum('ImGuiHoveredFlags', ['ImGuiHoveredFlags_Default', 'ImGuiHoveredFlags_ChildWindows', 'ImGuiHoveredFlags_RootWindow', 'ImGuiHoveredFlags_AllowWhenBlockedByPopup', 'ImGuiHoveredFlags_AllowWhenBlockedByActiveItem', 'ImGuiHoveredFlags_AllowWhenOverlapped', 'ImGuiHoveredFlags_RectOnly', 'ImGuiHoveredFlags_RootAndChildWindows'], 'int', namespace='')
+	gen.bind_named_enum('ImGuiMouseButton', [		
+		'ImGuiMouseButton_Left',
+		'ImGuiMouseButton_Right',
+		'ImGuiMouseButton_Middle',
+	], 'int', namespace='')
+
+	gen.bind_named_enum('ImGuiHoveredFlags', [
+		'ImGuiHoveredFlags_None', 'ImGuiHoveredFlags_ChildWindows', 'ImGuiHoveredFlags_RootWindow', 'ImGuiHoveredFlags_AnyWindow', 'ImGuiHoveredFlags_AllowWhenBlockedByPopup',
+		'ImGuiHoveredFlags_AllowWhenBlockedByActiveItem', 'ImGuiHoveredFlags_AllowWhenOverlapped', 'ImGuiHoveredFlags_AllowWhenDisabled', 'ImGuiHoveredFlags_RectOnly', 'ImGuiHoveredFlags_RootAndChildWindows'
+	], 'int', namespace='')
 	gen.bind_named_enum('ImGuiFocusedFlags', ['ImGuiFocusedFlags_ChildWindows', 'ImGuiFocusedFlags_RootWindow', 'ImGuiFocusedFlags_RootAndChildWindows'], 'int', namespace='')
 
 	gen.bind_named_enum('ImGuiColorEditFlags', [
-		'ImGuiColorEditFlags_NoAlpha', 'ImGuiColorEditFlags_NoPicker', 'ImGuiColorEditFlags_NoOptions', 'ImGuiColorEditFlags_NoSmallPreview', 'ImGuiColorEditFlags_NoInputs', 'ImGuiColorEditFlags_NoTooltip', 'ImGuiColorEditFlags_NoLabel', 'ImGuiColorEditFlags_NoSidePreview',
-		'ImGuiColorEditFlags_AlphaBar', 'ImGuiColorEditFlags_AlphaPreview', 'ImGuiColorEditFlags_AlphaPreviewHalf', 'ImGuiColorEditFlags_HDR', 'ImGuiColorEditFlags_RGB', 'ImGuiColorEditFlags_HSV', 'ImGuiColorEditFlags_HEX', 'ImGuiColorEditFlags_Uint8', 'ImGuiColorEditFlags_Float', 'ImGuiColorEditFlags_PickerHueBar', 'ImGuiColorEditFlags_PickerHueWheel'
+		'ImGuiColorEditFlags_None', 'ImGuiColorEditFlags_NoAlpha', 'ImGuiColorEditFlags_NoPicker', 'ImGuiColorEditFlags_NoOptions', 'ImGuiColorEditFlags_NoSmallPreview', 'ImGuiColorEditFlags_NoInputs',
+		'ImGuiColorEditFlags_NoTooltip', 'ImGuiColorEditFlags_NoLabel', 'ImGuiColorEditFlags_NoSidePreview', 'ImGuiColorEditFlags_NoDragDrop', 'ImGuiColorEditFlags_AlphaBar', 'ImGuiColorEditFlags_AlphaPreview',
+		'ImGuiColorEditFlags_AlphaPreviewHalf', 'ImGuiColorEditFlags_HDR', 'ImGuiColorEditFlags_DisplayRGB', 'ImGuiColorEditFlags_DisplayHSV', 'ImGuiColorEditFlags_DisplayHex', 'ImGuiColorEditFlags_Uint8',
+		'ImGuiColorEditFlags_Float', 'ImGuiColorEditFlags_PickerHueBar', 'ImGuiColorEditFlags_PickerHueWheel', 'ImGuiColorEditFlags_InputRGB', 'ImGuiColorEditFlags_InputHSV'
 	], 'int', namespace='')
 
 	gen.bind_named_enum('ImGuiInputTextFlags', [
 		'ImGuiInputTextFlags_CharsDecimal', 'ImGuiInputTextFlags_CharsHexadecimal', 'ImGuiInputTextFlags_CharsUppercase', 'ImGuiInputTextFlags_CharsNoBlank',
 		'ImGuiInputTextFlags_AutoSelectAll', 'ImGuiInputTextFlags_EnterReturnsTrue', 'ImGuiInputTextFlags_CallbackCompletion', 'ImGuiInputTextFlags_CallbackHistory',
 		'ImGuiInputTextFlags_CallbackAlways', 'ImGuiInputTextFlags_CallbackCharFilter', 'ImGuiInputTextFlags_AllowTabInput', 'ImGuiInputTextFlags_CtrlEnterForNewLine',
-		'ImGuiInputTextFlags_NoHorizontalScroll', 'ImGuiInputTextFlags_AlwaysInsertMode', 'ImGuiInputTextFlags_ReadOnly', 'ImGuiInputTextFlags_Password'
+		'ImGuiInputTextFlags_NoHorizontalScroll', 'ImGuiInputTextFlags_AlwaysOverwrite', 'ImGuiInputTextFlags_ReadOnly', 'ImGuiInputTextFlags_Password'
 	], 'int', namespace='')
 
 	gen.bind_named_enum('ImGuiTreeNodeFlags', [
@@ -4967,13 +3740,12 @@ def bind_imgui(gen):
 	gen.bind_named_enum('ImGuiSelectableFlags', ['ImGuiSelectableFlags_DontClosePopups', 'ImGuiSelectableFlags_SpanAllColumns', 'ImGuiSelectableFlags_AllowDoubleClick'], 'int', namespace='')
 
 	gen.bind_named_enum('ImGuiCol', [
-		'ImGuiCol_Text', 'ImGuiCol_TextDisabled', 'ImGuiCol_WindowBg', 'ImGuiCol_ChildBg', 'ImGuiCol_PopupBg', 'ImGuiCol_Border', 'ImGuiCol_BorderShadow',
-		'ImGuiCol_FrameBg', 'ImGuiCol_FrameBgHovered', 'ImGuiCol_FrameBgActive', 'ImGuiCol_TitleBg', 'ImGuiCol_TitleBgCollapsed', 'ImGuiCol_TitleBgActive', 'ImGuiCol_MenuBarBg',
-		'ImGuiCol_ScrollbarBg', 'ImGuiCol_ScrollbarGrab', 'ImGuiCol_ScrollbarGrabHovered', 'ImGuiCol_ScrollbarGrabActive', 'ImGuiCol_CheckMark',
-		'ImGuiCol_SliderGrab', 'ImGuiCol_SliderGrabActive', 'ImGuiCol_Button', 'ImGuiCol_ButtonHovered', 'ImGuiCol_ButtonActive', 'ImGuiCol_Header', 'ImGuiCol_HeaderHovered',
-		'ImGuiCol_HeaderActive', 'ImGuiCol_Separator', 'ImGuiCol_SeparatorHovered', 'ImGuiCol_SeparatorActive', 'ImGuiCol_ResizeGrip', 'ImGuiCol_ResizeGripHovered', 'ImGuiCol_ResizeGripActive',
-		'ImGuiCol_CloseButton', 'ImGuiCol_CloseButtonHovered', 'ImGuiCol_CloseButtonActive', 'ImGuiCol_PlotLines', 'ImGuiCol_PlotLinesHovered', 'ImGuiCol_PlotHistogram', 'ImGuiCol_PlotHistogramHovered',
-		'ImGuiCol_TextSelectedBg', 'ImGuiCol_ModalWindowDarkening', 'ImGuiCol_DragDropTarget'
+		'ImGuiCol_Text', 'ImGuiCol_TextDisabled', 'ImGuiCol_WindowBg', 'ImGuiCol_ChildBg', 'ImGuiCol_PopupBg', 'ImGuiCol_Border', 'ImGuiCol_BorderShadow', 'ImGuiCol_FrameBg', 'ImGuiCol_FrameBgHovered', 
+		'ImGuiCol_FrameBgActive', 'ImGuiCol_TitleBg', 'ImGuiCol_TitleBgActive', 'ImGuiCol_TitleBgCollapsed', 'ImGuiCol_MenuBarBg', 'ImGuiCol_ScrollbarBg', 'ImGuiCol_ScrollbarGrab', 'ImGuiCol_ScrollbarGrabHovered', 
+		'ImGuiCol_ScrollbarGrabActive', 'ImGuiCol_CheckMark', 'ImGuiCol_SliderGrab', 'ImGuiCol_SliderGrabActive', 'ImGuiCol_Button', 'ImGuiCol_ButtonHovered', 'ImGuiCol_ButtonActive', 'ImGuiCol_Header', 
+		'ImGuiCol_HeaderHovered', 'ImGuiCol_HeaderActive', 'ImGuiCol_Separator', 'ImGuiCol_SeparatorHovered', 'ImGuiCol_SeparatorActive', 'ImGuiCol_ResizeGrip', 'ImGuiCol_ResizeGripHovered', 'ImGuiCol_ResizeGripActive', 
+		'ImGuiCol_PlotLines', 'ImGuiCol_PlotLinesHovered', 'ImGuiCol_PlotHistogram', 'ImGuiCol_PlotHistogramHovered', 'ImGuiCol_TextSelectedBg', 'ImGuiCol_DragDropTarget', 'ImGuiCol_NavHighlight', 
+		'ImGuiCol_NavWindowingHighlight', 'ImGuiCol_NavWindowingDimBg', 'ImGuiCol_ModalWindowDimBg'
 	], 'int', namespace='')
 
 	gen.bind_named_enum('ImGuiStyleVar', [
@@ -4981,47 +3753,125 @@ def bind_imgui(gen):
 		'ImGuiStyleVar_FrameRounding', 'ImGuiStyleVar_ItemSpacing', 'ImGuiStyleVar_ItemInnerSpacing', 'ImGuiStyleVar_IndentSpacing', 'ImGuiStyleVar_GrabMinSize', 'ImGuiStyleVar_ButtonTextAlign'
 	], 'int', namespace='')
 
+	gen.bind_named_enum('ImDrawFlags', [
+		'ImDrawFlags_RoundCornersNone',
+		'ImDrawFlags_RoundCornersTopLeft', 'ImDrawFlags_RoundCornersTopRight', 'ImDrawFlags_RoundCornersBottomLeft', 'ImDrawFlags_RoundCornersBottomRight',
+		'ImDrawFlags_RoundCornersAll'
+	], 'int', namespace='')
+
 	#gen.bind_function('ImGui::GetIO', 'ImGuiIO &', [], bound_name='ImGuiGetIO')
 	#gen.bind_function('ImGui::GetStyle', 'ImGuiStyle &', [], bound_name='ImGuiGetStyle')
 
+	imfont = gen.begin_class('ImFont')
+	gen.end_class(imfont)
+
+	gen.typedef('ImU32', 'unsigned int')
+
+	imdrawlist = gen.begin_class('ImDrawList')
+
+	gen.bind_method(imdrawlist, 'PushClipRect', 'void', ['hg::tVec2<float> clip_rect_min', 'hg::tVec2<float> clip_rect_max', '?bool intersect_with_curent_clip_rect'])
+	gen.bind_method(imdrawlist, 'PushClipRectFullScreen', 'void', [])
+	gen.bind_method(imdrawlist, 'PopClipRect', 'void', [])
+	gen.bind_method(imdrawlist, 'PushTextureID', 'void', ['const hg::Texture &tex'], {'route': route_lambda('ImGui::PushTextureID')})
+	gen.bind_method(imdrawlist, 'PopTextureID', 'void', [])
+	gen.bind_method(imdrawlist, 'GetClipRectMin', 'hg::tVec2<float>', [])
+	gen.bind_method(imdrawlist, 'GetClipRectMax', 'hg::tVec2<float>', [])
+	
+	gen.bind_method(imdrawlist, 'AddLine', 'void', ['const hg::tVec2<float> &a', 'const hg::tVec2<float> &b', 'ImU32 col', '?float thickness'])
+	gen.bind_method(imdrawlist, 'AddRect', 'void', ['const hg::tVec2<float> &a', 'const hg::tVec2<float> &b', 'ImU32 col', '?float rounding', '?int rounding_corner_flags', '?float thickness'])
+	gen.bind_method(imdrawlist, 'AddRectFilled', 'void', ['const hg::tVec2<float> &a', 'const hg::tVec2<float> &b', 'ImU32 col', '?float rounding', '?int rounding_corner_flags'])
+	gen.bind_method(imdrawlist, 'AddRectFilledMultiColor', 'void', ['const hg::tVec2<float> &a', 'const hg::tVec2<float> &b', 'ImU32 col_upr_left', 'ImU32 col_upr_right', 'ImU32 col_bot_right', 'ImU32 col_bot_left'])
+	gen.bind_method(imdrawlist, 'AddQuad', 'void', ['const hg::tVec2<float> &a', 'const hg::tVec2<float> &b', 'const hg::tVec2<float> &c', 'const hg::tVec2<float> &d', 'ImU32 col', '?float thickness'])
+	gen.bind_method(imdrawlist, 'AddQuadFilled', 'void', ['const hg::tVec2<float> &a', 'const hg::tVec2<float> &b', 'const hg::tVec2<float> &c', 'const hg::tVec2<float> &d', 'ImU32 col'])
+	gen.bind_method(imdrawlist, 'AddTriangle', 'void', ['const hg::tVec2<float> &a', 'const hg::tVec2<float> &b', 'const hg::tVec2<float> &c', 'ImU32 col', '?float thickness'])
+	gen.bind_method(imdrawlist, 'AddTriangleFilled', 'void', ['const hg::tVec2<float> &a', 'const hg::tVec2<float> &b', 'const hg::tVec2<float> &c', 'ImU32 col'])
+	gen.bind_method(imdrawlist, 'AddCircle', 'void', ['const hg::tVec2<float> &centre', 'float radius', 'ImU32 col', '?int num_segments', '?float thickness'])
+	gen.bind_method(imdrawlist, 'AddCircleFilled', 'void', ['const hg::tVec2<float> &centre', 'float radius', 'ImU32 col', '?int num_segments'])
+
+	gen.insert_binding_code('''static void _ImDrawList_AddText(ImDrawList *self, const ImFont *font, float font_size, const hg::tVec2<float> &pos, ImU32 col, const char *text, float wrap_width = 0.0f, const hg::Vec4 *cpu_fine_clip_rect = nullptr) {
+	self->AddText(font, font_size, pos, col, text, nullptr, wrap_width, reinterpret_cast<const ImVec4 *>(cpu_fine_clip_rect));
+}''')
+
+	gen.bind_method_overloads(imdrawlist, 'AddText', [
+		('void', ['const hg::tVec2<float> &pos', 'ImU32 col', 'const char *text'], []),
+		('void', ['const ImFont *font', 'float font_size', 'const hg::tVec2<float> &pos', 'ImU32 col', 'const char *text', '?float wrap_width', '?const hg::Vec4 *cpu_fine_clip_rect'], {'route': route_lambda('_ImDrawList_AddText')})
+	])
+
+	gen.bind_method_overloads(imdrawlist, 'AddImage', [
+		('void', ['const hg::Texture &tex', 'const hg::tVec2<float> &a', 'const hg::tVec2<float> &b'], {'route': route_lambda('ImGui::AddImage')}),
+		('void', ['const hg::Texture &tex', 'const hg::tVec2<float> &a', 'const hg::tVec2<float> &b', 'const hg::tVec2<float> &uv_a', 'const hg::tVec2<float> &uv_b', '?ImU32 col'], {'route': route_lambda('ImGui::AddImage')})
+	])
+	gen.bind_method_overloads(imdrawlist, 'AddImageQuad', [
+		('void', ['const hg::Texture &tex', 'const hg::tVec2<float> &a', 'const hg::tVec2<float> &b', 'const hg::tVec2<float> &c', 'const hg::tVec2<float> &d'], {'route': route_lambda('ImGui::AddImageQuad')}),
+		('void', ['const hg::Texture &tex', 'const hg::tVec2<float> &a', 'const hg::tVec2<float> &b', 'const hg::tVec2<float> &c', 'const hg::tVec2<float> &d', 'const hg::tVec2<float> &uv_a', 'const hg::tVec2<float> &uv_b', 'const hg::tVec2<float> &uv_c', 'const hg::tVec2<float> &uv_d', '?ImU32 col'], {'route': route_lambda('ImGui::AddImageQuad')})
+	])
+	gen.bind_method(imdrawlist, 'AddImageRounded', 'void', ['const hg::Texture &tex', 'const hg::tVec2<float> &a', 'const hg::tVec2<float> &b', 'const hg::tVec2<float> &uv_a', 'const hg::tVec2<float> &uv_b', 'ImU32 col', 'float rounding', '?ImDrawFlags flags'], {'route': route_lambda('ImGui::AddImageRounded')})
+
+	gen.insert_binding_code('''
+static void _ImDrawList_AddPolyline(ImDrawList *self, const std::vector<hg::tVec2<float>> &points, ImU32 col, bool closed, float thickness) { self->AddPolyline(reinterpret_cast<const ImVec2 *>(points.data()), points.size(), col, closed, thickness); }
+static void _ImDrawList_AddConvexPolyFilled(ImDrawList *self, const std::vector<hg::tVec2<float>> &points, ImU32 col) { self->AddConvexPolyFilled(reinterpret_cast<const ImVec2 *>(points.data()), points.size(), col); }
+''')
+	gen.bind_method(imdrawlist, 'AddPolyline', 'void', ['const std::vector<hg::tVec2<float>> &points', 'ImU32 col', 'bool closed', 'float thickness'], {'route': route_lambda('_ImDrawList_AddPolyline')})
+	gen.bind_method(imdrawlist, 'AddConvexPolyFilled', 'void', ['const std::vector<hg::tVec2<float>> &points', 'ImU32 col'], {'route': route_lambda('_ImDrawList_AddConvexPolyFilled')})
+	gen.bind_method(imdrawlist, 'AddBezierCubic', 'void', ['const hg::tVec2<float> &pos0', 'const hg::tVec2<float> &cp0', 'const hg::tVec2<float> &cp1', 'const hg::tVec2<float> &pos1', 'ImU32 col', 'float thickness', '?int num_segments'])
+
+	gen.bind_method(imdrawlist, 'PathClear', 'void', [])
+
+	gen.bind_method(imdrawlist, 'PathLineTo', 'void', ['const hg::tVec2<float> &pos'])
+	gen.bind_method(imdrawlist, 'PathLineToMergeDuplicate', 'void', ['const hg::tVec2<float> &pos'])
+	gen.bind_method(imdrawlist, 'PathFillConvex', 'void', ['ImU32 col'])
+	gen.bind_method(imdrawlist, 'PathStroke', 'void', ['ImU32 col', 'bool closed', '?float thickness'])
+
+	gen.bind_method(imdrawlist, 'PathArcTo', 'void', ['const hg::tVec2<float> &centre', 'float radius', 'float a_min', 'float a_max', '?int num_segments'])
+	gen.bind_method(imdrawlist, 'PathArcToFast', 'void', ['const hg::tVec2<float> &centre', 'float radius', 'int a_min_of_12', 'int a_max_of_12'])
+	gen.bind_method(imdrawlist, 'PathBezierCubicCurveTo', 'void', ['const hg::tVec2<float> &p1', 'const hg::tVec2<float> &p2', 'const hg::tVec2<float> &p3', '?int num_segments'])
+	gen.bind_method(imdrawlist, 'PathRect', 'void', ['const hg::tVec2<float> &rect_min', 'const hg::tVec2<float> &rect_max', '?float rounding', '?ImDrawFlags flags'])
+
+	gen.bind_method(imdrawlist, 'ChannelsSplit', 'void', ['int channels_count'])
+	gen.bind_method(imdrawlist, 'ChannelsMerge', 'void', [])
+	gen.bind_method(imdrawlist, 'ChannelsSetCurrent', 'void', ['int channel_index'])
+	
+	gen.end_class(imdrawlist)
+
+	#
 	gen.bind_function('ImGui::NewFrame', 'void', [], bound_name='ImGuiNewFrame')
 	gen.bind_function('ImGui::Render', 'void', [], bound_name='ImGuiRender')
-	gen.bind_function('ImGui::Shutdown', 'void', [], bound_name='ImGuiShutdown')
 
 	gen.bind_function_overloads('ImGui::Begin', [
 		('bool', ['const char *name'], []),
-		('bool', ['const char *name', 'bool *open', 'ImGuiWindowFlags flags'], {'arg_out': ['open']})
+		('bool', ['const char *name', 'bool *open', 'ImGuiWindowFlags flags'], {'arg_in_out': ['open']})
 	], bound_name='ImGuiBegin')
 	gen.bind_function('ImGui::End', 'void', [], bound_name='ImGuiEnd')
 
-	gen.bind_function('ImGui::BeginChild', 'bool', ['const char *id', '?const ImVec2 &size', '?bool border', '?ImGuiWindowFlags extra_flags'], bound_name='ImGuiBeginChild')
+	gen.bind_function('ImGui::BeginChild', 'bool', ['const char *id', '?const hg::tVec2<float> &size', '?bool border', '?ImGuiWindowFlags flags'], bound_name='ImGuiBeginChild')
 	gen.bind_function('ImGui::EndChild', 'void', [], bound_name='ImGuiEndChild')
 
-	gen.bind_function('ImGui::GetContentRegionMax', 'hg::tVector2<float>', [], bound_name='ImGuiGetContentRegionMax')
-	gen.bind_function('ImGui::GetContentRegionAvail', 'hg::tVector2<float>', [], bound_name='ImGuiGetContentRegionAvail')
+	gen.bind_function('ImGui::GetContentRegionMax', 'hg::tVec2<float>', [], bound_name='ImGuiGetContentRegionMax')
+	gen.bind_function('ImGui::GetContentRegionAvail', 'hg::tVec2<float>', [], bound_name='ImGuiGetContentRegionAvail')
 	gen.bind_function('ImGui::GetContentRegionAvailWidth', 'float', [], bound_name='ImGuiGetContentRegionAvailWidth')
-	gen.bind_function('ImGui::GetWindowContentRegionMin', 'hg::tVector2<float>', [], bound_name='ImGuiGetWindowContentRegionMin')
-	gen.bind_function('ImGui::GetWindowContentRegionMax', 'hg::tVector2<float>', [], bound_name='ImGuiGetWindowContentRegionMax')
+	gen.bind_function('ImGui::GetWindowContentRegionMin', 'hg::tVec2<float>', [], bound_name='ImGuiGetWindowContentRegionMin')
+	gen.bind_function('ImGui::GetWindowContentRegionMax', 'hg::tVec2<float>', [], bound_name='ImGuiGetWindowContentRegionMax')
 	gen.bind_function('ImGui::GetWindowContentRegionWidth', 'float', [], bound_name='ImGuiGetWindowContentRegionWidth')
-	#IMGUI_API ImDrawList*   GetWindowDrawList();                                                // get rendering command-list if you want to append your own draw primitives
-	gen.bind_function('ImGui::GetWindowPos', 'hg::tVector2<float>', [], bound_name='ImGuiGetWindowPos')
-	gen.bind_function('ImGui::GetWindowSize', 'hg::tVector2<float>', [], bound_name='ImGuiGetWindowSize')
+	gen.bind_function('ImGui::GetWindowDrawList', 'ImDrawList *', [], bound_name='ImGuiGetWindowDrawList')
+	gen.bind_function('ImGui::GetWindowPos', 'hg::tVec2<float>', [], bound_name='ImGuiGetWindowPos')
+	gen.bind_function('ImGui::GetWindowSize', 'hg::tVec2<float>', [], bound_name='ImGuiGetWindowSize')
 	gen.bind_function('ImGui::GetWindowWidth', 'float', [], bound_name='ImGuiGetWindowWidth')
 	gen.bind_function('ImGui::GetWindowHeight', 'float', [], bound_name='ImGuiGetWindowHeight')
 	gen.bind_function('ImGui::IsWindowCollapsed', 'bool', [], bound_name='ImGuiIsWindowCollapsed')
 	gen.bind_function('ImGui::SetWindowFontScale', 'void', ['float scale'], bound_name='ImGuiSetWindowFontScale')
 
-	gen.bind_function('ImGui::SetNextWindowPos', 'void', ['const hg::tVector2<float> &pos', '?ImGuiCond condition'], bound_name='ImGuiSetNextWindowPos')
+	gen.bind_function('ImGui::SetNextWindowPos', 'void', ['const hg::tVec2<float> &pos', '?ImGuiCond condition'], bound_name='ImGuiSetNextWindowPos')
 	gen.bind_function('ImGui::SetNextWindowPosCenter', 'void', ['?ImGuiCond condition'], bound_name='ImGuiSetNextWindowPosCenter')
-	gen.bind_function('ImGui::SetNextWindowSize', 'void', ['const hg::tVector2<float> &size', '?ImGuiCond condition'], bound_name='ImGuiSetNextWindowSize')
-	gen.bind_function('ImGui::SetNextWindowContentSize', 'void', ['const hg::tVector2<float> &size'], bound_name='ImGuiSetNextWindowContentSize')
+	gen.bind_function('ImGui::SetNextWindowSize', 'void', ['const hg::tVec2<float> &size', '?ImGuiCond condition'], bound_name='ImGuiSetNextWindowSize')
+	gen.bind_function('ImGui::SetNextWindowSizeConstraints', 'void', ['const hg::tVec2<float> &size_min', 'const hg::tVec2<float> &size_max'], bound_name='ImGuiSetNextWindowSizeConstraints')
+	gen.bind_function('ImGui::SetNextWindowContentSize', 'void', ['const hg::tVec2<float> &size'], bound_name='ImGuiSetNextWindowContentSize')
 	gen.bind_function('ImGui::SetNextWindowContentWidth', 'void', ['float width'], bound_name='ImGuiSetNextWindowContentWidth')
 	gen.bind_function('ImGui::SetNextWindowCollapsed', 'void', ['bool collapsed', 'ImGuiCond condition'], bound_name='ImGuiSetNextWindowCollapsed')
 	gen.bind_function('ImGui::SetNextWindowFocus', 'void', [], bound_name='ImGuiSetNextWindowFocus')
-	gen.bind_function('ImGui::SetWindowPos', 'void', ['const hg::tVector2<float> &pos', '?ImGuiCond condition'], bound_name='ImGuiSetWindowPos')
-	gen.bind_function('ImGui::SetWindowSize', 'void', ['const hg::tVector2<float> &size', '?ImGuiCond condition'], bound_name='ImGuiSetWindowSize')
-	gen.bind_function('ImGui::SetWindowCollapsed', 'void', ['bool collapsed', '?ImGuiCond condition'], bound_name='ImGuiSetWindowCollapsed')
-	gen.bind_function('ImGui::SetWindowFocus', 'void', ['?const char *name'], bound_name='ImGuiSetWindowFocus')
+	gen.bind_function('ImGui::SetWindowPos', 'void', ['const char *name', 'const hg::tVec2<float> &pos', '?ImGuiCond condition'], bound_name='ImGuiSetWindowPos')
+	gen.bind_function('ImGui::SetWindowSize', 'void', ['const char *name', 'const hg::tVec2<float> &size', '?ImGuiCond condition'], bound_name='ImGuiSetWindowSize')
+	gen.bind_function('ImGui::SetWindowCollapsed', 'void', ['const char *name', 'bool collapsed', '?ImGuiCond condition'], bound_name='ImGuiSetWindowCollapsed')
+	gen.bind_function('ImGui::SetWindowFocus', 'void', ['const char *name'], bound_name='ImGuiSetWindowFocus')
 
 	gen.bind_function('ImGui::GetScrollX', 'float', [], bound_name='ImGuiGetScrollX')
 	gen.bind_function('ImGui::GetScrollY', 'float', [], bound_name='ImGuiGetScrollY')
@@ -5029,12 +3879,9 @@ def bind_imgui(gen):
 	gen.bind_function('ImGui::GetScrollMaxY', 'float', [], bound_name='ImGuiGetScrollMaxY')
 	gen.bind_function('ImGui::SetScrollX', 'void', ['float scroll_x'], bound_name='ImGuiSetScrollX')
 	gen.bind_function('ImGui::SetScrollY', 'void', ['float scroll_y'], bound_name='ImGuiSetScrollY')
-	gen.bind_function('ImGui::SetScrollHere', 'void', ['?float center_y_ratio'], bound_name='ImGuiSetScrollHere')
+	gen.bind_function('ImGui::SetScrollHereY', 'void', ['?float center_y_ratio'], bound_name='ImGuiSetScrollHereY')
 	gen.bind_function('ImGui::SetScrollFromPosY', 'void', ['float pos_y', '?float center_y_ratio'], bound_name='ImGuiSetScrollFromPosY')
 	gen.bind_function('ImGui::SetKeyboardFocusHere', 'void', ['?int offset'], bound_name='ImGuiSetKeyboardFocusHere')
-
-	imfont = gen.begin_class('ImFont')
-	gen.end_class(imfont)
 
 	gen.bind_function('ImGui::PushFont', 'void', ['ImFont *font'], bound_name='ImGuiPushFont')
 	gen.bind_function('ImGui::PopFont', 'void', [], bound_name='ImGuiPopFont')
@@ -5042,12 +3889,12 @@ def bind_imgui(gen):
 	gen.bind_function('ImGui::PopStyleColor', 'void', ['?int count'], bound_name='ImGuiPopStyleColor')
 	gen.bind_function_overloads('ImGui::PushStyleVar', [
 		('void', ['ImGuiStyleVar idx', 'float value'], []),
-		('void', ['ImGuiStyleVar idx', 'const hg::tVector2<float> &value'], [])
+		('void', ['ImGuiStyleVar idx', 'const hg::tVec2<float> &value'], [])
 	], bound_name='ImGuiPushStyleVar')
 	gen.bind_function('ImGui::PopStyleVar', 'void', ['?int count'], bound_name='ImGuiPopStyleVar')
 	gen.bind_function('ImGui::GetFont', 'ImFont *', [], bound_name='ImGuiGetFont')
 	gen.bind_function('ImGui::GetFontSize', 'float', [], bound_name='ImGuiGetFontSize')
-	gen.bind_function('ImGui::GetFontTexUvWhitePixel', 'hg::tVector2<float>', [], bound_name='ImGuiGetFontTexUvWhitePixel')
+	gen.bind_function('ImGui::GetFontTexUvWhitePixel', 'hg::tVec2<float>', [], bound_name='ImGuiGetFontTexUvWhitePixel')
 	gen.bind_function_overloads('ImGui::GetColorU32', [
 		('uint32_t', ['ImGuiCol idx', '?float alpha_multiplier'], []),
 		('uint32_t', ['const hg::Color &color'], [])
@@ -5067,20 +3914,20 @@ def bind_imgui(gen):
 	gen.bind_function('ImGui::SameLine', 'void', ['?float pos_x', '?float spacing_w'], bound_name='ImGuiSameLine')
 	gen.bind_function('ImGui::NewLine', 'void', [], bound_name='ImGuiNewLine')
 	gen.bind_function('ImGui::Spacing', 'void', [], bound_name='ImGuiSpacing')
-	gen.bind_function('ImGui::Dummy', 'void', ['const hg::tVector2<float> &size'], bound_name='ImGuiDummy')
+	gen.bind_function('ImGui::Dummy', 'void', ['const hg::tVec2<float> &size'], bound_name='ImGuiDummy')
 	gen.bind_function('ImGui::Indent', 'void', ['?float width'], bound_name='ImGuiIndent')
 	gen.bind_function('ImGui::Unindent', 'void', ['?float width'], bound_name='ImGuiUnindent')
 	gen.bind_function('ImGui::BeginGroup', 'void', [], bound_name='ImGuiBeginGroup')
 	gen.bind_function('ImGui::EndGroup', 'void', [], bound_name='ImGuiEndGroup')
-	gen.bind_function('ImGui::GetCursorPos', 'hg::tVector2<float>', [], bound_name='ImGuiGetCursorPos')
+	gen.bind_function('ImGui::GetCursorPos', 'hg::tVec2<float>', [], bound_name='ImGuiGetCursorPos')
 	gen.bind_function('ImGui::GetCursorPosX', 'float', [], bound_name='ImGuiGetCursorPosX')
 	gen.bind_function('ImGui::GetCursorPosY', 'float', [], bound_name='ImGuiGetCursorPosY')
-	gen.bind_function('ImGui::SetCursorPos', 'void', ['const hg::tVector2<float> &local_pos'], bound_name='ImGuiSetCursorPos')
+	gen.bind_function('ImGui::SetCursorPos', 'void', ['const hg::tVec2<float> &local_pos'], bound_name='ImGuiSetCursorPos')
 	gen.bind_function('ImGui::SetCursorPosX', 'void', ['float x'], bound_name='ImGuiSetCursorPosX')
 	gen.bind_function('ImGui::SetCursorPosY', 'void', ['float y'], bound_name='ImGuiSetCursorPosY')
-	gen.bind_function('ImGui::GetCursorStartPos', 'hg::tVector2<float>', [], bound_name='ImGuiGetCursorStartPos')
-	gen.bind_function('ImGui::GetCursorScreenPos', 'hg::tVector2<float>', [], bound_name='ImGuiGetCursorScreenPos')
-	gen.bind_function('ImGui::SetCursorScreenPos', 'void', ['const hg::tVector2<float> &pos'], bound_name='ImGuiSetCursorScreenPos')
+	gen.bind_function('ImGui::GetCursorStartPos', 'hg::tVec2<float>', [], bound_name='ImGuiGetCursorStartPos')
+	gen.bind_function('ImGui::GetCursorScreenPos', 'hg::tVec2<float>', [], bound_name='ImGuiGetCursorScreenPos')
+	gen.bind_function('ImGui::SetCursorScreenPos', 'void', ['const hg::tVec2<float> &pos'], bound_name='ImGuiSetCursorScreenPos')
 	gen.bind_function('ImGui::AlignTextToFramePadding', 'void', [], bound_name='ImGuiAlignTextToFramePadding')
 	gen.bind_function('ImGui::GetTextLineHeight', 'float', [], bound_name='ImGuiGetTextLineHeight')
 	gen.bind_function('ImGui::GetTextLineHeightWithSpacing', 'float', [], bound_name='ImGuiGetTextLineHeightWithSpacing')
@@ -5092,6 +3939,7 @@ def bind_imgui(gen):
 	gen.bind_function('ImGui::GetColumnOffset', 'float', ['?int column_index'], bound_name='ImGuiGetColumnOffset')
 	gen.bind_function('ImGui::SetColumnOffset', 'void', ['int column_index', 'float offset_x'], bound_name='ImGuiSetColumnOffset')
 	gen.bind_function('ImGui::GetColumnWidth', 'float', ['?int column_index'], bound_name='ImGuiGetColumnWidth')
+	gen.bind_function('ImGui::SetColumnWidth', 'void', ['int column_index', 'float width'], bound_name='ImGuiSetColumnWidth')
 	gen.bind_function('ImGui::GetColumnsCount', 'int', [], bound_name='ImGuiGetColumnsCount')
 
 	gen.typedef('ImGuiID', 'unsigned int')
@@ -5103,6 +3951,8 @@ def bind_imgui(gen):
 	gen.bind_function('ImGui::PopID', 'void', [], bound_name='ImGuiPopID')
 	gen.bind_function('ImGui::GetID', 'ImGuiID', ['const char *id'], bound_name='ImGuiGetID')
 
+	#gen.bind_function('ImGui::time_ns_Edit', 'bool', ['const char *label', 'hg::time_ns &t'], {'arg_in_out': ['t']}, 'ImGuiInput_time_ns')
+
 	gen.bind_function('ImGui::Text', 'void', ['const char *text'], bound_name='ImGuiText')
 	gen.bind_function('ImGui::TextColored', 'void', ['const hg::Color &color', 'const char *text'], bound_name='ImGuiTextColored')
 	gen.bind_function('ImGui::TextDisabled', 'void', ['const char *text'], bound_name='ImGuiTextDisabled')
@@ -5111,17 +3961,37 @@ def bind_imgui(gen):
 	gen.bind_function('ImGui::LabelText', 'void', ['const char *label', 'const char *text'], bound_name='ImGuiLabelText')
 	gen.bind_function('ImGui::Bullet', 'void', [], bound_name='ImGuiBullet')
 	gen.bind_function('ImGui::BulletText', 'void', ['const char *label'], bound_name='ImGuiBulletText')
-	gen.bind_function('ImGui::Button', 'bool', ['const char *label', '?const hg::tVector2<float> &size'], bound_name='ImGuiButton')
+	gen.bind_function('ImGui::Button', 'bool', ['const char *label', '?const hg::tVec2<float> &size'], bound_name='ImGuiButton')
 	gen.bind_function('ImGui::SmallButton', 'bool', ['const char *label'], bound_name='ImGuiSmallButton')
-	gen.bind_function('ImGui::InvisibleButton', 'bool', ['const char *text', 'const hg::tVector2<float> &size'], bound_name='ImGuiInvisibleButton')
+	gen.bind_function('ImGui::InvisibleButton', 'bool', ['const char *text', 'const hg::tVec2<float> &size'], bound_name='ImGuiInvisibleButton')
 
-	gen.bind_function('ImGui::Image', 'void', ['hg::Texture *texture', 'const hg::tVector2<float> &size', '?const hg::tVector2<float> &uv0', '?const hg::tVector2<float> &uv1', '?const hg::Color &tint_col', '?const hg::Color &border_col'], bound_name='ImGuiImage')
-	gen.bind_function('ImGui::ImageButton', 'bool', ['hg::Texture *texture', 'const hg::tVector2<float> &size', '?const hg::tVector2<float> &uv0', '?const hg::tVector2<float> &uv1', '?int frame_padding', '?const hg::Color &bg_col', '?const hg::Color &tint_col'], bound_name='ImGuiImageButton')
+	gen.bind_function('ImGui::Image', 'void', ['const hg::Texture &tex', 'const hg::tVec2<float> &size', '?const hg::tVec2<float> &uv0', '?const hg::tVec2<float> &uv1', '?const hg::Color &tint_col', '?const hg::Color &border_col'], bound_name='ImGuiImage')
+	gen.bind_function('ImGui::ImageButton', 'bool', ['const hg::Texture &tex', 'const hg::tVec2<float> &size', '?const hg::tVec2<float> &uv0', '?const hg::tVec2<float> &uv1', '?int frame_padding', '?const hg::Color &bg_col', '?const hg::Color &tint_col'], bound_name='ImGuiImageButton')
 
+	gen.insert_binding_code('''\
+static bool _InputText(const char *label, const char *text, size_t max_size, std::string &out, ImGuiInputTextFlags flags = 0) {
+	out = text;
+	out.reserve(max_size + 1);
+	return ImGui::InputText(label, const_cast<char *>(out.c_str()), max_size, flags);
+}
+''')
+	gen.bind_function('ImGui::InputText', 'bool', ['const char *label', 'const char *text', 'size_t max_size', 'std::string &out', '?ImGuiInputTextFlags flags'], {'route': route_lambda('_InputText'), 'arg_out': ['out']}, bound_name='ImGuiInputText')
+	#
 	gen.bind_function('ImGui::Checkbox', 'bool', ['const char *label', 'bool *value'], {'arg_in_out': ['value']}, 'ImGuiCheckbox')
 	#IMGUI_API bool          CheckboxFlags(const char* label, unsigned int* flags, unsigned int flags_value);
-	gen.bind_function('ImGui::RadioButton', 'bool', ['const char *label', 'bool active'], bound_name='ImGuiRadioButton')
+	
+	gen.bind_function_overloads('ImGui::RadioButton', [
+		('bool', ['const char *label', 'bool active'], []),
+		('bool', ['const char *label', 'int* v', 'int v_button'], {'arg_in_out': ['v']})
+	], bound_name='ImGuiRadioButton')
 
+	gen.bind_named_enum('ImGuiComboFlags', [
+		'ImGuiComboFlags_PopupAlignLeft', 'ImGuiComboFlags_HeightSmall', 'ImGuiComboFlags_HeightRegular', 'ImGuiComboFlags_HeightLarge', 'ImGuiComboFlags_HeightLargest'
+	], 'int', namespace='')
+
+	gen.bind_function('ImGui::BeginCombo', 'bool', ['const char* label', 'const char* preview_value', '?ImGuiComboFlags flags'], bound_name='ImGuiBeginCombo')
+	gen.bind_function('ImGui::EndCombo', 'void', [], bound_name='ImGuiEndCombo')
+    
 	gen.insert_binding_code('''\
 static bool _ImGuiCombo(const char *label, int *current_item, const std::vector<std::string> &items, int height_in_items = -1) {
 	auto item_cb = [](void *data, int idx, const char **out_text) -> bool {
@@ -5134,26 +4004,24 @@ static bool _ImGuiCombo(const char *label, int *current_item, const std::vector<
 	return ImGui::Combo(label, current_item, item_cb, (void *)&items, hg::numeric_cast<int>(items.size()), height_in_items);
 }
 
-static bool _ImGuiColorButton(const char *id, hg::Color &color, ImGuiColorEditFlags flags = 0, const hg::tVector2<float> &size = hg::tVector2<float>(0, 0)) { return ImGui::ColorButton(id, *(ImVec4 *)&color, flags, size); }
+static bool _ImGuiColorButton(const char *id, hg::Color &color, ImGuiColorEditFlags flags = 0, const hg::tVec2<float> &size = hg::tVec2<float>(0, 0)) { return ImGui::ColorButton(id, *(hg::Vec4 *)&color, flags, size); }
 static bool _ImGuiColorEdit(const char *label, hg::Color &color, ImGuiColorEditFlags flags = 0) { return ImGui::ColorEdit4(label, &color.r, flags); }
-static void _ImGuiProgressBar(float fraction, const hg::tVector2<float> &size = hg::tVector2<float>(-1, 0), const char *overlay = nullptr) { ImGui::ProgressBar(fraction, size, overlay); }
+static void _ImGuiProgressBar(float fraction, const hg::tVec2<float> &size = hg::tVec2<float>(-1, 0), const char *overlay = nullptr) { ImGui::ProgressBar(fraction, size, overlay); }
 ''')
 
-	imgui_combo_protos = [('bool', ['const char *label', 'int *current_item', 'const std::vector<std::string> &items', '?int height_in_items'], {'arg_in_out': ['current_item']})]
-	if gen.get_language() == "CPython":
-		imgui_combo_protos += [('bool', ['const char *label', 'int *current_item', 'PySequenceOfString items', '?int height_in_items'], {'arg_in_out': ['current_item']})]
-	gen.bind_function_overloads('_ImGuiCombo', imgui_combo_protos, bound_name='ImGuiCombo')
+	protos = [('bool', ['const char *label', 'int *current_item', 'const std::vector<std::string> &items', '?int height_in_items'], {'arg_in_out': ['current_item']})]
+	gen.bind_function_overloads('_ImGuiCombo', expand_std_vector_proto(gen, protos), bound_name='ImGuiCombo')
 
-	gen.bind_function('_ImGuiColorButton', 'bool', ['const char *id', 'hg::Color &color', '?ImGuiColorEditFlags flags', '?const hg::tVector2<float> &size'], {'arg_in_out': ['color']}, bound_name='ImGuiColorButton')
+	gen.bind_function('_ImGuiColorButton', 'bool', ['const char *id', 'hg::Color &color', '?ImGuiColorEditFlags flags', '?const hg::tVec2<float> &size'], bound_name='ImGuiColorButton')
 	gen.bind_function('_ImGuiColorEdit', 'bool', ['const char *label', 'hg::Color &color', '?ImGuiColorEditFlags flags'], {'arg_in_out': ['color']}, bound_name='ImGuiColorEdit')
-	gen.bind_function('_ImGuiProgressBar', 'void', ['float fraction', '?const hg::tVector2<float> &size', '?const char *overlay'], bound_name='ImGuiProgressBar')
+	gen.bind_function('_ImGuiProgressBar', 'void', ['float fraction', '?const hg::tVec2<float> &size', '?const char *overlay'], bound_name='ImGuiProgressBar')
 
 	gen.insert_binding_code('''\
-static bool _ImGuiDragiVector2(const char *label, hg::tVector2<int> &v, float v_speed = 1.f, int v_min = 0, int v_max = 0) { return ImGui::DragInt2(label, &v.x, v_speed, v_min, v_max); }
+static bool _ImGuiDragiVec2(const char *label, hg::tVec2<int> &v, float v_speed = 1.f, int v_min = 0, int v_max = 0) { return ImGui::DragInt2(label, &v.x, v_speed, v_min, v_max); }
 
-static bool _ImGuiDragVector2(const char *label, hg::tVector2<float> &v, float v_speed = 1.f, float v_min = 0.f, float v_max = 0.f) { return ImGui::DragFloat2(label, &v.x, v_speed, v_min, v_max); }
-static bool _ImGuiDragVector3(const char *label, hg::Vector3 &v, float v_speed = 1.f, float v_min = 0.f, float v_max = 0.f) { return ImGui::DragFloat3(label, &v.x, v_speed, v_min, v_max); }
-static bool _ImGuiDragVector4(const char *label, hg::Vector4 &v, float v_speed = 1.f, float v_min = 0.f, float v_max = 0.f) { return ImGui::DragFloat4(label, &v.x, v_speed, v_min, v_max); }
+static bool _ImGuiDragVec2(const char *label, hg::tVec2<float> &v, float v_speed = 1.f, float v_min = 0.f, float v_max = 0.f) { return ImGui::DragFloat2(label, &v.x, v_speed, v_min, v_max); }
+static bool _ImGuiDragVec3(const char *label, hg::Vec3 &v, float v_speed = 1.f, float v_min = 0.f, float v_max = 0.f) { return ImGui::DragFloat3(label, &v.x, v_speed, v_min, v_max); }
+static bool _ImGuiDragVec4(const char *label, hg::Vec4 &v, float v_speed = 1.f, float v_min = 0.f, float v_max = 0.f) { return ImGui::DragFloat4(label, &v.x, v_speed, v_min, v_max); }
 ''')
 
 	gen.bind_function_overloads('ImGui::DragFloat', [
@@ -5161,93 +4029,104 @@ static bool _ImGuiDragVector4(const char *label, hg::Vector4 &v, float v_speed =
 		('bool', ['const char *label', 'float *v', 'float v_speed'], {'arg_in_out': ['v']}),
 		('bool', ['const char *label', 'float *v', 'float v_speed', 'float v_min', 'float v_max'], {'arg_in_out': ['v']})
 	], bound_name='ImGuiDragFloat')
-	gen.bind_function_overloads('_ImGuiDragVector2', [
-		('bool', ['const char *label', 'hg::tVector2<float> &v'], {'arg_in_out': ['v']}),
-		('bool', ['const char *label', 'hg::tVector2<float> &v', 'float v_speed'], {'arg_in_out': ['v']}),
-		('bool', ['const char *label', 'hg::tVector2<float> &v', 'float v_speed', 'float v_min', 'float v_max'], {'arg_in_out': ['v']})
-	], bound_name='ImGuiDragVector2')
-	gen.bind_function_overloads('_ImGuiDragVector3', [
-		('bool', ['const char *label', 'hg::Vector3 &v'], {'arg_in_out': ['v']}),
-		('bool', ['const char *label', 'hg::Vector3 &v', 'float v_speed'], {'arg_in_out': ['v']}),
-		('bool', ['const char *label', 'hg::Vector3 &v', 'float v_speed', 'float v_min', 'float v_max'], {'arg_in_out': ['v']})
-	], bound_name='ImGuiDragVector3')
-	gen.bind_function_overloads('_ImGuiDragVector4', [
-		('bool', ['const char *label', 'hg::Vector4 &v'], {'arg_in_out': ['v']}),
-		('bool', ['const char *label', 'hg::Vector4 &v', 'float v_speed'], {'arg_in_out': ['v']}),
-		('bool', ['const char *label', 'hg::Vector4 &v', 'float v_speed', 'float v_min', 'float v_max'], {'arg_in_out': ['v']})
-	], bound_name='ImGuiDragVector4')
+	gen.bind_function_overloads('_ImGuiDragVec2', [
+		('bool', ['const char *label', 'hg::tVec2<float> &v'], {'arg_in_out': ['v']}),
+		('bool', ['const char *label', 'hg::tVec2<float> &v', 'float v_speed'], {'arg_in_out': ['v']}),
+		('bool', ['const char *label', 'hg::tVec2<float> &v', 'float v_speed', 'float v_min', 'float v_max'], {'arg_in_out': ['v']})
+	], bound_name='ImGuiDragVec2')
+	gen.bind_function_overloads('_ImGuiDragVec3', [
+		('bool', ['const char *label', 'hg::Vec3 &v'], {'arg_in_out': ['v']}),
+		('bool', ['const char *label', 'hg::Vec3 &v', 'float v_speed'], {'arg_in_out': ['v']}),
+		('bool', ['const char *label', 'hg::Vec3 &v', 'float v_speed', 'float v_min', 'float v_max'], {'arg_in_out': ['v']})
+	], bound_name='ImGuiDragVec3')
+	gen.bind_function_overloads('_ImGuiDragVec4', [
+		('bool', ['const char *label', 'hg::Vec4 &v'], {'arg_in_out': ['v']}),
+		('bool', ['const char *label', 'hg::Vec4 &v', 'float v_speed'], {'arg_in_out': ['v']}),
+		('bool', ['const char *label', 'hg::Vec4 &v', 'float v_speed', 'float v_min', 'float v_max'], {'arg_in_out': ['v']})
+	], bound_name='ImGuiDragVec4')
 
-	gen.bind_function_overloads('_ImGuiDragiVector2', [
-		('bool', ['const char *label', 'hg::tVector2<int> &v'], {'arg_in_out': ['v']}),
-		('bool', ['const char *label', 'hg::tVector2<int> &v', 'float v_speed'], {'arg_in_out': ['v']}),
-		('bool', ['const char *label', 'hg::tVector2<int> &v', 'float v_speed', 'int v_min', 'int v_max'], {'arg_in_out': ['v']})
-	], bound_name='ImGuiDragIntVector2')
+	gen.bind_function_overloads('_ImGuiDragiVec2', [
+		('bool', ['const char *label', 'hg::tVec2<int> &v'], {'arg_in_out': ['v']}),
+		('bool', ['const char *label', 'hg::tVec2<int> &v', 'float v_speed'], {'arg_in_out': ['v']}),
+		('bool', ['const char *label', 'hg::tVec2<int> &v', 'float v_speed', 'int v_min', 'int v_max'], {'arg_in_out': ['v']})
+	], bound_name='ImGuiDragIntVec2')
 
 	#IMGUI_API bool InputText(const char* label, char* buf, size_t buf_size, ImGuiInputTextFlags flags = 0, ImGuiTextEditCallback callback = NULL, void* user_data = NULL);
-	#IMGUI_API bool InputTextMultiline(const char* label, char* buf, size_t buf_size, const ImVec2& size = ImVec2(0,0), ImGuiInputTextFlags flags = 0, ImGuiTextEditCallback callback = NULL, void* user_data = NULL);
+	#IMGUI_API bool InputTextMultiline(const char* label, char* buf, size_t buf_size, const hg::tVec2<float>& size = hg::tVec2<float>(0,0), ImGuiInputTextFlags flags = 0, ImGuiTextEditCallback callback = NULL, void* user_data = NULL);
 
 	gen.insert_binding_code('''\
-static bool _ImGuiInputiVector2(const char *label, hg::tVector2<int> &v, ImGuiInputTextFlags extra_flags = 0) { return ImGui::InputInt2(label, &v.x, extra_flags); }
+static bool _ImGuiInputiVec2(const char *label, hg::tVec2<int> &v, ImGuiInputTextFlags flags = 0) { return ImGui::InputInt2(label, &v.x, flags); }
 
-static bool _ImGuiInputVector2(const char *label, hg::tVector2<float> &v, int decimal_precision = -1, ImGuiInputTextFlags extra_flags = 0) { return ImGui::InputFloat2(label, &v.x, decimal_precision, extra_flags); }
-static bool _ImGuiInputVector3(const char *label, hg::Vector3 &v, int decimal_precision = -1, ImGuiInputTextFlags extra_flags = 0) { return ImGui::InputFloat3(label, &v.x, decimal_precision, extra_flags); }
-static bool _ImGuiInputVector4(const char *label, hg::Vector4 &v, int decimal_precision = -1, ImGuiInputTextFlags extra_flags = 0) { return ImGui::InputFloat4(label, &v.x, decimal_precision, extra_flags); }
+static bool _ImGuiInputFloat(const char *label, float &v, float step = 0.f, float step_fast = 0.f, int decimal_precision = 4, ImGuiInputTextFlags flags = 0) { return ImGui::InputFloat(label, &v, step, step_fast, hg::format("%.%1f").arg(decimal_precision).c_str(), flags); }
+static bool _ImGuiInputVec2(const char *label, hg::tVec2<float> &v, int decimal_precision = 4, ImGuiInputTextFlags flags = 0) { return ImGui::InputFloat2(label, &v.x, hg::format("%.%1f").arg(decimal_precision).c_str(), flags); }
+static bool _ImGuiInputVec3(const char *label, hg::Vec3 &v, int decimal_precision = 4, ImGuiInputTextFlags flags = 0) { return ImGui::InputFloat3(label, &v.x, hg::format("%.%1f").arg(decimal_precision).c_str(), flags); }
+static bool _ImGuiInputVec4(const char *label, hg::Vec4 &v, int decimal_precision = 4, ImGuiInputTextFlags flags = 0) { return ImGui::InputFloat4(label, &v.x, hg::format("%.%1f").arg(decimal_precision).c_str(), flags); }
 ''')
 
-	gen.bind_function_overloads('ImGui::InputFloat', [
-		('bool', ['const char *label', 'float *v'], {'arg_in_out': ['v']}),
-		('bool', ['const char *label', 'float *v', 'float step', 'float step_fast'], {'arg_in_out': ['v']}),
-		('bool', ['const char *label', 'float *v', 'float step', 'float step_fast', 'int decimal_precision'], {'arg_in_out': ['v']}),
-		('bool', ['const char *label', 'float *v', 'float step', 'float step_fast', 'int decimal_precision', 'ImGuiInputTextFlags extra_flags'], {'arg_in_out': ['v']})
+	gen.bind_function_overloads('ImGui::InputInt', [
+		('bool', ['const char *label', 'int *v'], {'arg_in_out': ['v']}),
+		('bool', ['const char *label', 'int *v', 'int step', 'int step_fast', '?ImGuiInputTextFlags flags'], {'arg_in_out': ['v']})
+	], bound_name='ImGuiInputInt')
+	gen.bind_function_overloads('_ImGuiInputFloat', [
+		('bool', ['const char *label', 'float &v'], {'arg_in_out': ['v']}),
+		('bool', ['const char *label', 'float &v', 'float step', 'float step_fast', '?int decimal_precision', '?ImGuiInputTextFlags flags'], {'arg_in_out': ['v']})
 	], bound_name='ImGuiInputFloat')
-	gen.bind_function_overloads('_ImGuiInputVector2', [
-		('bool', ['const char *label', 'hg::tVector2<float> &v'], {'arg_in_out': ['v']}),
-		('bool', ['const char *label', 'hg::tVector2<float> &v', 'int decimal_precision'], {'arg_in_out': ['v']}),
-		('bool', ['const char *label', 'hg::tVector2<float> &v', 'int decimal_precision', 'ImGuiInputTextFlags extra_flags'], {'arg_in_out': ['v']})
-	], bound_name='ImGuiInputVector2')
-	gen.bind_function_overloads('_ImGuiInputVector3', [
-		('bool', ['const char *label', 'hg::Vector3 &v'], {'arg_in_out': ['v']}),
-		('bool', ['const char *label', 'hg::Vector3 &v', 'int decimal_precision'], {'arg_in_out': ['v']}),
-		('bool', ['const char *label', 'hg::Vector3 &v', 'int decimal_precision', 'ImGuiInputTextFlags extra_flags'], {'arg_in_out': ['v']})
-	], bound_name='ImGuiInputVector3')
-	gen.bind_function_overloads('_ImGuiInputVector4', [
-		('bool', ['const char *label', 'hg::Vector4 &v'], {'arg_in_out': ['v']}),
-		('bool', ['const char *label', 'hg::Vector4 &v', 'int decimal_precision'], {'arg_in_out': ['v']}),
-		('bool', ['const char *label', 'hg::Vector4 &v', 'int decimal_precision', 'ImGuiInputTextFlags extra_flags'], {'arg_in_out': ['v']})
-	], bound_name='ImGuiInputVector4')
+	gen.bind_function_overloads('_ImGuiInputVec2', [
+		('bool', ['const char *label', 'hg::tVec2<float> &v', '?int decimal_precision', '?ImGuiInputTextFlags flags'], {'arg_in_out': ['v']})
+	], bound_name='ImGuiInputVec2')
+	gen.bind_function_overloads('_ImGuiInputVec3', [
+		('bool', ['const char *label', 'hg::Vec3 &v', '?int decimal_precision', '?ImGuiInputTextFlags flags'], {'arg_in_out': ['v']})
+	], bound_name='ImGuiInputVec3')
+	gen.bind_function_overloads('_ImGuiInputVec4', [
+		('bool', ['const char *label', 'hg::Vec4 &v', '?int decimal_precision', '?ImGuiInputTextFlags flags'], {'arg_in_out': ['v']})
+	], bound_name='ImGuiInputVec4')
+	gen.bind_function_overloads('_ImGuiInputiVec2', [
+		('bool', ['const char *label', 'hg::tVec2<int> &v', '?ImGuiInputTextFlags flags'], {'arg_in_out': ['v']})
+	], bound_name='ImGuiInputIntVec2')
 
 	gen.insert_binding_code('''\
-static bool _ImGuiSliderFloat(const char *label, float &v, float v_min, float v_max) { return ImGui::SliderFloat(label, &v, v_min, v_max); }
+static bool _ImGuiSliderInt(const char *label, int &v, int v_min, int v_max, const char *format="%.0f") { return ImGui::SliderInt(label, &v, v_min, v_max, format); }
+static bool _ImGuiSlideriVec2(const char *label, hg::tVec2<int> &v, int v_min, int v_max, const char *format="%.0f") { return ImGui::SliderInt2(label, &v.x, v_min, v_max, format); }
 
-static bool _ImGuiSlideriVector2(const char *label, hg::tVector2<int> &v, int v_min, int v_max) { return ImGui::SliderInt2(label, &v.x, v_min, v_max); }
-
-static bool _ImGuiSliderVector2(const char *label, hg::tVector2<float> &v, float v_min, float v_max) { return ImGui::SliderFloat2(label, &v.x, v_min, v_max); }
-static bool _ImGuiSliderVector3(const char *label, hg::Vector3 &v, float v_min, float v_max) { return ImGui::SliderFloat3(label, &v.x, v_min, v_max); }
-static bool _ImGuiSliderVector4(const char *label, hg::Vector4 &v, float v_min, float v_max) { return ImGui::SliderFloat4(label, &v.x, v_min, v_max); }
+static bool _ImGuiSliderFloat(const char *label, float &v, float v_min, float v_max, const char *format="%.3f") { return ImGui::SliderFloat(label, &v, v_min, v_max, format); }
+static bool _ImGuiSliderVec2(const char *label, hg::tVec2<float> &v, float v_min, float v_max, const char *format="%.3f") { return ImGui::SliderFloat2(label, &v.x, v_min, v_max, format); }
+static bool _ImGuiSliderVec3(const char *label, hg::Vec3 &v, float v_min, float v_max, const char *format="%.3f") { return ImGui::SliderFloat3(label, &v.x, v_min, v_max, format); }
+static bool _ImGuiSliderVec4(const char *label, hg::Vec4 &v, float v_min, float v_max, const char *format="%.3f") { return ImGui::SliderFloat4(label, &v.x, v_min, v_max, format); }
 ''')
-	
-	gen.bind_function('_ImGuiSliderFloat', 'bool', ['const char *label', 'float &v', 'float v_min', 'float v_max'], {'arg_in_out': ['v']}, 'ImGuiSliderFloat')
 
-	gen.bind_function('_ImGuiSlideriVector2', 'bool', ['const char *label', 'hg::tVector2<int> &v', 'int v_min', 'int v_max'], {'arg_in_out': ['v']}, 'ImGuiSliderIntVector2')
+	gen.bind_function_overloads('_ImGuiSliderInt', [
+		('bool', ['const char *label', 'int &v', 'int v_min', 'int v_max', '?const char *format'], {'arg_in_out': ['v']})
+	], bound_name='ImGuiSliderInt')
+	gen.bind_function_overloads('_ImGuiSlideriVec2', [
+		('bool', ['const char *label', 'hg::tVec2<int> &v', 'int v_min', 'int v_max', '?const char *format'], {'arg_in_out': ['v']})
+	], bound_name='ImGuiSliderIntVec2')
 
-	gen.bind_function('_ImGuiSliderVector2', 'bool', ['const char *label', 'hg::tVector2<float> &v', 'float v_min', 'float v_max'], {'arg_in_out': ['v']}, 'ImGuiSliderVector2')
-	gen.bind_function('_ImGuiSliderVector3', 'bool', ['const char *label', 'hg::Vector3 &v', 'float v_min', 'float v_max'], {'arg_in_out': ['v']}, 'ImGuiSliderVector3')
-	gen.bind_function('_ImGuiSliderVector4', 'bool', ['const char *label', 'hg::Vector4 &v', 'float v_min', 'float v_max'], {'arg_in_out': ['v']}, 'ImGuiSliderVector4')
+	gen.bind_function_overloads('_ImGuiSliderFloat', [
+		('bool', ['const char *label', 'float &v', 'float v_min', 'float v_max', '?const char *format'], {'arg_in_out': ['v']})
+	], bound_name='ImGuiSliderFloat')	
+	gen.bind_function_overloads('_ImGuiSliderVec2', [
+        ('bool', ['const char *label', 'hg::tVec2<float> &v', 'float v_min', 'float v_max', '?const char *format'], {'arg_in_out': ['v']}),
+    ], bound_name='ImGuiSliderVec2')
+	gen.bind_function_overloads('_ImGuiSliderVec3', [
+        ('bool', ['const char *label', 'hg::Vec3 &v', 'float v_min', 'float v_max', '?const char *format'], {'arg_in_out': ['v']}),
+    ], bound_name='ImGuiSliderVec3')
+	gen.bind_function_overloads('_ImGuiSliderVec4', [
+        ('bool', ['const char *label', 'hg::Vec4 &v', 'float v_min', 'float v_max', '?const char *format'], {'arg_in_out': ['v']}),
+    ], bound_name='ImGuiSliderVec4')
 
 	gen.bind_function('ImGui::TreeNode', 'bool', ['const char *label'], bound_name='ImGuiTreeNode')
 	gen.bind_function('ImGui::TreeNodeEx', 'bool', ['const char *label', 'ImGuiTreeNodeFlags flags'], bound_name='ImGuiTreeNodeEx')
 	gen.bind_function('ImGui::TreePush', 'void', ['const char *id'], bound_name='ImGuiTreePush')
 	gen.bind_function('ImGui::TreePop', 'void', [], bound_name='ImGuiTreePop')
-	gen.bind_function('ImGui::TreeAdvanceToLabelPos', 'void', [], bound_name='ImGuiTreeAdvanceToLabelPos')
 	gen.bind_function('ImGui::GetTreeNodeToLabelSpacing', 'float', [], bound_name='ImGuiGetTreeNodeToLabelSpacing')
-	gen.bind_function('ImGui::SetNextTreeNodeOpen', 'void', ['bool is_open', '?ImGuiCond condition'], bound_name='ImGuiSetNextTreeNodeOpen')
+	gen.bind_function('ImGui::SetNextItemOpen', 'void', ['bool is_open', '?ImGuiCond condition'], bound_name='ImGuiSetNextItemOpen')
 	gen.bind_function_overloads('ImGui::CollapsingHeader', [
 		('bool', ['const char *label', '?ImGuiTreeNodeFlags flags'], []),
 		('bool', ['const char *label', 'bool *p_open', '?ImGuiTreeNodeFlags flags'], {'arg_in_out': ['p_open']})
 	], bound_name='ImGuiCollapsingHeader')
 
 	gen.insert_binding_code('''\
-static bool _ImGuiSelectable(const char *label, bool selected = false, ImGuiSelectableFlags flags = 0, const hg::tVector2<float> &size = hg::tVector2<float>(0.f, 0.f)) { return ImGui::Selectable(label, selected, flags, ImVec2(size)); }
+static bool _ImGuiSelectable(const char *label, bool selected = false, ImGuiSelectableFlags flags = 0, const hg::tVec2<float> &size = hg::tVec2<float>(0.f, 0.f)) { return ImGui::Selectable(label, selected, flags, hg::tVec2<float>(size)); }
 
 static bool _ImGuiListBox(const char *label, int *current_item, const std::vector<std::string> &items, int height_in_items = -1) {
 	auto cb = [](void *data, int idx, const char **out) -> bool {
@@ -5261,8 +4140,11 @@ static bool _ImGuiListBox(const char *label, int *current_item, const std::vecto
 }
 ''')
 
-	gen.bind_function('_ImGuiSelectable', 'bool', ['const char *label', '?bool selected', '?ImGuiSelectableFlags flags', '?const hg::tVector2<float> &size'], bound_name='ImGuiSelectable')
-	gen.bind_function('_ImGuiListBox', 'bool', ['const char *label', 'int *current_item', 'const std::vector<std::string> &items', '?int height_in_items'], bound_name='ImGuiListBox')
+	gen.bind_function('_ImGuiSelectable', 'bool', ['const char *label', '?bool selected', '?ImGuiSelectableFlags flags', '?const hg::tVec2<float> &size'], bound_name='ImGuiSelectable')
+	gen.bind_function_overloads('_ImGuiListBox', expand_std_vector_proto(gen, [
+		('bool', ['const char *label', 'int *current_item', 'const std::vector<std::string> &items'], {'arg_in_out': ['current_item']}),
+		('bool', ['const char *label', 'int *current_item', 'const std::vector<std::string> &items', 'int height_in_items'], {'arg_in_out': ['current_item']})
+	]), bound_name='ImGuiListBox')
 
 	gen.bind_function('ImGui::SetTooltip', 'void', ['const char *text'], bound_name='ImGuiSetTooltip')
 	gen.bind_function('ImGui::BeginTooltip', 'void', [], bound_name='ImGuiBeginTooltip')
@@ -5278,29 +4160,28 @@ static bool _ImGuiListBox(const char *label, int *current_item, const std::vecto
 
 	gen.bind_function('ImGui::OpenPopup', 'void', ['const char *id'], bound_name='ImGuiOpenPopup')
 	gen.bind_function('ImGui::BeginPopup', 'bool', ['const char *id'], bound_name='ImGuiBeginPopup')
-	gen.bind_function('ImGui::BeginPopupModal', 'bool', ['const char *name', '?bool *open', '?ImGuiWindowFlags extra_flags'], bound_name='ImGuiBeginPopupModal')
+	gen.bind_function('ImGui::BeginPopupModal', 'bool', ['const char *name', '?bool *open', '?ImGuiWindowFlags flags'], bound_name='ImGuiBeginPopupModal')
 	gen.bind_function('ImGui::BeginPopupContextItem', 'bool', ['const char *id', '?int mouse_button'], bound_name='ImGuiBeginPopupContextItem')
-	gen.bind_function('ImGui::BeginPopupContextWindow', 'bool', ['?const char *id', '?int mouse_button', '?bool also_over_items'], bound_name='ImGuiBeginPopupContextWindow')
+	gen.bind_function('ImGui::BeginPopupContextWindow', 'bool', ['?const char *id', '?ImGuiPopupFlags flags'], bound_name='ImGuiBeginPopupContextWindow')
 	gen.bind_function('ImGui::BeginPopupContextVoid', 'bool', ['?const char *id', '?int mouse_button'], bound_name='ImGuiBeginPopupContextVoid')
 	gen.bind_function('ImGui::EndPopup', 'void', [], bound_name='ImGuiEndPopup')
 	gen.bind_function('ImGui::CloseCurrentPopup', 'void', [], bound_name='ImGuiCloseCurrentPopup')
 
 	gen.insert_binding_code('''\
-static void _ImGuiPushClipRect(const hg::tVector2<float> &clip_rect_min, const hg::tVector2<float> &clip_rect_max, bool intersect_with_current_clip_rect) {
-	ImGui::PushClipRect(ImVec2(clip_rect_min), ImVec2(clip_rect_max), intersect_with_current_clip_rect);
+static void _ImGuiPushClipRect(const hg::tVec2<float> &clip_rect_min, const hg::tVec2<float> &clip_rect_max, bool intersect_with_current_clip_rect) {
+	ImGui::PushClipRect(hg::tVec2<float>(clip_rect_min), hg::tVec2<float>(clip_rect_max), intersect_with_current_clip_rect);
 }
 
-static hg::tVector2<float> _ImGuiGetItemRectMin() { return hg::tVector2<float>(ImGui::GetItemRectMin()); }
-static hg::tVector2<float> _ImGuiGetItemRectMax() { return hg::tVector2<float>(ImGui::GetItemRectMax()); }
-static hg::tVector2<float> _ImGuiGetItemRectSize() { return hg::tVector2<float>(ImGui::GetItemRectSize()); }
+static hg::tVec2<float> _ImGuiGetItemRectMin() { return hg::tVec2<float>(ImGui::GetItemRectMin()); }
+static hg::tVec2<float> _ImGuiGetItemRectMax() { return hg::tVec2<float>(ImGui::GetItemRectMax()); }
+static hg::tVec2<float> _ImGuiGetItemRectSize() { return hg::tVec2<float>(ImGui::GetItemRectSize()); }
 
-static bool _ImGuiIsRectVisible(const hg::tVector2<float> &size) { return ImGui::IsRectVisible(size); }
-static bool _ImGuiIsRectVisible(const hg::tVector2<float> &min, const hg::tVector2<float> &max) { return ImGui::IsRectVisible(min, max); }
+static bool _ImGuiIsRectVisible(const hg::tVec2<float> &size) { return ImGui::IsRectVisible(size); }
+static bool _ImGuiIsRectVisible(const hg::tVec2<float> &min, const hg::tVec2<float> &max) { return ImGui::IsRectVisible(min, max); }
 
-static hg::Vector2 _ImGuiCalcItemRectClosestPoint(const hg::Vector2 &pos, bool on_edge = false, float outward = 0.f) { return ImGui::CalcItemRectClosestPoint(pos, on_edge, outward); }
-static hg::Vector2 _ImGuiCalcTextSize(const char *text, bool hide_text_after_double_dash = false, float wrap_width = -1.f) { return ImGui::CalcTextSize(text, NULL, hide_text_after_double_dash, wrap_width); }
+static hg::Vec2 _ImGuiCalcTextSize(const char *text, bool hide_text_after_double_dash = false, float wrap_width = -1.f) { return ImGui::CalcTextSize(text, NULL, hide_text_after_double_dash, wrap_width); }
 ''')
-	gen.bind_function('_ImGuiPushClipRect', 'void', ['const hg::tVector2<float> &clip_rect_min', 'const hg::tVector2<float> &clip_rect_max', 'bool intersect_with_current_clip_rect'], bound_name='ImGuiPushClipRect')
+	gen.bind_function('_ImGuiPushClipRect', 'void', ['const hg::tVec2<float> &clip_rect_min', 'const hg::tVec2<float> &clip_rect_max', 'bool intersect_with_current_clip_rect'], bound_name='ImGuiPushClipRect')
 	gen.bind_function('ImGui::PopClipRect', 'void', [], bound_name='ImGuiPopClipRect')
 
 	gen.bind_function('ImGui::IsItemHovered', 'bool', ['?ImGuiHoveredFlags flags'], bound_name='ImGuiIsItemHovered')
@@ -5309,23 +4190,23 @@ static hg::Vector2 _ImGuiCalcTextSize(const char *text, bool hide_text_after_dou
 	gen.bind_function('ImGui::IsItemVisible', 'bool', [], bound_name='ImGuiIsItemVisible')
 	gen.bind_function('ImGui::IsAnyItemHovered', 'bool', [], bound_name='ImGuiIsAnyItemHovered')
 	gen.bind_function('ImGui::IsAnyItemActive', 'bool', [], bound_name='ImGuiIsAnyItemActive')
-	gen.bind_function('_ImGuiGetItemRectMin', 'hg::tVector2<float>', [], bound_name='ImGuiGetItemRectMin')
-	gen.bind_function('_ImGuiGetItemRectMax', 'hg::tVector2<float>', [], bound_name='ImGuiGetItemRectMax')
-	gen.bind_function('_ImGuiGetItemRectSize', 'hg::tVector2<float>', [], bound_name='ImGuiGetItemRectSize')
+	gen.bind_function('_ImGuiGetItemRectMin', 'hg::tVec2<float>', [], bound_name='ImGuiGetItemRectMin')
+	gen.bind_function('_ImGuiGetItemRectMax', 'hg::tVec2<float>', [], bound_name='ImGuiGetItemRectMax')
+	gen.bind_function('_ImGuiGetItemRectSize', 'hg::tVec2<float>', [], bound_name='ImGuiGetItemRectSize')
 	gen.bind_function('ImGui::SetItemAllowOverlap', 'void', [], bound_name='ImGuiSetItemAllowOverlap')
+	gen.bind_function('ImGui::SetItemDefaultFocus', 'void', [], bound_name='ImGuiSetItemDefaultFocus')
 	gen.bind_function('ImGui::IsWindowHovered', 'bool', ['?ImGuiHoveredFlags flags'], bound_name='ImGuiIsWindowHovered')
 	gen.bind_function('ImGui::IsWindowFocused', 'bool', ['?ImGuiFocusedFlags flags'], bound_name='ImGuiIsWindowFocused')
 	gen.bind_function_overloads('ImGui::IsRectVisible', [
-		('bool', ['const hg::tVector2<float> &size'], []),
-		('bool', ['const hg::tVector2<float> &rect_min', 'const hg::tVector2<float> &rect_max'], [])
+		('bool', ['const hg::tVec2<float> &size'], []),
+		('bool', ['const hg::tVec2<float> &rect_min', 'const hg::tVec2<float> &rect_max'], [])
 	], bound_name='ImGuiIsRectVisible')
 	gen.bind_function('ImGui::GetTime', 'float', [], bound_name='ImGuiGetTime')
 	gen.bind_function('ImGui::GetFrameCount', 'int', [], bound_name='ImGuiGetFrameCount')
 	#IMGUI_API const char*   GetStyleColName(ImGuiCol idx);
-	gen.bind_function('_ImGuiCalcItemRectClosestPoint', 'hg::tVector2<float>', ['const hg::tVector2<float> &pos', '?bool on_edge', '?float outward'], bound_name='ImGuiCalcItemRectClosestPoint')
-	gen.bind_function('_ImGuiCalcTextSize', 'hg::tVector2<float>', ['const char *text', '?bool hide_text_after_double_dash', '?float wrap_width'], bound_name='ImGuiCalcTextSize')
+	gen.bind_function('_ImGuiCalcTextSize', 'hg::tVec2<float>', ['const char *text', '?bool hide_text_after_double_dash', '?float wrap_width'], bound_name='ImGuiCalcTextSize')
 
-	#IMGUI_API bool          BeginChildFrame(ImGuiID id, const ImVec2& size, ImGuiWindowFlags extra_flags = 0);	// helper to create a child window / scrolling region that looks like a normal widget frame
+	#IMGUI_API bool          BeginChildFrame(ImGuiID id, const hg::tVec2<float>& size, ImGuiWindowFlags flags = 0);	// helper to create a child window / scrolling region that looks like a normal widget frame
 	#IMGUI_API void          EndChildFrame();
 
 	#gen.bind_function('ImGui::GetKeyIndex', 'int', [], bound_name='ImGuiGetKeyIndex')
@@ -5337,13 +4218,13 @@ static hg::Vector2 _ImGuiCalcTextSize(const char *text, bool hide_text_after_dou
 	gen.bind_function('ImGui::IsMouseDoubleClicked', 'bool', ['int button'], bound_name='ImGuiIsMouseDoubleClicked')
 	gen.bind_function('ImGui::IsMouseReleased', 'bool', ['int button'], bound_name='ImGuiIsMouseReleased')
 	#gen.bind_function('ImGui::IsWindowRectHovered', 'bool', [], bound_name='ImGuiIsWindowRectHovered')
-	gen.bind_function('ImGui::IsAnyWindowHovered', 'bool', [], bound_name='ImGuiIsAnyWindowHovered')
-	gen.bind_function('ImGui::IsMouseHoveringRect', 'bool', ['const hg::tVector2<float> &rect_min', 'const hg::tVector2<float> &rect_max', '?bool clip'], bound_name='ImGuiIsMouseHoveringRect')
-	gen.bind_function('ImGui::IsMouseDragging', 'bool', ['?int button', '?float lock_threshold'], bound_name='ImGuiIsMouseDragging')
-	gen.bind_function('ImGui::GetMousePos', 'hg::tVector2<float>', [], bound_name='ImGuiGetMousePos')
-	gen.bind_function('ImGui::GetMousePosOnOpeningCurrentPopup', 'hg::tVector2<float>', [], bound_name='ImGuiGetMousePosOnOpeningCurrentPopup')
-	gen.bind_function('ImGui::GetMouseDragDelta', 'hg::tVector2<float>', ['?int button', '?float lock_threshold'], bound_name='ImGuiGetMouseDragDelta')
-	gen.bind_function('ImGui::ResetMouseDragDelta', 'void', ['?int button'], bound_name='ImGuiResetMouseDragDelta')
+	#gen.bind_function('ImGui::IsAnyWindowHovered', 'bool', [], bound_name='ImGuiIsAnyWindowHovered')
+	gen.bind_function('ImGui::IsMouseHoveringRect', 'bool', ['const hg::tVec2<float> &rect_min', 'const hg::tVec2<float> &rect_max', '?bool clip'], bound_name='ImGuiIsMouseHoveringRect')
+	gen.bind_function('ImGui::IsMouseDragging', 'bool', ['ImGuiMouseButton button', '?float lock_threshold'], bound_name='ImGuiIsMouseDragging')
+	gen.bind_function('ImGui::GetMousePos', 'hg::tVec2<float>', [], bound_name='ImGuiGetMousePos')
+	gen.bind_function('ImGui::GetMousePosOnOpeningCurrentPopup', 'hg::tVec2<float>', [], bound_name='ImGuiGetMousePosOnOpeningCurrentPopup')
+	gen.bind_function('ImGui::GetMouseDragDelta', 'hg::tVec2<float>', ['?ImGuiMouseButton button', '?float lock_threshold'], bound_name='ImGuiGetMouseDragDelta')
+	gen.bind_function('ImGui::ResetMouseDragDelta', 'void', ['?ImGuiMouseButton button'], bound_name='ImGuiResetMouseDragDelta')
 	#IMGUI_API ImGuiMouseCursor GetMouseCursor();                                                // get desired cursor type, reset in ImGui::NewFrame(), this updated during the frame. valid before Render(). If you use software rendering by setting io.MouseDrawCursor ImGui will render those for you
 	#IMGUI_API void          SetMouseCursor(ImGuiMouseCursor type);                              // set desired cursor type
 	gen.bind_function('ImGui::CaptureKeyboardFromApp', 'void', ['bool capture'], bound_name='ImGuiCaptureKeyboardFromApp')
@@ -5352,103 +4233,17 @@ static hg::Vector2 _ImGuiCalcTextSize(const char *text, bool hide_text_after_dou
 	gen.insert_binding_code('static bool _ImGuiWantCaptureMouse() { return ImGui::GetIO().WantCaptureMouse; }')    
 	gen.bind_function('_ImGuiWantCaptureMouse', 'bool', [], bound_name='ImGuiWantCaptureMouse')
 	
-	gen.bind_function('hg::ImGuiSetOutputSurface', 'void', ['const hg::Surface &surface'], bound_name='ImGuiSetOutputSurface')
+	gen.insert_binding_code('static void _ImGuiMouseDrawCursor(const bool &draw_cursor) { ImGui::GetIO().MouseDrawCursor = draw_cursor; }')    
+	gen.bind_function('_ImGuiMouseDrawCursor', 'void', ['const bool &draw_cursor'], bound_name='ImGuiMouseDrawCursor')
 
-	gen.add_include('engine/imgui_renderer_hook.h')
-
-	gen.bind_function('hg::ImGuiLock', 'void', [], {'exception': 'double lock from the same thread, check your program for a missing unlock'})
-	gen.bind_function('hg::ImGuiUnlock', 'void', [])
-
-
-def bind_lua_task_system(gen):
-	gen.add_include('engine/lua_task_system.h')
-
-	gen.bind_named_enum('hg::LuaTaskState', ['LuaTaskPending', 'LuaTaskRunning', 'LuaTaskComplete', 'LuaTaskFailed'])
-
-	#
-	lua_task_hnd = gen.begin_class('hg::LuaTaskHandle', bound_name='LuaTaskHandle_nobind', noncopyable=True, nobind=True)
-	gen.end_class(lua_task_hnd)
-
-	shared_lua_task_hnd = gen.begin_class('std::shared_ptr<hg::LuaTaskHandle>', bound_name='LuaTaskHandle', features={'proxy': lib.stl.SharedPtrProxyFeature(lua_task_hnd)})
-
-	gen.bind_method(shared_lua_task_hnd, 'GetState', 'hg::LuaTaskState', [], ['proxy'])
-	gen.bind_method(shared_lua_task_hnd, 'IsCompleteOrFailed', 'bool', [], ['proxy'])
-
-	gen.bind_method(shared_lua_task_hnd, 'GetResults', 'std::vector<hg::TypeValue>', [], ['proxy'])
-
-	gen.end_class(shared_lua_task_hnd)
-
-	#
-	lua_task = gen.begin_class('hg::LuaTask', bound_name='LuaTask_nobind', noncopyable=True, nobind=True)
-	gen.end_class(lua_task)
-
-	shared_lua_task = gen.begin_class('std::shared_ptr<hg::LuaTask>', bound_name='LuaTask', features={'proxy': lib.stl.SharedPtrProxyFeature(lua_task)})
-	gen.end_class(shared_lua_task)
-
-	#
-	lua_ts = gen.begin_class('hg::LuaTaskSystem', bound_name='LuaTaskSystem_nobind', noncopyable=True, nobind=True)
-	gen.end_class(lua_ts)
-
-	shared_lua_ts = gen.begin_class('std::shared_ptr<hg::LuaTaskSystem>', bound_name='LuaTaskSystem', features={'proxy': lib.stl.SharedPtrProxyFeature(lua_ts)})
-
-	gen.bind_constructor(shared_lua_ts, [], ['proxy'])
-
-	gen.bind_method(shared_lua_ts, 'Start', 'bool', ['?size_t worker_count'], ['proxy'])
-	gen.bind_method(shared_lua_ts, 'Stop', 'void', [], ['proxy'])
-
-	gen.bind_method(shared_lua_ts, 'PrepareTask', 'std::shared_ptr<hg::LuaTask>', ['const std::string &source', 'const std::string &name'], ['proxy'])
-	gen.bind_method(shared_lua_ts, 'RunTask', 'std::shared_ptr<hg::LuaTaskHandle>', ['std::shared_ptr<hg::LuaTask> task', 'const std::vector<hg::TypeValue> &args'], ['proxy'])
-
-	gen.bind_method(shared_lua_ts, 'GetWorkerCount', 'size_t', [], ['proxy'])
-
-	gen.end_class(shared_lua_ts)
-
-
-def bind_fast_noise(gen):
-	gen.add_include('FastNoise.h')
-
-	gen.bind_named_enum('FastNoise::NoiseType', ['Value', 'ValueFractal', 'Gradient', 'GradientFractal', 'Simplex', 'SimplexFractal', 'Cellular', 'WhiteNoise'], prefix='NoiseType')
-	gen.bind_named_enum('FastNoise::Interp', ['InterpLinear', 'InterpHermite', 'InterpQuintic'], prefix='Noise')
-	gen.bind_named_enum('FastNoise::FractalType', ['FBM', 'Billow', 'RigidMulti'], prefix='NoiseFractalType')
-	gen.bind_named_enum('FastNoise::CellularDistanceFunction', ['Euclidean', 'Manhattan', 'Natural'], prefix='NoiseCellularDistance')
-	gen.bind_named_enum('FastNoise::CellularReturnType', ['CellValue', 'NoiseLookup', 'Distance', 'Distance2', 'Distance2Add', 'Distance2Sub', 'Distance2Mul', 'Distance2Div'], prefix='NoiseCellularReturn')
-
-	noise = gen.begin_class('FastNoise')
-
-	gen.bind_constructor(noise, ['?int seed'])
-
-	gen.bind_method(noise, 'SetSeed', 'void', ['int seed'])
-	gen.bind_method(noise, 'GetSeed', 'int', [])
-	
-	gen.bind_method(noise, 'SetFrequency', 'void', ['float fq'])
-	gen.bind_method(noise, 'SetInterp', 'void', ['FastNoise::Interp interp'])
-	gen.bind_method(noise, 'SetNoiseType', 'void', ['FastNoise::NoiseType type'])
-
-	gen.bind_method(noise, 'SetFractalOctaves', 'void', ['unsigned int octaves'])
-	gen.bind_method(noise, 'SetFractalLacunarity', 'void', ['float lacunarity'])
-	gen.bind_method(noise, 'SetFractalGain', 'void', ['float gain'])
-	gen.bind_method(noise, 'SetFractalType', 'void', ['FastNoise::FractalType type'])
-
-	gen.bind_method(noise, 'SetCellularDistanceFunction', 'void', ['FastNoise::CellularDistanceFunction function'])
-	gen.bind_method(noise, 'SetCellularReturnType', 'void', ['FastNoise::CellularReturnType type'])
-
-	gen.bind_method(noise, 'GetValue', 'float', ['float x', 'float y', '?float z'])
-	gen.bind_method(noise, 'GetValueFractal', 'float', ['float x', 'float y', '?float z'])
-
-	gen.bind_method(noise, 'GetGradient', 'float', ['float x', 'float y', '?float z'])
-	gen.bind_method(noise, 'GetGradientFractal', 'float', ['float x', 'float y', '?float z'])
-
-	gen.bind_method(noise, 'GetSimplex', 'float', ['float x', 'float y', '?float z', '?float w'])
-	gen.bind_method(noise, 'GetSimplexFractal', 'float', ['float x', 'float y', '?float z'])
-
-	gen.bind_method(noise, 'GetCellular', 'float', ['float x', 'float y', '?float z'])
-
-	gen.bind_method(noise, 'GetWhiteNoise', 'float', ['float x', 'float y', '?float z', '?float w'])
-	gen.bind_method(noise, 'GetWhiteNoiseInt', 'float', ['int x', 'int y', '?int z', '?int w'])
-
-	gen.bind_method(noise, 'GetNoise', 'float', ['float x', 'float y', '?float z'])
-
-	gen.end_class(noise)
+	gen.bind_function('hg::ImGuiInit', 'void', ['float font_size', 'bgfx::ProgramHandle imgui_program', 'bgfx::ProgramHandle imgui_image_program'])
+	gen.bind_function('hg::ImGuiInitContext', 'hg::DearImguiContext *', ['float font_size', 'bgfx::ProgramHandle imgui_program', 'bgfx::ProgramHandle imgui_image_program'])
+	gen.bind_function('hg::ImGuiShutdown', 'void', [])
+	gen.bind_function('hg::ImGuiBeginFrame', 'void', ['int width', 'int height', 'hg::time_ns dt_clock', 'const hg::MouseState &mouse', 'const hg::KeyboardState &keyboard'])
+	gen.bind_function('hg::ImGuiBeginFrame', 'void', ['hg::DearImguiContext &ctx', 'int width', 'int height', 'hg::time_ns dt_clock', 'const hg::MouseState &mouse', 'const hg::KeyboardState &keyboard'])
+	gen.bind_function('hg::ImGuiEndFrame', 'void', ['const hg::DearImguiContext& ctx', '?bgfx::ViewId view_id'])
+	gen.bind_function('hg::ImGuiEndFrame', 'void', ['?bgfx::ViewId view_id'])
+	gen.bind_function('hg::ImGuiClearInputBuffer', 'void', [])
 
 
 def bind_extras(gen):
@@ -5459,6 +4254,225 @@ def bind_extras(gen):
 	gen.bind_function('SleepThisThread', 'void', ['hg::time_ns duration'], bound_name='Sleep')
 
 
+def bind_audio(gen):
+	gen.add_include('engine/audio_stream_interface.h')
+	
+	gen.bind_named_enum('AudioFrameFormat', ['AFF_LPCM_44KHZ_S16_Mono', 'AFF_LPCM_48KHZ_S16_Mono', 'AFF_LPCM_44KHZ_S16_Stereo', 'AFF_LPCM_48KHZ_S16_Stereo'])
+
+	gen.typedef('AudioStreamRef', 'int')
+	gen.bind_variable('const AudioStreamRef InvalidAudioStreamRef')
+
+	gen.add_include('engine/audio.h')
+	
+	gen.bind_function('hg::AudioInit', 'bool', [])
+	gen.bind_function('hg::AudioShutdown', 'void', [])
+
+	gen.typedef('hg::SoundRef', 'int')
+	gen.bind_constants('int', [("SND_Invalid", "hg::InvalidSoundRef")], 'SoundRef')
+	gen.typedef('hg::SourceRef', 'int')
+	gen.bind_constants('int', [("SRC_Invalid", "hg::InvalidSourceRef")], 'SourceRef')
+
+	gen.bind_function('hg::LoadWAVSoundFile', 'hg::SoundRef', ['const char *path'], {'rval_constants_group': 'SoundRef'})
+	gen.bind_function('hg::LoadWAVSoundAsset', 'hg::SoundRef', ['const char *name'], {'rval_constants_group': 'SoundRef'})
+
+	gen.bind_function('hg::LoadOGGSoundFile', 'hg::SoundRef', ['const char *path'], {'rval_constants_group': 'SoundRef'})
+	gen.bind_function('hg::LoadOGGSoundAsset', 'hg::SoundRef', ['const char *name'], {'rval_constants_group': 'SoundRef'})
+
+	gen.bind_function('hg::UnloadSound', 'void', ['hg::SoundRef snd'], {'constants_group': {'snd': 'SoundRef'}})
+
+
+	gen.bind_function('hg::SetListener', 'void', ['const hg::Mat4 &world', 'const hg::Vec3 &velocity'])
+
+	gen.bind_named_enum('hg::SourceRepeat', ['SR_Once', 'SR_Loop'])
+
+	gen.insert_binding_code('''
+static hg::StereoSourceState *__ConstructStereoSourceState(float volume = 1.f, hg::SourceRepeat repeat = hg::SR_Once, float panning = 0.f) {
+	return new hg::StereoSourceState{volume, repeat, panning};
+}
+
+static hg::SpatializedSourceState *__ConstructSpatializedSourceState(hg::Mat4 mtx = hg::Mat4::Identity, float volume = 1.f, hg::SourceRepeat repeat = hg::SR_Once, const hg::Vec3 &vel = {}) {
+	return new hg::SpatializedSourceState{mtx, volume, repeat, vel};
+}
+''')
+
+	stereo_source_state = gen.begin_class('hg::StereoSourceState')
+	gen.bind_members(stereo_source_state, ['float volume', 'hg::SourceRepeat repeat', 'float panning'])
+	gen.bind_constructor(stereo_source_state, ['?float volume', '?hg::SourceRepeat repeat', '?float panning'], {'route': route_lambda('__ConstructStereoSourceState')})
+	gen.end_class(stereo_source_state)
+
+	spatialized_source_state = gen.begin_class('hg::SpatializedSourceState')
+	gen.bind_members(spatialized_source_state, ['hg::Mat4 mtx', 'float volume', 'hg::SourceRepeat repeat', 'hg::Vec3 vel'])
+	gen.bind_constructor(spatialized_source_state, ['?hg::Mat4 mtx', '?float volume', '?hg::SourceRepeat repeat', '?const hg::Vec3 &vel'], {'route': route_lambda('__ConstructSpatializedSourceState')})
+	gen.end_class(spatialized_source_state)
+	
+	gen.bind_function('hg::PlayStereo', 'hg::SourceRef', ['hg::SoundRef snd', 'const hg::StereoSourceState &state'], {'rval_constants_group': 'SourceRef', 'constants_group': {'snd': 'SoundRef'}})
+	gen.bind_function('hg::PlaySpatialized', 'hg::SourceRef', ['hg::SoundRef snd', 'const hg::SpatializedSourceState &state'], {'rval_constants_group': 'SourceRef', 'constants_group': {'snd': 'SoundRef'}})
+
+	gen.bind_function('hg::StreamWAVFileStereo', 'hg::SourceRef', ['const char *path', 'const hg::StereoSourceState &state'], {'rval_constants_group': 'SourceRef'})
+	gen.bind_function('hg::StreamWAVAssetStereo', 'hg::SourceRef', ['const char *name', 'const hg::StereoSourceState &state'], {'rval_constants_group': 'SourceRef'})
+	gen.bind_function('hg::StreamWAVFileSpatialized', 'hg::SourceRef', ['const char *path', 'const hg::SpatializedSourceState &state'], {'rval_constants_group': 'SourceRef'})
+	gen.bind_function('hg::StreamWAVAssetSpatialized', 'hg::SourceRef', ['const char *name', 'const hg::SpatializedSourceState &state'], {'rval_constants_group': 'SourceRef'})
+
+	gen.bind_function('hg::StreamOGGFileStereo', 'hg::SourceRef', ['const char *path', 'const hg::StereoSourceState &state'], {'rval_constants_group': 'SourceRef'})
+	gen.bind_function('hg::StreamOGGAssetStereo', 'hg::SourceRef', ['const char *name', 'const hg::StereoSourceState &state'], {'rval_constants_group': 'SourceRef'})
+	gen.bind_function('hg::StreamOGGFileSpatialized', 'hg::SourceRef', ['const char *path', 'const hg::SpatializedSourceState &state'], {'rval_constants_group': 'SourceRef'})
+	gen.bind_function('hg::StreamOGGAssetSpatialized', 'hg::SourceRef', ['const char *name', 'const hg::SpatializedSourceState &state'], {'rval_constants_group': 'SourceRef'})
+
+	gen.bind_function('hg::GetSourceDuration', 'hg::time_ns', ['hg::SourceRef source'], {'constants_group': {'source': 'SourceRef'}})
+	gen.bind_function('hg::GetSourceTimecode', 'hg::time_ns', ['hg::SourceRef source'], {'constants_group': {'source': 'SourceRef'}})
+	gen.bind_function('hg::SetSourceTimecode', 'bool', ['hg::SourceRef source', 'hg::time_ns t'], {'constants_group': {'source': 'SourceRef'}})
+
+	gen.bind_function('hg::SetSourceVolume', 'void', ['hg::SourceRef source', 'float volume'], {'constants_group': {'source': 'SourceRef'}})
+	gen.bind_function('hg::SetSourcePanning', 'void', ['hg::SourceRef source', 'float panning'], {'constants_group': {'source': 'SourceRef'}})
+	gen.bind_function('hg::SetSourceRepeat', 'void', ['hg::SourceRef source', 'hg::SourceRepeat repeat'], {'constants_group': {'source': 'SourceRef'}})
+	gen.bind_function('hg::SetSourceTransform', 'void', ['hg::SourceRef source', 'const hg::Mat4 &world', 'const hg::Vec3 &velocity'], {'constants_group': {'source': 'SourceRef'}})
+
+	gen.bind_named_enum('hg::SourceState', [
+		'SS_Initial', 'SS_Playing', 'SS_Paused', 'SS_Stopped', 'SS_Invalid'
+	])
+
+	gen.bind_function('hg::GetSourceState', 'hg::SourceState', ['hg::SourceRef source'], {'constants_group': {'source': 'SourceRef'}})
+
+	gen.bind_function('hg::PauseSource', 'void', ['hg::SourceRef source'], {'constants_group': {'source': 'SourceRef'}})
+	gen.bind_function('hg::StopSource', 'void', ['hg::SourceRef source'], {'constants_group': {'source': 'SourceRef'}})
+	gen.bind_function('hg::StopAllSources', 'void', [])
+
+
+def bind_bloom(gen):
+	gen.add_include('engine/bloom.h')
+
+	bloom = gen.begin_class('hg::Bloom')
+	gen.end_class(bloom)
+
+	gen.bind_function('hg::CreateBloomFromFile', 'hg::Bloom', ['const char *path', 'bgfx::BackbufferRatio::Enum ratio'])
+	gen.bind_function('hg::CreateBloomFromAssets', 'hg::Bloom', ['const char *path', 'bgfx::BackbufferRatio::Enum ratio'])
+	gen.bind_function('hg::DestroyBloom', 'void', ['hg::Bloom &bloom'])
+	gen.bind_function('hg::ApplyBloom', 'void', ['bgfx::ViewId &view_id', 'const hg::Rect<int> &rect', 'const hg::Texture &input', 'bgfx::FrameBufferHandle output', 'hg::Bloom &bloom', 'float threshold', 'float smoothness', 'float intensity'], {'arg_in_out': ['view_id']})
+
+
+def bind_sao(gen):
+	gen.add_include('engine/sao.h')
+
+	sao = gen.begin_class('hg::SAO')
+	gen.end_class(sao)
+
+	"""
+	SAO CreateSAOFromFile(const char *path, bgfx::BackbufferRatio::Enum ratio, bool blur = true);
+	SAO CreateSAOFromAssets(const char *path, bgfx::BackbufferRatio::Enum ratio, bool blur = true);
+
+	void DestroySAO(SAO &sao);
+
+	/// @note input depth buffer must be in linear depth
+	void ComputeSAO(bgfx::ViewId &view_id, const iRect &rect, const Texture &attr0, const Texture &attr1, const Texture &noise, bgfx::FrameBufferHandle output,
+		const SAO &sao, const Mat44 &projection, float bias, float radius, int sample_count, float sharpness);
+	"""
+
+	gen.bind_function_overloads('hg::CreateSAOFromFile', [
+		('hg::SAO', ['const char *path', 'bgfx::BackbufferRatio::Enum ratio'], [])
+	])
+	gen.bind_function_overloads('hg::CreateSAOFromAssets', [
+		('hg::SAO', ['const char *path', 'bgfx::BackbufferRatio::Enum ratio'], [])
+	])
+	gen.bind_function('hg::DestroySAO', 'void', ['hg::SAO &sao'])
+	gen.bind_function('hg::ComputeSAO', 'void', ['bgfx::ViewId &view_id', 'const hg::Rect<int> &rect', 'const hg::Texture &attr0', 'const hg::Texture &attr1', 'const hg::Texture &noise', 'bgfx::FrameBufferHandle output', 'const hg::SAO &sao', 'const hg::Mat44 &projection', 'float bias', 'float radius', 'int sample_count', 'float sharpness'])
+
+	
+def bind_video_stream(gen):
+	gen.add_include('engine/video_stream.h')
+	
+	gen.bind_named_enum('VideoFrameFormat', ['VFF_UNKNOWN', 'VFF_YUV422', 'VFF_RGB24'])
+
+	gen.typedef('VideoStreamHandle', 'intptr_t')
+	gen.typedef('time_ns', 'int64_t')
+	
+	video_streamer = gen.begin_class('IVideoStreamer')
+	gen.bind_method(video_streamer, 'Startup', 'int', [])
+	gen.bind_method(video_streamer, 'Shutdown', 'void', [])
+	gen.bind_method(video_streamer, 'Open', 'VideoStreamHandle', ['const char *name'])
+	gen.bind_method(video_streamer, 'Play', 'int', ['VideoStreamHandle h'])
+	gen.bind_method(video_streamer, 'Pause', 'int', ['VideoStreamHandle h'])
+	gen.bind_method(video_streamer, 'Close', 'int', ['VideoStreamHandle h'])
+	gen.bind_method(video_streamer, 'Seek', 'int', ['VideoStreamHandle h', 'time_ns t'])
+	gen.bind_method(video_streamer, 'GetDuration', 'time_ns', ['VideoStreamHandle h'])
+	gen.bind_method(video_streamer, 'GetTimeStamp', 'time_ns', ['VideoStreamHandle h'])
+	gen.bind_method(video_streamer, 'IsEnded', 'int', ['VideoStreamHandle h'])
+
+	gen.insert_binding_code('''
+static int _VideoStreamer_GetFrame(IVideoStreamer *streamer, VideoStreamHandle h, intptr_t& ptr, int &width, int &height, int &pitch, VideoFrameFormat &format) {
+	return streamer->GetFrame(h, (const void **)&ptr, &width, &height, &pitch, &format);
+}
+''')	
+	gen.bind_method(video_streamer, 'GetFrame', 'int', ['VideoStreamHandle h', 'intptr_t& ptr', 'int &width', 'int &height', 'int &pitch', 'VideoFrameFormat &format'], {'route': route_lambda('_VideoStreamer_GetFrame'), 'arg_in_out': ['ptr', 'width', 'height', 'pitch', 'format']})
+
+	gen.bind_method(video_streamer, 'FreeFrame', 'int', ['VideoStreamHandle h', 'int frame'])
+		
+	gen.end_class(video_streamer)
+
+	gen.bind_function('hg::MakeVideoStreamer', 'IVideoStreamer', ['const char *module_path'])
+	gen.bind_function('hg::IsValid', 'bool', ['IVideoStreamer &streamer'])
+	gen.bind_function('hg::UpdateTexture', 'bool', ['IVideoStreamer &streamer', 'VideoStreamHandle &handle', 'hg::Texture &texture', 'hg::tVec2<int> &size', 'bgfx::TextureFormat::Enum &format', '?bool destroy'], {'arg_in_out': ['texture', 'size', 'format']})
+	
+def bind_profiler(gen):
+	gen.add_include('foundation/profiler.h')
+
+	gen.typedef('hg::ProfilerSectionIndex', 'size_t')
+
+	profiler_frame = gen.begin_class('hg::ProfilerFrame')
+	gen.end_class(profiler_frame)
+
+	gen.bind_function('hg::BeginProfilerSection', 'hg::ProfilerSectionIndex', ['const std::string &name', '?const std::string &section_details'])
+	gen.bind_function('hg::EndProfilerSection', 'void', ['hg::ProfilerSectionIndex section_idx'])
+
+	gen.bind_function('hg::EndProfilerFrame', 'hg::ProfilerFrame', [])
+	gen.bind_function('hg::CaptureProfilerFrame', 'hg::ProfilerFrame', [])
+
+	gen.bind_function('hg::PrintProfilerFrame', 'void', ['const hg::ProfilerFrame &profiler_frame'])
+
+
+def insert_non_embedded_setup_free_code(gen):
+	if gen.get_language() == 'CPython':
+		gen.insert_binding_code('''
+#include "foundation/log.h"
+#include <iostream>
+
+static void OnHarfangLog(const char *msg, int mask, const char *details, void *user) {
+	if (mask & hg::LL_Error)
+		PyErr_SetString(PyExc_RuntimeError, msg);
+	else if (mask & hg::LL_Warning)
+		PyErr_WarnEx(PyExc_Warning, msg, 1);
+	else
+		std::cout << msg << std::endl;
+}
+
+static void InstallLogHook() { hg::set_log_hook(OnHarfangLog, nullptr); }
+''')
+	elif gen.get_language() == 'Lua':
+		gen.insert_binding_code('''
+''')
+
+	gen.insert_binding_code('''
+#include "foundation/build_info.h"
+
+static void OutputLicensingTerms(const char *lang) {
+	hg::log(
+		hg::format("Harfang %1 for %2 on %3 (build %4 %5 %6)")
+		.arg(hg::get_version_string()).arg(lang).arg(hg::get_target_string())
+		.arg(hg::get_build_sha()).arg(__DATE__).arg(__TIME__)
+	);
+	hg::log("See https://www.harfang3d.com/license for licensing terms");
+}
+''')
+
+	if gen.get_language() == 'Lua':
+		gen.add_custom_init_code('OutputLicensingTerms("Lua 5.3");\n')
+	elif gen.get_language() == 'CPython':
+		gen.add_custom_init_code('''
+InstallLogHook();
+OutputLicensingTerms("CPython 3.2+");
+''')
+
+	gen.add_custom_free_code('\n')
+
 def bind(gen):
 	gen.start('harfang')
 
@@ -5466,134 +4480,79 @@ def bind(gen):
 
 	gen.add_include('foundation/cext.h')
 
-	gen.add_include('engine/engine.h')
-	gen.add_include('engine/factories.h')
-	gen.add_include('engine/plugin_system.h')
-
-	if gen.get_language() == 'CPython':
-		gen.insert_binding_code('''
-// Add the Python interpreter module search paths to the engine default plugins search path
-void InitializePluginsDefaultSearchPath() {
-	if (PyObject *sys_path = PySys_GetObject("path")) {
-		if (PyList_Check(sys_path)) {
-			Py_ssize_t n = PyList_Size(sys_path);
-			for (Py_ssize_t i = 0; i < n; ++i)
-				if (PyObject *path = PyList_GetItem(sys_path, i))
-					if (PyObject *tmp = PyUnicode_AsUTF8String(path)) {
-						std::string path(PyBytes_AsString(tmp));
-						hg::g_plugin_system.get().default_search_paths.push_back(path + "/harfang");
-					}
-		}
-	}
-}
-\n''')
-	elif gen.get_language() == 'Lua':
-		gen.insert_binding_code('''
-#include "foundation/string.h"
-
-// Add the Lua interpreter package.cpath to the engine default plugins search path
-static void InitializePluginsDefaultSearchPath(lua_State *L) {
-	lua_getglobal(L, "package");
-	lua_getfield(L, -1, "cpath");
-	std::string package_cpath = lua_tostring(L, -1);
-	lua_pop(L, 2);
-
-	std::vector<std::string> paths = hg::split(package_cpath, ";"), out;
-
-	for (size_t i = 0; i < paths.size(); ++i) {
-		std::string path = paths[i];
-		std::replace(path.begin(), path.end(), '\\\\', '/');
-
-		std::vector<std::string> elms = hg::split(path, "/");
-		path = "";
-		for (auto &elm : elms)
-			if (elm.find('?') == std::string::npos)
-				path += elm + "/";
-
-		if (path == "./")
-			continue;
-		if (hg::ends_with(path, "loadall.dll/"))
-			continue;
-
-		out.push_back(path);
-	}
-
-	for (auto &path : out)
-		hg::g_plugin_system.get().default_search_paths.push_back(path);
-}
-\n''')
-
-	# setup/free code only for non embedded binding
 	if not gen.embedded:
-		init_plugins_parm = ''
-		if gen.get_language() == 'Lua':
-			init_plugins_parm = 'L'
+		insert_non_embedded_setup_free_code(gen)
 
-		gen.add_custom_init_code('''\
-	hg::Init();
-	InitializePluginsDefaultSearchPath(%s);
-\n''' % init_plugins_parm)
-
-		gen.add_custom_free_code('hg::Uninit();\n')
+	if gen.get_language() == 'Go':
+		gen.set_compilation_directives("// #cgo linux pkg-config: gtk+-3.0\n" \
+										"// #cgo linux LDFLAGS: -L${SRCDIR}/linux -lhg_go -lharfang -lm -lstdc++ -Wl,--no-as-needed -ldl -lGL -lXrandr -lXext -lX11 -lglib-2.0\n" \
+										"// #cgo windows LDFLAGS: -L${SRCDIR}/windows -lhg_go -lharfang -lGdi32 -lDbghelp -lshell32 -loleaut32 -luuid -lcomdlg32 -lOle32 -lWinmm -lstdc++\n")
 
 	void_ptr = gen.bind_ptr('void *', bound_name='VoidPointer')
+	gen.insert_binding_code('static void * _int_to_VoidPointer(intptr_t ptr) { return reinterpret_cast<void *>(ptr); }')
+	gen.bind_function('int_to_VoidPointer', 'void *', ['intptr_t ptr'], {'route': route_lambda('_int_to_VoidPointer')})
+		
+	gen.typedef('bgfx::ViewId', 'uint16_t')
 
-	gen.typedef('uint32_t', 'unsigned int')
-
-	lib.stl.bind_future_T(gen, 'void', 'FutureVoid')
-	lib.stl.bind_future_T(gen, 'bool', 'FutureBool')
-	lib.stl.bind_future_T(gen, 'int', 'FutureInt')
-	lib.stl.bind_future_T(gen, 'float', 'FutureFloat')
-
-	lib.stl.bind_future_T(gen, 'uint32_t', 'FutureUInt')
-	lib.stl.bind_future_T(gen, 'size_t', 'FutureSize')
-
-	bind_std_vector(gen, gen.get_conv('char'))
+	#bind_std_vector(gen, gen.get_conv('char'))
 	bind_std_vector(gen, gen.get_conv('int'))
-	bind_std_vector(gen, gen.get_conv('int8_t'))
-	bind_std_vector(gen, gen.get_conv('int16_t'))
-	bind_std_vector(gen, gen.get_conv('int32_t'))
-	bind_std_vector(gen, gen.get_conv('int64_t'))
-	bind_std_vector(gen, gen.get_conv('uint8_t'))
+	#bind_std_vector(gen, gen.get_conv('int8_t'))
+	#bind_std_vector(gen, gen.get_conv('int16_t'))
+	#bind_std_vector(gen, gen.get_conv('int32_t'))
+	#bind_std_vector(gen, gen.get_conv('int64_t'))
+	#bind_std_vector(gen, gen.get_conv('uint8_t'))
 	bind_std_vector(gen, gen.get_conv('uint16_t'))
 	bind_std_vector(gen, gen.get_conv('uint32_t'))
-	bind_std_vector(gen, gen.get_conv('uint64_t'))
-	bind_std_vector(gen, gen.get_conv('float'))
-	bind_std_vector(gen, gen.get_conv('double'))
+	#bind_std_vector(gen, gen.get_conv('uint64_t'))
+	#bind_std_vector(gen, gen.get_conv('float'))
+	#bind_std_vector(gen, gen.get_conv('double'))
 
-	bind_std_vector(gen, gen.get_conv('std::string'))
+	bind_std_vector(gen, gen.get_conv('std::string'), 'StringList')
 
-	bind_task_system(gen)
 	bind_log(gen)
-	bind_binary_data(gen)
 	bind_time(gen)
-	bind_task_system(gen)
+	bind_clock(gen)
+	bind_file(gen)
+	bind_data(gen)
+	bind_dir(gen)
+	bind_path_tools(gen)
+	bind_assets(gen)
 	bind_math(gen)
+	bind_rand(gen)
+	bind_projection(gen)
 	bind_frustum(gen)
 	bind_window_system(gen)
 	bind_color(gen)
-	bind_font_engine(gen)
 	bind_picture(gen)
-	bind_document(gen)
-	bind_engine(gen)
-	bind_plugins(gen)
-	bind_filesystem(gen)
-	bind_type_value(gen)
-	bind_core(gen)
-	bind_create_geometry(gen)
-	bind_gpu(gen)
 	bind_render(gen)
-	bind_iso_surface(gen)
-	bind_frame_renderer(gen)
-	bind_mixer(gen)
-	bind_movie(gen)
+	bind_forward_pipeline(gen)
+	bind_font(gen)
+	bind_meta(gen)
+	bind_LuaObject(gen)
 	bind_scene(gen)
+	if gen.defined('HG_ENABLE_BULLET3_SCENE_PHYSICS'):
+		bind_bullet3_physics(gen)
+	bind_lua_scene_vm(gen)
+	bind_scene_systems(gen)
 	bind_input(gen)
-	bind_plus(gen)
 	bind_imgui(gen)
 	bind_platform(gen)
-	bind_lua_task_system(gen)
-	bind_fast_noise(gen)
+	bind_fps_controller(gen)
 	bind_extras(gen)
+	bind_audio(gen)
+	bind_openvr(gen)
+	bind_openxr(gen)
+	bind_sranipal(gen)
+	bind_vertex(gen)
+	bind_model_builder(gen)
+	bind_geometry_builder(gen)
+	bind_iso_surface(gen)
+	if gen.defined('HG_ENABLE_RECAST_DETOUR_API'):
+		bind_recast_detour(gen)
+	bind_bloom(gen)
+	bind_sao(gen)
+	bind_profiler(gen)
+
+	bind_video_stream(gen)
 
 	gen.finalize()
