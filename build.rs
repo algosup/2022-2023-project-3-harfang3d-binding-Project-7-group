@@ -30,10 +30,17 @@ fn main(){
     }
 
     // run make command
-    let output = std::process::Command::new("make")
+    
+    if cfg!(target_os = "windows"){
+        let output = std::process::Command::new("make")
         .output()
         .expect("failed to execute process");
-
+    } else {
+        let output = std::process::Command::new("make")
+        .arg("linux")
+        .output()
+        .expect("failed to execute process");
+    }
     fs::copy("./out/build.dll", "./src/build.dll").expect("Error while copying file");
     fs::copy("./out/build.lib", "./src/build.lib").expect("Error while copying file");
     // println!("status: {}", output.status);
