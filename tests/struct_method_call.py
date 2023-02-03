@@ -141,35 +141,35 @@ func Test(t *testing.T) {
 '''
 
 test_rust = '''\
-extern crate my_test;
+mod my_test;
 
 #[test]
 fn test() {
 	unsafe {
 		let s = my_test::simple_struct::SimplestConstructor();
 
-		assert_eq!(s.get_a(), 1);
-		assert_eq!(s.set_a_with_v0_v1(8, 2), true);
+		assert_eq!(s.GetA(), 1);
+		assert_eq!(s.SetAWithV0V1(8, 2), true);
 
-		assert_eq!(s.get_a(), 10);
-		assert_eq!(s.set_a(9), 9);
-		assert_eq!(s.get_a(), 9);
+		assert_eq!(s.GetA(), 10);
+		assert_eq!(s.SetA(9), 9);
+		assert_eq!(s.GetA(), 9);
 
-		assert_eq!(my_test::simple_struct::get_static_int(), 4);
+		assert_eq!(my_test::simple_struct::GetStaticInt(), 4);
 
-		let mut s_out = my_test::get_modify_arg_out();
-		assert_eq!(s_out.get_a(), 4);
+		let mut s_out = my_test::GetModifyArgOut();
+		assert_eq!(s_out.GetA(), 4);
 
-		let mut s_out = my_test::get_modify_arg_out_with_k(my_test::simple_struct::WithV(5));
-		assert_eq!(s_out.get_a(), 16);
+		let mut s_out = my_test::GetModifyArgOutWithK(my_test::simple_struct::WithV(5));
+		assert_eq!(s_out.GetA(), 16);
 
 		let s2 = my_test::simple_struct2::WithOtherStruct(s_out);
-		assert_eq!(s2.get_a(), 16);
+		assert_eq!(s2.GetA(), 16);
 
-		let mut s_out2 = my_test::get_modify_arg_out2();
-		assert_eq!(s_out2.get_a(), 4);
+		let mut s_out2 = my_test::GetModifyArgOut2();
+		assert_eq!(s_out2.GetA(), 4);
 
-		let mut s_out2 = my_test::get_modify_arg_out2_with_k(s);
-		assert_eq!(s_out2.get_a(), 28);
+		let mut s_out2 = my_test::GetModifyArgOut2WithK(s);
+		assert_eq!(s_out2.GetA(), 28);
 	}
 }

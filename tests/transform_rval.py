@@ -111,16 +111,16 @@ func Test(t *testing.T) {
 '''
 
 test_rust = '''\
-extern crate my_test;
+mod my_test;
 
 #[test]
 fn test() {
 	unsafe {
-		let b = my_test::get_b();
+		let b = my_test::GetB();
 		assert_eq!(b.b, 3);
 		assert_eq!(b.GetBaseValue(), 12);
 		
-		let c = my_test::get_c();
+		let c = my_test::GetC();
 		assert_eq!(c.c, 7);
 		assert_eq!(c.GetBaseValue(), 12);
 	}

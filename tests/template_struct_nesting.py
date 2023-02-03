@@ -71,12 +71,12 @@ func Test(t *testing.T) {
 """
 
 test_rust = '''\
-extern crate my_test;
+mod my_test;
 
 #[test]
 fn test() {
 	unsafe {
-		let s = my_test::enclosing_template_int();
+		let s = my_test::EnclosingTemplateInt();
 		let n = my_test::GetNestedStructInt(s);
 		assert_eq!(n.v, 9);
 	}

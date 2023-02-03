@@ -106,24 +106,24 @@ func Test(t *testing.T) {
 '''
 
 test_rust = '''\
-extern crate my_test;
+mod my_test;
 
 #[test]
 fn test() {
 	unsafe {
-		let sp = my_test::get_shared_ptr_to_simple_struct();
+		let sp = my_test::GetSharedPtrToSimpleStruct();
 
 		assert_eq!(sp.u, 4.0);
 		assert_eq!(sp.v, 7);
 
-		let sp2 = my_test::ssimple_struct::new(9.0);
+		let sp2 = my_test::SsimpleStruct::new(9.0);
 		
 		assert_eq!(sp2.u, 9.0);
 		assert_eq!(sp2.v, 90);
 
-		let spn = my_test::get_empty_shared_ptr();
+		let spn = my_test::GetEmptySharedPtr();
 
-		assert!(spn.is_none());
+		assert!(spn.isNone());
 	}
 }
 '''

@@ -100,25 +100,25 @@ func Test(t *testing.T) {
 '''
 
 test_rust = '''\
-extern crate my_test;
+mod my_test;
 
 #[test]
 fn test() {
 	unsafe {
 		let n = my_test::nested_struct::new();
-		assert_eq!(n.get_v(), 8);
-		n.set_v(n.get_v() - 4);
-		assert_eq!(n.get_v(), 4);
+		assert_eq!(n.GetV(), 8);
+		n.SetV(n.GetV() - 4);
+		assert_eq!(n.GetV(), 4);
 
 		//
 		let e = my_test::enclosing_struct::new();
-		assert_eq!(e.get_n().get_v(), 8);
-		e.get_n().set_v(12);
-		assert_eq!(e.get_n().get_v(), 12);
-		e.get_n().set_v(e.get_n().get_v() * 4);
-		assert_eq!(e.get_n().get_v(), 48);
-		e.get_n().set_v(e.get_n().get_v() / 2);
-		assert_eq!(e.get_n().get_v(), 24);
+		assert_eq!(e.GetN().GetV(), 8);
+		e.GetN().SetV(12);
+		assert_eq!(e.GetN().GetV(), 12);
+		e.GetN().SetV(e.GetN().GetV() * 4);
+		assert_eq!(e.GetN().GetV(), 48);
+		e.GetN().SetV(e.GetN().GetV() / 2);
+		assert_eq!(e.GetN().GetV(), 24);
 	}
 }
 '''

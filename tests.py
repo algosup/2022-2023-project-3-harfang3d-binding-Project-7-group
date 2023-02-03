@@ -468,7 +468,7 @@ def create_rust_cmake_file(module, work_path, sources):
 	cmake_path = os.path.join(work_path, 'CMakeLists.txt')
 
 	with open(cmake_path, 'w') as file:
-		quoted_sources = ['"%s"' % source for source in sources if ".rust" not in source]
+		quoted_sources = ['"%s"' % source for source in sources if ".rs" not in source]
 
 		work_place_ = work_path.replace('\\', '/')
 
@@ -494,34 +494,34 @@ def build_and_deploy_rust_extension(work_path, build_path):
 	print("Generating build system...")
 	# TODO: use cargo to build rust extension
 	# TODO: cargo should call Cmake and then Make before compiling the rust	
-	#try:
-	#	if args.linux:
-	#		subprocess.check_output(['cmake', '..'])
-	#	else:
-	#		subprocess.check_output('cmake .. -G "%s"' % cmake_generator)
-	#except subprocess.CalledProcessError as e:
-	#	print(e.output.decode('utf-8'))
-	#	return False
+	try:
+		if args.linux:
+			subprocess.check_output(['cmake', '..'])
+		else:
+			subprocess.check_output('cmake .. -G "%s"' % cmake_generator)
+	except subprocess.CalledProcessError as e:
+		print(e.output.decode('utf-8'))
+		return False
 
 	print("Building extension...")
-	#try:
-	#	if args.linux:
-	#		subprocess.check_output(['make'])
-	#	else:
-	#		subprocess.check_output(['cmake', '--build', '.', '--config', 'Release'])
-	#except subprocess.CalledProcessError as e:
-	#	print(e.output.decode('utf-8'))
-	#	return False
+	try:
+		if args.linux:
+			subprocess.check_output(['make'])
+		else:
+			subprocess.check_output(['cmake', '--build', '.', '--config', 'Release'])
+	except subprocess.CalledProcessError as e:
+		print(e.output.decode('utf-8'))
+		return False
 
 	print("install extension...")
-	#try:
-	#	if args.linux:
-	#		subprocess.check_output(['make', 'install'])
-	#	else:
-	#		subprocess.check_output(['cmake', '--install', '.', '--config', 'Release'])
-	#except subprocess.CalledProcessError as e:
-	#	print(e.output.decode('utf-8'))
-	#	return False
+	try:
+		if args.linux:
+			subprocess.check_output(['make', 'install'])
+		else:
+			subprocess.check_output(['cmake', '--install', '.', '--config', 'Release'])
+	except subprocess.CalledProcessError as e:
+		print(e.output.decode('utf-8'))
+		return False
 
 	return True
 
@@ -540,7 +540,7 @@ class RustTestBed:
 		if hasattr(module, "test_special_rust"):
 			test_path = os.path.join(work_path, 'test_rust.rs')
 			with open(test_path, 'w') as file:
-				file.write(module.test_special_rustt)
+				file.write(module.test_special_rust)
 
 		build_path = os.path.join(work_path, 'build')
 		os.mkdir(build_path)
@@ -561,11 +561,20 @@ class RustTestBed:
 
 		success = True
 		try:
+			
 			subprocess.check_output('cargo new test_rust', shell=True, stderr=subprocess.STDOUT)
 			os.chdir(os.path.join(work_path, 'test_rust'))
-			shutil.copyfile(f"{work_path}/test.rs", f"{work_path}/test_rust/src/lib.rs")
-			#shutil.rmtree(f"{work_path}/test_rust/src")
+			# subprocess.Popen('notepad.exe "%s"' % os.getcwd())
+			# print(work_path)
+			shutil.move(f"{work_path}/test.rs", f"{work_path}/test_rust/src/main.rs")
+			shutil.move(f"{work_path}/bind.rs", f"{work_path}/test_rust/src/my_test.rs")
+			# exit()
+			# subprocess.call("mv ../test.rs ./src/main.rs", shell=False, stderr=subprocess.STDOUT)
 			subprocess.check_output("cargo test", shell=True, stderr=subprocess.STDOUT)
+			#subprocess.check_output("goimports -w bind.go", shell=True, stderr=subprocess.STDOUT)
+			#subprocess.check_output('go test -run ""', shell=True, stderr=subprocess.STDOUT)
+
+			# shutil.copyfile(f"{work_path}/test.rs", f"{work_path}/test_rust/src/lib.rs")
 		except subprocess.CalledProcessError as e:
 			print(e.output.decode('utf-8'))
 			success = False

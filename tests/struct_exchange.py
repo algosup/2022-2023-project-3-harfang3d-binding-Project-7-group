@@ -109,23 +109,23 @@ func Test(t *testing.T) {
 '''
 
 test_rust = '''\
-extern crate my_test;
+mod my_test;
 
 #[test]
 fn test() {
 	unsafe {
 		// take by value
-		let s = my_test::return_simple_struct_by_value();
-		my_test::take_simple_struct_by_value(s);
-		assert!(my_test::test_simple_struct() == true);
+		let s = my_test::ReturnSimpleStructByValue();
+		my_test::TakeSimpleStructByValue(s);
+		assert!(my_test::TestSimpleStruct() == true);
 
-		let s = my_test::return_simple_struct_by_pointer();
-		my_test::take_simple_struct_by_value(s);
-		assert!(my_test::test_simple_struct() == true);
+		let s = my_test::ReturnSimpleStructByPointer();
+		my_test::TakeSimpleStructByValue(s);
+		assert!(my_test::TestSimpleStruct() == true);
 
-		let s = my_test::return_simple_struct_by_ref();
-		my_test::take_simple_struct_by_value(s);
-		assert!(my_test::test_simple_struct() == true);
+		let s = my_test::ReturnSimpleStructByRef();
+		my_test::TakeSimpleStructByValue(s);
+		assert!(my_test::TestSimpleStruct() == true);
 	}
 }
 '''

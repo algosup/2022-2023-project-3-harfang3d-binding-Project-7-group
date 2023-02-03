@@ -45,12 +45,12 @@ func Test(t *testing.T) {
 '''
 
 test_rust = '''\
-extern crate my_test;
+mod my_test;
 
 #[test]
 fn test() {
 	unsafe {
-		assert_eq!(my_test::return_nullptr(), std::ptr::null_mut());
+		assert_eq!(my_test::ReturnNullptr(), std::ptr::null_mut());
 	}
 }
 '''
