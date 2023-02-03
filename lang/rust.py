@@ -1145,9 +1145,9 @@ uint32_t %s(void* p) {
 				if self.__get_is_type_class_or_pointer_with_class(conv):
 					rust += f"static {clean_name(name)} : {arg_bound_name.replace('*','')} = {arg_bound_name.replace('*', '')}{clean_name_with_title(self._name)}{clean_name_with_title(classname)}Get{name}()\n"
 				elif implicit_cast is not None:
-					rust += f"static {clean_name(name)} : {implicit_cast} = {clean_name_with_title(self._name)}{clean_name_with_title(classname)}Get{name}() as {implicit_cast}\n"
+					rust += f"static {clean_name(name)} : *{implicit_cast} = {clean_name_with_title(self._name)}{clean_name_with_title(classname)}Get{name}() as {implicit_cast}\n"
 				else:
-					rust += f"static {clean_name(name)} : {implicit_cast} = ({clean_name_with_title(self._name)}{clean_name_with_title(classname)}Get{name}() as {arg_bound_name}\n"
+					rust += f"static {clean_name(name)} : {arg_bound_name} = {clean_name_with_title(self._name)}{clean_name_with_title(classname)}Get{name}() as {arg_bound_name}\n"
 			else:
 				rust += "// "
 				if do_static:
