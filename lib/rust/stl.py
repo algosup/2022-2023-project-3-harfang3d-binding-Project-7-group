@@ -28,6 +28,9 @@ def bind_stl(gen):
         def from_c_call(self, out_var, expr, ownership):
             return "C.RustString(%s)" % (out_var)
 
+    gen.bind_type(RustStringConverter('std::string'))
+
+    
 def bind_function_T(gen, type, bound_name=None):
 	class RustStdFunctionConverter(lang.rust.RustTypeConverterCommon):
 		def get_type_glue(self, gen, module_name):

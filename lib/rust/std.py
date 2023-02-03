@@ -23,7 +23,7 @@ def bind_std(gen):
 		def from_c_call(self, out_var, expr, ownership):
 			return "C.GoString(%s)" % (out_var)
 
-	gen.bind_type(RustConstCharPtrConverter("const char *"))
+	gen.bind_type(RustConstCharPtrConverter("str"))
 
 	class RustBasicTypeConverter(lang.rust.RustTypeConverterCommon):
 		def __init__(self, type, c_type, rust_type, to_c_storage_type=None, bound_name=None, from_c_storage_type=None, needs_c_storage_class=False):
@@ -74,6 +74,8 @@ def bind_std(gen):
 
 	gen.bind_type(RustBasicTypeConverter('char16_t','c_short', 'i16'))
 	gen.bind_type(RustBasicTypeConverter('char32_t','c_int', 'i32'))
+
+	gen.bind_type(RustBasicTypeConverter('intptr_t', 'C.intptr_t', 'uintptr'))
 
 	#TODO: This should be defined at runtime instead to support systems other than 64bits
 	gen.bind_type(RustBasicTypeConverter('size_t','c_long', 'isize'))
