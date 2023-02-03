@@ -38,18 +38,15 @@
 				- As stated in the Functional Requirements Document (FSD), the main goal of this project is to be able to use **HARFANG® 3D Framework** library, which is implemented in C/C++ in Rust language, through the use of their custom made code binder **FABGen** (designed as a replacement for SWIG) which already supports transpiling to CPython, Lua and Go. Therefore, the code binder can be described as an interface generator, more specifically as an Application Binary Interface generator, as it has to interface between two languages at low levels. This implies good knowledge of source and target languages, since (especially in the case of C/C++  Rust) where syntax and functioning greatly differ.
 			- #### Methodology (DMAIC Framework)
 				- Although the project consists mostly of identifying code implementations, writing them and passing predefined tests, we made sure to follow the DMAIC framework seen during our lessons. Tracking was vital for us, since we did not feature a dedicated quality assurance engineer/manager, and had to cross check everything we did before moving on. We did daily meetings to learn about our progress and came up with new ideas to be implemented until the end.
-				  collapsed:: true
-					- ![DMAIC.png](../images/technical/DMAIC_1675431865139_0.png)
+					- ![DMAIC.png](/images/technical/DMAIC_1675431865139_0.png)
 			- #### What is HARFANG 3D ?
 				- **HARFANG® 3D Framework** is a 3D Engine built in C/C++ that is sold to diverse companies in various sectors such as automotive, railway, risk prevention, design etc. .  **HARFANG® 3D Framework**, which we will call "the engine" is able to be run with other languages thanks to an ABI generator (FABGen), which will be the main focus of our work, since we need to add another language (Rust) to it.
 			- #### What is a code binder used for ?
 				- Here is a simplified view of how FABGen is expected to function:
-				  collapsed:: true
-					- ![simplified diagram.png](../images/technical/simplified_diagram_1674828088999_0.png)
+					- ![simplified diagram.png](/images/technical/simplified_diagram_1674828088999_0.png)
 			- #### Existing Solutions & Similar technologies
 				- ##### Automatic binding generation
 					- rust-bindgen
-					  collapsed:: true
 						- https://github.com/rust-lang/rust-bindgen
 						- Parses header files and generates a rust code out of it
 						- will try to convert what it can, skipping constructs it can not handle.
@@ -73,7 +70,7 @@
 						  * Everything was done through a single Object struct which hides the real types of variables, making it difficult to debug or extend the functionalities.
 						  * Uneven feature support between languages
 					- #admon-question https://cxx.rs/
-						- ![image.png](../images/technical/image_1675162623380_0.png)
+						- ![image.png](/images/technical/image_1675162623380_0.png)
 						- Requires custom code/data to generate bindings for C++ and Rust. A CFFI interface is hidden between the two bindings.
 						- Its Aim is to describe interface and generate safe and fast bindings from and to C++ code.
 						- **Safe** in the rust sense: Rust compiler enforces its invariants.
@@ -97,7 +94,6 @@
 		- ### Goals, Product/Client requirements
 			- #### Functional Requirements
 				- as mentioned in the *Functional Specifications*, the main objectives of our work are:
-				  collapsed:: true
 					- Provide Rust programs with access to all of C++'s functions and data structures.
 					- Be easy to use and integrate into Rust programs, with a clear and simple API that is easy to learn and use.
 					- Be well-tested, following Fabgen's existing templates, to ensure that it works correctly and is reliable.
@@ -121,7 +117,6 @@
 				- The test coverage of FABGen was of 92%, A total of 29 tests provided by the customer, and and passing rate must be 100% to validate the implementation
 			- #### License
 				- GNU GPL 3.0
-				  collapsed:: true
 					- |Permissions|Limitations|Conditions|
 					  |--|--|--|
 					  |✅ Commercial Use|❌ Liability|☝️ License and copyright notice|
@@ -145,7 +140,7 @@
 		- Example of a binding
 		- Example of a test
 		- The whole thing
-			- ![image.png](../images/technical/image_1675436220671_0.png)
+			- ![image.png](/images/technical/image_1675436220671_0.png)
 	- ### Technical Specifications
 		- #### Define Languages:
 			- ##### Idiomatic C/C++ Code
@@ -192,7 +187,7 @@
 				-  Rust has a different Macro system than C++
 		- *List all the other stuff like the files tests etc*
 	- ### Risk assessment and security risks/measures
-		- ![image.png](../images/technical/image_1673536919062_0.png)
+		- ![image.png](/images/technical/image_1673536919062_0.png)
 		- Error Handling
 		- Security
 		- Privacy
