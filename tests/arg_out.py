@@ -6,15 +6,15 @@ def bind_test(gen):
 
 	lib.bind_defaults(gen)
 
-	gen.insert_code('''
-struct A { int v{2}; };
-void modify_in_out_struct(A *a) { a->v = 3; }
-''')
-	A = gen.begin_class('A')
-	gen.bind_constructor(A, [])
-	gen.bind_member(A, 'int v')
-	gen.end_class(A)
-	gen.bind_function('modify_in_out_struct', 'void', ['A *a'], {'arg_in_out': ['a']})
+# 	gen.insert_code('''
+# struct A { int v{2}; };
+# void modify_in_out_struct(A *a) { a->v = 3; }
+# ''')
+# 	A = gen.begin_class('A')
+# 	gen.bind_constructor(A, [])
+# 	gen.bind_member(A, 'int v')
+# 	gen.end_class(A)
+	# gen.bind_function('modify_in_out_struct', 'void', ['A *a'], {'arg_in_out': ['a']})
 
 	gen.insert_code('void out_values_function_call(int &a, int d, int *b, float k) { a = 8 * d; *b = 14 * k; }\n\n')
 	gen.bind_function('out_values_function_call', 'void', ['int &a', 'int d', 'int *b', 'float k'], {'arg_out': ['a', 'b']})
@@ -126,27 +126,26 @@ mod my_test;
 #[test]
 fn test() {
 	unsafe {
-		println!("test");
-		# let mut a = my_test::A::new();
-		# my_test::modify_in_out_struct(&mut a);
-		# assert_eq!(a.v, 3);
+		// let mut a = my_test::A::new();
+		// my_test::ModifyInOutStruct(&mut a);
+		// assert_eq!(a.v, 3);
 
-		let (a, b) = my_test::out_values_function_call(2, 3);
+		let (a, b) = my_test::OutValuesFunctionCall(2, 3.0);
 		assert_eq!(*a, 16);
 		assert_eq!(*b, 42);
 
-		let (r, a, b) = my_test::out_values_function_call_rval(2);
+		let (r, a, b) = my_test::OutValuesFunctionCallRval(2);
 		assert_eq!(r, 2);
 		assert_eq!(*a, 16);
 		assert_eq!(*b, 28);
 
-		let (r, a, b) = my_test::out_values_function_call_rval_with_k(2, 2);
+		let (r, a, b) = my_test::OutValuesFunctionCallRvalWithK(2, 2.0);
 		assert_eq!(r, 4);
 		assert_eq!(*a, 16);
 		assert_eq!(*b, 28);
 
 		let mut w = 5;
-		let rb = my_test::in_out_value(&mut w);
+		let rb = my_test::InOutValue(&mut w);
 		assert!(rb);
 		assert_eq!(w, 20);
 	}

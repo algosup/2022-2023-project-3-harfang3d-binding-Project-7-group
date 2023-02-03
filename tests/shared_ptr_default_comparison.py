@@ -99,17 +99,17 @@ mod my_test;
 #[test]
 fn test() {
 	unsafe {
-		let a = my_test::get_obj0();
-		let b = my_test::get_obj0();
+		let a = my_test::GetObj0();
+		let b = my_test::GetObj0();
 
 		assert!(a == b);
 
-		let c = my_test::get_obj1();
+		let c = my_test::GetObj1();
 
 		assert!(a != c);
 		assert!(b != c);
 
-		let d = my_test::get_obj2();
+		let d = my_test::GetObj2();
 
 		assert!(a == d);
 	}

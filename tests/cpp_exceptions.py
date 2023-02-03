@@ -53,7 +53,7 @@ mod my_test;
 fn test() {
 	unsafe {
 		let do_step = || Result<(),MyError> {
-			assert_eq!(my_test::get_int(), 8);
+			assert_eq!(my_test::GetInt(), 8);
 			Ok(())
 		};
 

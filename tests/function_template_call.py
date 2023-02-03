@@ -54,7 +54,7 @@ mod my_test;
 #[test]
 fn test() {
 	unsafe {
-		assert_eq!(my_test::get_int(), 8);
-		assert_eq!(my_test::get_float(), 8.0);
+		assert_eq!(my_test::GetInt(), 8);
+		assert_eq!(my_test::GetFloat(), 8.0);
 	}
 }
