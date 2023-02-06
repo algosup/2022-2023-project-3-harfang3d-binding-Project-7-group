@@ -15,6 +15,6 @@ def bind(gen):
     gen.start('adder')
     lib.bind_defaults(gen)
     bind_adder(gen)
-    bind_subtracter(gen)
+    # bind_subtracter(gen)
     gen.finalize()
     return gen.get_output()
