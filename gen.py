@@ -708,7 +708,6 @@ class FABGen:
 	#
 	def select_ctype_conv(self, ctype):
 		"""Select a type converter."""
-
 		if repr(ctype) == 'void':
 			return None
 
