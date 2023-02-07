@@ -1145,9 +1145,9 @@ uint32_t %s(void* p) {
 				if self.__get_is_type_class_or_pointer_with_class(conv):
 					rust += f"static {clean_name(name)} : {arg_bound_name.replace('*','')} = {arg_bound_name.replace('*', '')}{clean_name_with_title(self._name)}{clean_name_with_title(classname)}Get{name}()\n"
 				elif implicit_cast is not None:
-					rust += f"static {clean_name(name)} : {implicit_cast} = {clean_name_with_title(self._name)}{clean_name_with_title(classname)}Get{name}() as {implicit_cast}\n"
+					rust += f"static {clean_name(name)} : *{implicit_cast} = {clean_name_with_title(self._name)}{clean_name_with_title(classname)}Get{name}() as {implicit_cast}\n"
 				else:
-					rust += f"static {clean_name(name)} : {implicit_cast} = ({clean_name_with_title(self._name)}{clean_name_with_title(classname)}Get{name}() as {arg_bound_name}\n"
+					rust += f"static {clean_name(name)} : {arg_bound_name} = {clean_name_with_title(self._name)}{clean_name_with_title(classname)}Get{name}() as {arg_bound_name}\n"
 			else:
 				rust += "// "
 				if do_static:
@@ -1685,7 +1685,7 @@ uint32_t %s(void* p) {
 				'#[allow(non_snake_case)]\n' \
 				'#[allow(non_upper_case_globals)]\n' \
 				'#[allow(dead_code)]\n' 
-		
+		rust += f"[link(name = {self.bound_name})]"
 		rust += 'extern "C" {\n' 
 
 		#Write functions
@@ -1727,6 +1727,7 @@ uint32_t %s(void* p) {
 			cleanBoundName = clean_name_with_title(conv.bound_name)
 			if conv.is_type_class():
 				rust_c += f"// bind {clean_name_with_title(self._name)}{cleanBoundName} methods\n"
+				rust_c += f"{conv.bound_name} * {clean_name_with_title(self._name)}{cleanBoundName}Create() {{ return new {conv.bound_name}(); }};\n"
 
 			if "sequence" in conv._features:
 				rust_c += self.__extract_sequence(conv)
@@ -1954,6 +1955,15 @@ uint32_t %s(void* p) {
 			name = clean_name_with_title(name)
 			rust_translate_file[bound_name] = [f"Get{name}", f"Set{name}"]
 
+	def _write_rust_struct(self):
+		rust_struct = ""
+
+		for conv in self._bound_types:
+			if conv.nobind:
+				continue
+			if conv.is_type_class():
+				rust_struct += f"pub struct {conv.bound_name};\n\n"
+		return rust_struct
 
 	def finalize(self):
 
@@ -2019,5 +2029,6 @@ uint32_t %s(void* p) {
 		self.rust_h = self._write_header()
 		self.rust_c = self._write_C_code()
 		self.rust_bind = self._write_rust_binder_header()
+		self.rust_bind += self._write_rust_struct()
 		self.rust_bind += self._write_rust_extern()
 		self.rust_translate_file = json.dumps(self._write_json_translate(), indent=4, sort_keys=True)
