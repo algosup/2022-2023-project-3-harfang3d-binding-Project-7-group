@@ -196,8 +196,7 @@ class RustGenerator(gen.FABGen):
 				'#![allow(unused_unsafe)]\n' \
 				'#![allow(unused_must_use)]\n' \
 				'#![allow(unused_imports)]\n' \
-				'#![allow(unused_macros)]\n' \
-				'#![allow(unused_imports)]\n'
+				'#![allow(unused_macros)]\n'
 				 
 
 	def get_language(self):
