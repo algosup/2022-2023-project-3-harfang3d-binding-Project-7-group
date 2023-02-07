@@ -126,9 +126,9 @@ mod my_test;
 #[test]
 fn test() {
 	unsafe {
-		// let mut a = my_test::A::new();
-		// my_test::MyTestModifyInOutStruct(&mut a);
-		// assert_eq!(a.v, 3);
+		let a = my_test::MyTestConstructorA();
+		my_test::MyTestModifyInOutStruct(a);
+		assert_eq!(my_test::MyTestAGetV(a), 3);
 
 		let (a, b) = my_test::MyTestOutValuesFunctionCall(2, 3.0);
 		assert_eq!(*a, 16);

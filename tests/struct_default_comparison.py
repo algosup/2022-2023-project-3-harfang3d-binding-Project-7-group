@@ -85,15 +85,15 @@ mod my_test;
 #[test]
 fn test() {
 	unsafe {
-		let a = my_test::GetObj0();
-		let b = my_test::GetObj0();
+		let a = my_test::MyTestGetObj0();
+		let b = my_test::MyTestGetObj0();
 		
-		assert!(a == b, "should be the same.");
+		assert!((a as *mut i32) == (b as *mut i32), "should be the same.");
 
-		let c = my_test::GetObj1();
+		let c = my_test::MyTestGetObj1();
 		
-		assert!(a != c, "should not be the same.");
-		assert!(b != c, "should not be the same.");
+		assert!((a as *mut i32) != (c as *mut i32), "should not be the same.");
+		assert!((b as *mut i32) != (c as *mut i32), "should not be the same.");
 	}
 }
 '''

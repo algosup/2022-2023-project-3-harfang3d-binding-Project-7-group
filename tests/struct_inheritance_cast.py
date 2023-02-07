@@ -79,7 +79,7 @@ fn test() {
 	unsafe {
 		let a = my_test::MyTestGetBaseClass();
 		let b = my_test::MyTestCastBaseClassToDerivedClass(a);
-		assert_eq!(b.GetU(), 7);
+		assert_eq!(my_test::MyTestDerivedClassGetU(b), 7);
 	}
 }
 '''

@@ -60,7 +60,8 @@ mod my_test;
 #[test]
 fn test() {
 	unsafe {
-		let o = my_test::Object::new();
-		assert_eq!(o.get(4), 15);
+		let o = my_test::MyTestConstructorObject();
+		assert_eq!(my_test::MyTestObjectGet(4), 15);
 	}
 }
+"""

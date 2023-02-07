@@ -94,19 +94,19 @@ mod my_test;
 #[test]
 fn test() {
 	unsafe {
-		let mut s = my_test::simple_struct::new();
+		let s = my_test::MyTestConstructorSimpleStruct();
 
-		assert_eq!(s.GetA(), 3);
-		assert_eq!(s.GetB(), 11);
-		assert_eq!(s.GetC(), 1);
+		assert_eq!(my_test::MyTestSimpleStructGetA(s), 3);
+		assert_eq!(my_test::MyTestSimpleStructGetB(s), 11);
+		assert_eq!(my_test::MyTestSimpleStructGetC(s), 1);
 
-		s.SetA(1);
-		s.SetB(7);
-		s.SetC(2);
+		my_test::MyTestSimpleStructSetA(s, 1);
+		my_test::MyTestSimpleStructSetB(s, 7);
+		my_test::MyTestSimpleStructSetC(s, 2);
 
-		assert_eq!(s.GetA(), 1);
-		assert_eq!(s.GetB(), 7);
-		assert_eq!(s.GetC(), 2);
+		assert_eq!(my_test::MyTestSimpleStructGetA(s), 1);
+		assert_eq!(my_test::MyTestSimpleStructGetB(s), 7);
+		assert_eq!(my_test::MyTestSimpleStructGetC(s), 2);
 	}
 }
 '''

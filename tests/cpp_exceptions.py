@@ -53,7 +53,7 @@ mod my_test;
 fn test() {
 	unsafe {
 		let do_step = || -> Result<(),Box<dyn std::error::Error>> {
-			assert_eq!(my_test::MyTestGetInt(), 8)?;
+			assert_eq!(my_test::MyTestGetInt(), 8);
 			Ok(())
 		};
 		let mut write_to_const_failed = false;

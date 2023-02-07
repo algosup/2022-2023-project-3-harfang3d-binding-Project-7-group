@@ -99,19 +99,19 @@ mod my_test;
 #[test]
 fn test() {
 	unsafe {
-		let a = my_test::GetObj0();
-		let b = my_test::GetObj0();
+		let a = my_test::MyTestGetObj0();
+		let b = my_test::MyTestGetObj0();
 
-		assert!(a == b);
+		assert!((a as *mut i32) == (b as *mut i32));
 
-		let c = my_test::GetObj1();
+		let c = my_test::MyTestGetObj1();
 
-		assert!(a != c);
-		assert!(b != c);
+		assert!((a as *mut i32) != (c as *mut i32));
+		assert!((b as *mut i32) != (c as *mut i32));
 
-		let d = my_test::GetObj2();
+		let d = my_test::MyTestGetObj2();
 
-		assert!(a == d);
+		assert!(*(a as *mut i32) == (d as *mut i32));
 	}
 }
 '''
