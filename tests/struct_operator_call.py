@@ -177,35 +177,35 @@ mod my_test;
 #[test]
 fn test() {
 	unsafe {
-		let a = my_test::simple_struct::new(4);
-		let b = my_test::simple_struct::new(8);
+		let a = my_test::MyTestConstructorSimpleStruct(4);
+		let b = my_test::MyTestConstructorSimpleStruct(8);
 		
-		let mut s = a.AddSimpleStruct(&b);
-		assert_eq!(s.GetV(), 12);
-		s.InplaceAddSimpleStruct(&b);
-		assert_eq!(s.GetV(), 20);
-		s.InplaceAddInt(4);
-		assert_eq!(s.GetV(), 24);
+		let mut s = my_test::MyTestAddSimpleStructSimpleStruct(a, &b);
+		assert_eq!(my_test::MyTestGetV(s), 12);
+		my_test::MyTestInplaceAddSimpleStructSimpleStruct(s, &b);
+		assert_eq!(my_test::MyTestGetV(s), 20);
+		my_test::MyTestInplaceAddSimpleStructInt(s,4);
+		assert_eq!(my_test::MyTestGetV(s), 24);
 		
-		s = s.DivInt(4);
-		assert_eq!(s.GetV(), 6);
-		s.InplaceDivInt(3);
-		assert_eq!(s.GetV(), 2);
-		s.InplaceAddSimpleStruct(&a);
-		assert_eq!(s.GetV(), 6);
+		s = my_test::MyTestDivSimpleStructInt(s, 4);
+		assert_eq!(my_test::MyTestGetV(s), 6);
+		my_test::MyTestInplaceDivSimpleStructnt(s, 3);
+		assert_eq!(my_test::MyTestGetV(s), 2);
+		my_test::MyTestInplaceAddSimpleStructSimpleStruct(s, &a);
+		assert_eq!(my_test::MyTestGetV(s), 6);
 
 
-		s = s.MulSimpleStruct(&a);
-		assert_eq!(s.GetV(), 24);
-		s.InplaceMulInt(2);
-		assert_eq!(s.GetV(), 48);
+		s = my_test::MyTestMulSimpleStructSimpleStruct(s, &a);
+		assert_eq!(my_test::MyTestGetV(s), 24);
+		my_test::MyTestInplaceMulSimpleStructInt(s, 2);
+		assert_eq!(my_test::MyTestGetV(s), 48);
 
-		s = s.SubSimpleStruct(&b);
-		assert_eq!(s.GetV(), 40);
-		s.InplaceSubInt(32);
-		assert_eq!(s.GetV(), 8);
+		s = my_test::MyTestSubSimpleStructSimpleStruct(s, &b);
+		assert_eq!(my_test::MyTestGetV(s), 40);
+		my_test::MyTestInplaceSubSimpleStructInt(s, 32);
+		assert_eq!(my_test::MyTestGetV(s), 8);
 
-		let c = a.MulInt(2);
+		let c = my_test::MyTestMulSimpleStructInt(a, 2);
 		assert!(c.eq(&b));
 		assert!(!a.ne(&b));
 	}

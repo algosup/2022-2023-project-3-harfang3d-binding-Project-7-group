@@ -144,31 +144,31 @@ mod my_test;
 #[test]
 fn test() {
 	unsafe {
-		let s = my_test::MyTestReturnSimpleStructByPointer();
+		let s = my_test::MyTestConstructorSimpleStruct();
 
-		assert_eq!(s.a, 7);
-		assert_eq!(s.b, 17.5);
-		assert_eq!(s.c, true);
-		assert_eq!(s.d, 9);
-		assert_eq!(s.text_field, "some content");
+		assert_eq!(my_test::MyTestSimpleStructGetA(s) 7);
+		assert_eq!(my_test::MyTestSimpleStructGetB(s), 17.5);
+		assert_eq!(my_test::MyTestSimpleStructGetC(s), true);
+		assert_eq!(my_test::MyTestSimpleStructGetD(s), 9);
+		assert_eq!(my_test::MyTestSimpleStructGetTextField(s), "some content");
 
-		s.a = -2;
-		s.b = -4.5;
-		s.c = false;
+		my_test::MyTestSimpleStructSetA(s, -2);
+		my_test::MyTestSimpleStructSetB(s, -4.5);
+		my_test::MyTestSimpleStructSetC(s, false);
 		
-		assert_eq!(s.a, -2);
-		assert_eq!(s.b, -4.5);
-		assert_eq!(s.c, false);
+		assert_eq!(my_test::MyTestSimpleStructGetA(s), -2);
+		assert_eq!(my_test::MyTestSimpleStructGetB(s), -4.5);
+		assert_eq!(my_test::MyTestSimpleStructGetC(s), false);
 
-		s.a += 4;
-		assert_eq!(s.a, 2);
+		my_test::MyTestSimpleStructSetA(s,(my_test::MyTestSimpleStructGetA(s)+4)
+		assert_eq!(my_test::MyTestSimpleStructGetA(s), 2);
 
 		// write to const member
 		// can't set d because it's a const
 		// check if it didn't bind it
 
 		let do_step = || -> Result<(),,Box<dyn std::error::Error>> {
-			s.d = 12;
+			my_test::MyTestSimpleStructSetD(s)
 			Ok(())
 		};
 
@@ -179,7 +179,7 @@ fn test() {
 		}
 		
 		assert_eq!(write_to_const_failed, true);
-		assert_eq!(s.d, 9);
+		assert_eq!(my_test::MyTestSimpleStructGetD(s), 9);
 	}
 }
 '''

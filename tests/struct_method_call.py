@@ -173,3 +173,4 @@ fn test() {
 		assert_eq!(s_out2.GetA(), 28);
 	}
 }
+'''
