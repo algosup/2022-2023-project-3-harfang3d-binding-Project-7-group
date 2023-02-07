@@ -1,0 +1,7 @@
+use std::ffi::CStr;
+pub unsafe fn print_c_string(ptr: *mut c_void) -> String {
+    let c_str = CStr::from_ptr(ptr as *mut _);
+    let rust_str = c_str.to_str().expect("Bad encoding");
+    return rust_str.to_owned();
+
+}
