@@ -1791,7 +1791,7 @@ uint32_t %s(void* p) {
 			if type.is_type_class():
 				rust_bind += f"// bind {clean_name_with_title(self._name)}{clean_name_with_title(type.bound_name)} methods\n"
 			
-				rust_bind += f"pub fn {clean_name_with_title(self._name)}Constructor{clean_name_with_title(type.bound_name)}() -> *mut {type.bound_name};\n"
+				rust_bind += f"pub fn {clean_name_with_title(self._name)}Constructor{clean_name_with_title(type.bound_name)}() -> *mut {clean_name_with_title(type.bound_name)};\n"
 				for member in type.members:
 					rust_bind += f"pub fn {clean_name_with_title(self._name)}{clean_name_with_title(type.bound_name)}Get{clean_name_with_title(member['name'].naked_name())}({clean_name_with_title(type.bound_name).lower()}: *mut {clean_name_with_title(type.bound_name)}) -> {self.select_ctype_conv(member['ctype']).rust_type};\n"
 					rust_bind += f"pub fn {clean_name_with_title(self._name)}{clean_name_with_title(type.bound_name)}Set{clean_name_with_title(member['name'].naked_name())}({clean_name_with_title(type.bound_name).lower()}: *mut {clean_name_with_title(type.bound_name)},value : {self.select_ctype_conv(member['ctype']).rust_type});\n"
@@ -1972,7 +1972,7 @@ uint32_t %s(void* p) {
 			if conv.nobind:
 				continue
 			if conv.is_type_class():
-				rust_struct += f"pub type {conv.bound_name} = c_void;\n\n"
+				rust_struct += f"pub type {clean_name_with_title(conv.bound_name)} = c_void;\n\n"
 		return rust_struct
 
 	def finalize(self):
