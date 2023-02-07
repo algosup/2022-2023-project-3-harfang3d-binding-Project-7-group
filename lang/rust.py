@@ -187,7 +187,17 @@ class RustGenerator(gen.FABGen):
 				'#![allow(non_camel_case_types)]\n' \
 				'#![allow(non_snake_case)]\n' \
 				'#![allow(non_upper_case_globals)]\n' \
-				'#![allow(dead_code)]\n'
+				'#![allow(dead_code)]\n' \
+				'#![allow(unused_imports)]\n' \
+				'#![allow(unused_variables)]\n' \
+				'#![allow(unused_mut)]\n' \
+				'#![allow(unused_parens)]\n' \
+				'#![allow(unused_assignments)]\n' \
+				'#![allow(unused_unsafe)]\n' \
+				'#![allow(unused_must_use)]\n' \
+				'#![allow(unused_imports)]\n' \
+				'#![allow(unused_macros)]\n'
+				 
 
 	def get_language(self):
 		return "Rust"
@@ -1718,7 +1728,6 @@ uint32_t %s(void* p) {
 			cleanBoundName = clean_name_with_title(conv.bound_name)
 			if conv.is_type_class():
 				rust_c += f"// bind {clean_name_with_title(self._name)}{cleanBoundName} methods\n"
-				rust_c += f"{conv.bound_name} * {clean_name_with_title(self._name)}{cleanBoundName}Create() {{ return new {conv.bound_name}(); }};\n"
 
 			if "sequence" in conv._features:
 				rust_c += self.__extract_sequence(conv)
