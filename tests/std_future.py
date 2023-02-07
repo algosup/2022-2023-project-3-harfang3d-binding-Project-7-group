@@ -85,7 +85,7 @@ mod my_test;
 #[test]
 fn test() {
 	unsafe {
-		let future = my_test::GetFutureValue();
+		let future = my_test::MyTestGetFutureValue();
 		assert!(future.valid());
 
 		future.wait();

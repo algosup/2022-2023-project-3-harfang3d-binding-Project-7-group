@@ -146,7 +146,7 @@ mod my_test;
 #[test]
 fn test() {
 	unsafe {
-		let s = my_test::simple_struct::SimplestConstructor();
+		let s = my_test::SimpleStruct::SimplestConstructor();
 
 		assert_eq!(s.GetA(), 1);
 		assert_eq!(s.SetAWithV0V1(8, 2), true);
@@ -155,15 +155,15 @@ fn test() {
 		assert_eq!(s.SetA(9), 9);
 		assert_eq!(s.GetA(), 9);
 
-		assert_eq!(my_test::simple_struct::GetStaticInt(), 4);
+		assert_eq!(my_test::SimpleStruct::GetStaticInt(), 4);
 
-		let mut s_out = my_test::GetModifyArgOut();
+		let mut s_out = my_test::MyTestGetModifyArgOut();
 		assert_eq!(s_out.GetA(), 4);
 
-		let mut s_out = my_test::GetModifyArgOutWithK(my_test::simple_struct::WithV(5));
+		let mut s_out = my_test::MyTestGetModifyArgOutWithK(my_test::SimpleStruct::WithV(5));
 		assert_eq!(s_out.GetA(), 16);
 
-		let s2 = my_test::simple_struct2::WithOtherStruct(s_out);
+		let s2 = my_test::SimpleStruct2::WithOtherStruct(s_out);
 		assert_eq!(s2.GetA(), 16);
 
 		let mut s_out2 = my_test::GetModifyArgOut2();

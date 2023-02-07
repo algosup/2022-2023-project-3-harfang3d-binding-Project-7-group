@@ -253,7 +253,7 @@ mod my_test;
 #[test]
 fn test() {
 	unsafe {
-		let mut v = my_test::VectorOfInt();
+		let mut v = my_test::MyTestVectorOfInt();
 
 		assert_eq!(v.size(), 0);
 		assert_eq!(v.len(), 0);
@@ -283,19 +283,19 @@ fn test() {
 
 		assert_eq!(v.get(0), 20);
 
-		assert_eq!(my_test::ConsumePointerToInt(v.data()), 16);
+		assert_eq!(my_test::MyTestConsumePointerToInt(v.data()), 16);
 
 		// implicit cast to const int *
-		assert_eq!(my_test::ConsumePointerToInt(v), 16);
+		assert_eq!(my_test::MyTestConsumePointerToInt(v), 16);
 
 		// construct from Slice
-		let w = my_test::VectorOfIntWithSequence(&[5, 2, 8]);
+		let w = my_test::MyTestVectorOfIntWithSequence(&[5, 2, 8]);
 
 		assert_eq!(w.get(0), 5);
 		assert_eq!(w.get(1), 2);
 		assert_eq!(w.get(2), 8);
 
-		let mut v_ptr = my_test::VectorOfIntPtr();
+		let mut v_ptr = my_test::MyTestVectorOfIntPtr();
 		v_ptr.pushBack(std::ptr::null_mut());
 		v_ptr.pushBack(v.data());
 		

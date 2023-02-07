@@ -129,29 +129,29 @@ mod my_test;
 #[test]
 fn test() {
 	unsafe {
-		assert_eq!(my_test::GetInt(), 8);
+		assert_eq!(my_test::MyTestGetInt(), 8);
 
-		assert_eq!(my_test::GetGlobalInt(), 0);
-		my_test::SetGlobalInt();
-		assert_eq!(my_test::GetGlobalInt(), 8);
+		assert_eq!(my_test::MyTestGetGlobalInt(), 0);
+		my_test::MyTestSetGlobalInt();
+		assert_eq!(my_test::MyTestGetGlobalInt(), 8);
 
 		// overload
-		assert_eq!(my_test::Get(), 0);
-		assert_eq!(my_test::GetWithV(2), 1);
-		assert_eq!(my_test::GetWithVk(4, 3), 12);
-		assert_eq!(my_test::GetWithVkb(4, 3, 2), 14);
+		assert_eq!(my_test::MyTestGet(), 0);
+		assert_eq!(my_test::MyTestGetWithV(2), 1);
+		assert_eq!(my_test::MyTestGetWithVK(4, 3), 12);
+		assert_eq!(my_test::MyTestGetWithVKB(4, 3, 2), 14);
 
 		// optional argument
-		assert_eq!(my_test::GetGlobalIntMultiplied(), 15);
-		assert_eq!(my_test::GetGlobalIntMultipliedWithK(2), 6);
+		assert_eq!(my_test::MyTestGetGlobalIntMultiplied(), 15);
+		assert_eq!(my_test::MyTestGetGlobalIntMultipliedWithK(2), 6);
 		
 		// argument in out
 		let mut v = 2;
-		my_test::GetModifyArgInOut(&mut v);
+		my_test::MyTestGetModifyArgInOut(&mut v);
 		assert_eq!(v, 17);
 
 		let mut v = 2;
-		my_test::GetModifyArgInOutWithK(&mut v, 4);
+		my_test::MyTestGetModifyArgInOutWithK(&mut v, 4);
 		assert_eq!(v, 14);
 	}
 }

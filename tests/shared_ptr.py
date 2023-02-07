@@ -111,17 +111,17 @@ mod my_test;
 #[test]
 fn test() {
 	unsafe {
-		let sp = my_test::GetSharedPtrToSimpleStruct();
+		let sp = my_test::MyTestGetSharedPtrToSimpleStruct();
 
 		assert_eq!(sp.u, 4.0);
 		assert_eq!(sp.v, 7);
 
-		let sp2 = my_test::SsimpleStruct::new(9.0);
+		let sp2 = my_test::MyTestSimpleStruct::new(9.0);
 		
 		assert_eq!(sp2.u, 9.0);
 		assert_eq!(sp2.v, 90);
 
-		let spn = my_test::GetEmptySharedPtr();
+		let spn = my_test::MyTestGetEmptySharedPtr();
 
 		assert!(spn.isNone());
 	}

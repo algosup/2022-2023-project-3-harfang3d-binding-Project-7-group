@@ -76,8 +76,8 @@ mod my_test;
 #[test]
 fn test() {
 	unsafe {
-		let s = my_test::EnclosingTemplateInt();
-		let n = my_test::GetNestedStructInt(s);
+		let s = my_test::MyTestEnclosingTemplateInt();
+		let n = my_test::MyTestGetNestedStructInt(s);
 		assert_eq!(n.v, 9);
 	}
 }

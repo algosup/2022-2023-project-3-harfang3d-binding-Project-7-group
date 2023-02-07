@@ -116,11 +116,11 @@ mod my_test;
 #[test]
 fn test() {
 	unsafe {
-		let b = my_test::GetB();
+		let b = my_test::MyTestGetB();
 		assert_eq!(b.b, 3);
 		assert_eq!(b.GetBaseValue(), 12);
 		
-		let c = my_test::GetC();
+		let c = my_test::MyTestGetC();
 		assert_eq!(c.c, 7);
 		assert_eq!(c.GetBaseValue(), 12);
 	}

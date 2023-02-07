@@ -568,11 +568,15 @@ class RustTestBed:
 			# print(work_path)
 			shutil.move(f"{work_path}/test.rs", f"{work_path}/test_rust/src/main.rs")
 			shutil.move(f"{work_path}/bind.rs", f"{work_path}/test_rust/src/my_test.rs")
+			if args.linux:
+				shutil.move(f"{work_path}/libmy_test.so", f"{work_path}/test_rust/libmy_test.so")
+			else:
+				shutil.move(f"{work_path}/my_test.dll", f"{work_path}/test_rust/my_test.dll")
+				shutil.move(f"{work_path}/my_test.lib", f"{work_path}/test_rust/my_test.lib")
+
 			# exit()
 			# subprocess.call("mv ../test.rs ./src/main.rs", shell=False, stderr=subprocess.STDOUT)
 			subprocess.check_output("cargo test", shell=True, stderr=subprocess.STDOUT)
-			#subprocess.check_output("goimports -w bind.go", shell=True, stderr=subprocess.STDOUT)
-			#subprocess.check_output('go test -run ""', shell=True, stderr=subprocess.STDOUT)
 
 			# shutil.copyfile(f"{work_path}/test.rs", f"{work_path}/test_rust/src/lib.rs")
 		except subprocess.CalledProcessError as e:

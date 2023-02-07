@@ -77,8 +77,8 @@ mod my_test;
 #[test]
 fn test() {
 	unsafe {
-		let a = my_test::GetBaseClass();
-		let b = my_test::CastBaseClassToDerivedClass(a);
+		let a = my_test::MyTestGetBaseClass();
+		let b = my_test::MyTestCastBaseClassToDerivedClass(a);
 		assert_eq!(b.GetU(), 7);
 	}
 }

@@ -119,3 +119,4 @@ fn test() {
 		assert_eq!(my_test::NE_c, 4096);
 	}
 }
+'''

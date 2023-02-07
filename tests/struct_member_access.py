@@ -144,7 +144,7 @@ mod my_test;
 #[test]
 fn test() {
 	unsafe {
-		let s = my_test::ReturnSimpleStructByPointer();
+		let s = my_test::MyTestReturnSimpleStructByPointer();
 
 		assert_eq!(s.a, 7);
 		assert_eq!(s.b, 17.5);
@@ -167,10 +167,12 @@ fn test() {
 		// can't set d because it's a const
 		// check if it didn't bind it
 
-		let do_step = || Result<(),MyError> {
+		let do_step = || -> Result<(),,Box<dyn std::error::Error>> {
 			s.d = 12;
 			Ok(())
 		};
+
+		let write_to_const_failed = false;
 
 		if let Err(_err) = do_steps() {
 			write_to_const_failed = true;

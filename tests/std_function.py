@@ -131,11 +131,11 @@ mod my_test;
 #[test]
 fn test() {
 	unsafe {
-		my_test::SetSimpleVoidFunction(simple_void_function);
-		my_test::InvokeSimpleVoidFunction();
+		my_test::MyTestSetSimpleVoidFunction(simple_void_function);
+		my_test::MyTestInvokeSimpleVoidFunction();
 
-		my_test::SetComputeFunction(compute_function);
-		let r = my_test::InvokeComputeFunction(5, 3, 4);
+		my_test::MyTestSetComputeFunction(compute_function);
+		let r = my_test::MyTestInvokeComputeFunction(5, 3, 4);
 
 		assert_eq!(r, 19);
 	}
