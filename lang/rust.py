@@ -1728,7 +1728,6 @@ uint32_t %s(void* p) {
 			cleanBoundName = clean_name_with_title(conv.bound_name)
 			if conv.is_type_class():
 				rust_c += f"// bind {clean_name_with_title(self._name)}{cleanBoundName} methods\n"
-				rust_c += f"{conv.bound_name} * {clean_name_with_title(self._name)}{cleanBoundName}Create() {{ return new {conv.bound_name}(); }};\n"
 
 			if "sequence" in conv._features:
 				rust_c += self.__extract_sequence(conv)
