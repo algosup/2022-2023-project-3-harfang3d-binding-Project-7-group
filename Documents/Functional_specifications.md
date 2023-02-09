@@ -92,6 +92,7 @@ The final deliverables for the binding will include:
 * Tests for the binding, including unit and integration tests, following Fabgen's existing templates, to ensure that it works correctly and is reliable.
 
 ## Competitors
+Here is a list of projects close to Fabgen's rust accomplishment:
 * [rust-bindgen](https://rust-lang.github.io/rust-bindgen/): It is a Rust library that generates Rust FFI bindings to C and C++ libraries.
 
 * [FFI (Foreign Function Interface)](https://doc.rust-lang.org/nomicon/ffi.html): Allows Rust programs to call C functions. It is a low-level library that requires the developer to write lots of unsafe code. It is not compatible with C++ libraries.
@@ -164,7 +165,7 @@ python3 bind.py <lang> --out <output-folder> <script.py>
 ```
 For example:
 ```bash
-python3 bind.py --rust --out ./out ./examples/harfang.py
+python3 bind.py --rust --out ./out ./examples/generator.py
 ```
 Finally, they must import the library/crate created by Fabgen and use the Rust binding in their Rust program:
 ```rust
