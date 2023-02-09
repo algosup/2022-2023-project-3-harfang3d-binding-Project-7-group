@@ -111,7 +111,7 @@ fn test() {
 
 		let d = my_test::MyTestGetObj2();
 
-		assert!(*(a as *mut i32) == (d as *mut i32));
+		assert!(*(a as *mut i32) == *(d as *mut i32));
 	}
 }
 '''
