@@ -98,17 +98,17 @@ mod my_test;
 #[test]
 fn test() {
 	unsafe {
-		assert_eq!(my_test::v, 2);
-		my_test::v = 5;
-		assert_eq!(my_test::v, 5);
+		assert_eq!(my_test::MyTestGetV(), 2);
+		my_test::MyTestSetV(5);
+		assert_eq!(my_test::MyTestGetV(), 5);
 		
-		assert_eq!(my_test::s.v, 4);
-		my_test::s.v = 9;
-		assert_eq!(my_test::s.v, 9);
+		assert_eq!(my_test::MyTestSimpleStructGetV(my_test::MyTestGetS()), 4);
+		my_test::MyTestSimpleStructSetV(my_test::MyTestGetS(), 9);
+		assert_eq!(my_test::MyTestSimpleStructGetV(my_test::MyTestGetS()), 9);
 
-		assert_eq!(my_test::w, 14);
+		assert_eq!(my_test::MyTestGetW(), 14);
 
-		assert_eq!(my_test::u, 7.0);
+		assert_eq!(my_test::MyTestGetU(), 7.0);
 	}
 }
 '''

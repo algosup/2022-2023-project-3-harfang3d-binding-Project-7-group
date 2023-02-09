@@ -105,20 +105,20 @@ mod my_test;
 #[test]
 fn test() {
 	unsafe {
-		let n = my_test::nested_struct::new();
-		assert_eq!(n.GetV(), 8);
-		n.SetV(n.GetV() - 4);
-		assert_eq!(n.GetV(), 4);
+		let n = my_test::MyTestConstructorNestedStruct();
+		assert_eq!(my_test::MyTestNestedStructGetV(n), 8);
+		my_test::MyTestNestedStructSetV(n, my_test::MyTestNestedStructGetV(n) - 4);
+		assert_eq!(my_test::MyTestNestedStructGetV(n), 4);
 
 		//
-		let e = my_test::enclosing_struct::new();
-		assert_eq!(e.GetN().GetV(), 8);
-		e.GetN().SetV(12);
-		assert_eq!(e.GetN().GetV(), 12);
-		e.GetN().SetV(e.GetN().GetV() * 4);
-		assert_eq!(e.GetN().GetV(), 48);
-		e.GetN().SetV(e.GetN().GetV() / 2);
-		assert_eq!(e.GetN().GetV(), 24);
+		let e = my_test::MyTestConstructorEnclosingStruct();
+		assert_eq!(my_test::MyTestNestedStructGetV(my_test::MyTestEnclosingStructGetN(e)), 8);
+		my_test::MyTestNestedStructSetV(my_test::MyTestEnclosingStructGetN(e),12);
+		assert_eq!(my_test::MyTestNestedStructGetV(my_test::MyTestEnclosingStructGetN(e)), 12);
+		my_test::MyTestNestedStructSetV(my_test::MyTestEnclosingStructGetN(e),my_test::MyTestNestedStructGetV(my_test::MyTestEnclosingStructGetN(e)) * 4);
+		assert_eq!(my_test::MyTestNestedStructGetV(my_test::MyTestEnclosingStructGetN(e)), 48);
+		my_test::MyTestNestedStructSetV(my_test::MyTestEnclosingStructGetN(e),my_test::MyTestNestedStructGetV(my_test::MyTestEnclosingStructGetN(e)) / 2);
+		assert_eq!(my_test::MyTestNestedStructGetV(my_test::MyTestEnclosingStructGetN(e)), 24);
 	}
 }
 '''

@@ -74,11 +74,11 @@ mod my_test;
 #[test]
 fn test() {
 	unsafe {
-		let v = my_test::simple_struct::new();
-		assert_eq!(v.v, 3);
+		let v = my_test::MyTestConstructorSimpleStruct();
+		assert_eq!(my_test::MyTestSimpleStructGetV(v), 3);
 
-		assert_eq!(my_test::simple_struct::i, 5);
-		assert_eq!(my_test::simple_struct::s, "some string");
+		assert_eq!(my_test::MyTestSimpleStructGetI(), 5);
+		assert_eq!(my_test::MyTestSimpleStructGetS(), "some string");
 	}
 }
 '''
