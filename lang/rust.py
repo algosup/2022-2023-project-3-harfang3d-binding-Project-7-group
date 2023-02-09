@@ -738,7 +738,7 @@ uint32_t %s(void* p) {
 						arg_bound_name += f"{val['conv'].bound_name} "
 
 				# add a star (only if it's not a const char * SPECIAL CASE)
-				if "RustConstCharPtrConverter" not in str(val["conv"]) and ("carg" not in val or not val["carg"].ctype.const):
+				if "RustConstCharPtrConverter" not in str(val["conv"]):
 					arg_bound_name += "*"
 
 				if "carg" in val and hasattr(val["carg"].ctype, "ref") and not val["carg"].ctype.const:
