@@ -113,17 +113,18 @@ fn test() {
 	unsafe {
 		let sp = my_test::MyTestGetSharedPtrToSimpleStruct();
 
-		assert_eq!(sp.u, 4.0);
-		assert_eq!(sp.v, 7);
+		assert_eq!(my_test::MyTestSimpleStructGetU(sp), 4.0);
+		assert_eq!(my_test::MyTestSimpleStructGetV(sp), 7);
 
-		let sp2 = my_test::MyTestSimpleStruct::new(9.0);
+		let sp2 = my_test::MyTestConstructorSimpleStruct(9.0);
 		
-		assert_eq!(sp2.u, 9.0);
-		assert_eq!(sp2.v, 90);
+		assert_eq!(my_test::MyTestSsimpleStructGetU(sp2), 9.0);
+		assert_eq!(my_test::MyTestSsimpleStructGetV(sp2), 90);
+
 
 		let spn = my_test::MyTestGetEmptySharedPtr();
 
-		assert!(spn.isNone());
+		assert!(spn.is_null());
 	}
 }
 '''

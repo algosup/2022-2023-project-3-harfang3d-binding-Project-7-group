@@ -146,31 +146,31 @@ mod my_test;
 #[test]
 fn test() {
 	unsafe {
-		let s = my_test::SimpleStruct::SimplestConstructor();
+		let s = my_test::MyTestConstructorSimpleStruct();
 
-		assert_eq!(s.GetA(), 1);
-		assert_eq!(s.SetAWithV0V1(8, 2), true);
+		assert_eq!(my_test::MyTestSimpleStructGetA(s), 1);
+		assert_eq!(my_test::MyTestSetASimpleStructWithV0V1(s,8, 2), true);
 
-		assert_eq!(s.GetA(), 10);
-		assert_eq!(s.SetA(9), 9);
-		assert_eq!(s.GetA(), 9);
+		assert_eq!(my_test::MyTestGetASimpleStruct(s), 10);
+		assert_eq!(my_test::MyTestSetASimpleStruct(s,9), 9);
+		assert_eq!(my_test::MyTestGetASimpleStruct(s), 9);
 
-		assert_eq!(my_test::SimpleStruct::GetStaticInt(), 4);
+		assert_eq!(my_test::MyTestGetStaticIntSimpleStruct(), 4);
 
 		let mut s_out = my_test::MyTestGetModifyArgOut();
-		assert_eq!(s_out.GetA(), 4);
+		assert_eq!(my_test::MyTestSimpleStructGetA(s_out), 4);
 
 		let mut s_out = my_test::MyTestGetModifyArgOutWithK(my_test::SimpleStruct::WithV(5));
-		assert_eq!(s_out.GetA(), 16);
+		assert_eq!(my_test::MyTestSimpleStructGetA(s_out), 16);
 
-		let s2 = my_test::SimpleStruct2::WithOtherStruct(s_out);
-		assert_eq!(s2.GetA(), 16);
+		let s2 = my_test::MyTestConstructorSimpleStruct2WithOtherStruct(s_out);
+		assert_eq!(my_test::MyTestSimpleStruct2GetA(s2), 16);
 
-		let mut s_out2 = my_test::GetModifyArgOut2();
-		assert_eq!(s_out2.GetA(), 4);
+		let mut s_out2 = my_test::MyTestGetModifyArgOut2();
+		assert_eq!(s_out2.MyTestSimpleStruct2GetA(), 4);
 
 		let mut s_out2 = my_test::GetModifyArgOut2WithK(s);
-		assert_eq!(s_out2.GetA(), 28);
+		assert_eq!(s_out2.MyTestSimpleStruct2GetA(), 28);
 	}
 }
 '''

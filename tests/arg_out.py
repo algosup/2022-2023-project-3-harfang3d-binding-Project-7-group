@@ -2,7 +2,7 @@ import lib
 
 
 def bind_test(gen):
-	gen.start('my_test')
+	gen.start('my_test')          
 
 	lib.bind_defaults(gen)
 

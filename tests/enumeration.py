@@ -117,6 +117,6 @@ fn test() {
 		assert_eq!(my_test::NE_a, 0);
 		assert_eq!(my_test::NE_b, 1);
 		assert_eq!(my_test::NE_c, 4096);
-	}
+	}                           
 }
 '''
