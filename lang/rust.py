@@ -184,19 +184,7 @@ class RustGenerator(gen.FABGen):
 		self.check_self_type_in_ops = True
 		self.rust = ""
 		self.rust_directives = f'// rust wrapper header\n' \
-				'#![allow(non_camel_case_types)]\n' \
-				'#![allow(non_snake_case)]\n' \
-				'#![allow(non_upper_case_globals)]\n' \
 				'#![allow(dead_code)]\n' \
-				'#![allow(unused_imports)]\n' \
-				'#![allow(unused_variables)]\n' \
-				'#![allow(unused_mut)]\n' \
-				'#![allow(unused_parens)]\n' \
-				'#![allow(unused_assignments)]\n' \
-				'#![allow(unused_unsafe)]\n' \
-				'#![allow(unused_must_use)]\n' \
-				'#![allow(unused_imports)]\n' \
-				'#![allow(unused_macros)]\n'
 				 
 
 	def get_language(self):
