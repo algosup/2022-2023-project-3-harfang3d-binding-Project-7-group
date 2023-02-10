@@ -1,0 +1,2 @@
+# Software and Hardware Research
+In this project there is basically no research to do on software and hardware. For the hardware part, the project will be compatible with Windows and Linux (Ubuntu) because this is what is already done by the client on Harfang and Fabgen. For the software part we don't have to research anything because it already our base for the project.
