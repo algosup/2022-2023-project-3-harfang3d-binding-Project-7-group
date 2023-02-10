@@ -255,35 +255,35 @@ fn test() {
 	unsafe {
 		let mut v = my_test::MyTestConstructorVectorOfInt();
 
-		assert_eq!(my_test::MyTestGetSize(v), 0);
-		assert_eq!(my_test::MyTestGetLen(v), 0);
+		assert_eq!(my_test::MyTestSizeVectorOfInt(v), 0);
+		assert_eq!(my_test::MyTestVectorOfIntLenOperator(v), 0);
 
-		my_test::MyTestPushBack(v,5);
-		my_test::MyTestPushBack(v,1);
-		my_test::MyTestPushBack(v,9);
+		my_test::MyTestPushBackVectorOfInt(v,5);
+		my_test::MyTestPushBackVectorOfInt(v,1);
+		my_test::MyTestPushBackVectorOfInt(v,9);
 
-		assert_eq!(my_test::MyTestGetSize(v), 3);
-		assert_eq!(my_test::MyTestGetLen(v), 3);
+		assert_eq!(my_test::MyTestSizeVectorOfInt(v), 3);
+		assert_eq!(my_test::MyTestVectorOfIntLenOperator(v), 3);
 
-		assert_eq!(my_test::MyTestGetAt(v,1), 1);
-		assert_eq!(my_test::MyTestGetAt(v,2), 9);
-		assert_eq!(my_test::MyTestGetAt(v,0), 5);
+		assert_eq!(my_test::MyTestAtVectorOfInt(v,1), 1);
+		assert_eq!(my_test::MyTestAtVectorOfInt(v,2), 9);
+		assert_eq!(my_test::MyTestAtVectorOfInt(v,0), 5);
 
-		assert_eq!(my_test::MyTestGet(v,1), 1);
-		assert_eq!(my_test::MyTestGet(v,2), 9);
-		assert_eq!(my_test::MyTestGet(v,0), 5);
+		assert_eq!(my_test::MyTestVectorOfIntGetOperator(v,1), 1);
+		assert_eq!(my_test::MyTestVectorOfIntGetOperator(v,2), 9);
+		assert_eq!(my_test::MyTestVectorOfIntGetOperator(v,0), 5);
 
-		my_test::MyTestSet(v, 1, 16);
+		my_test::MyTestVectorOfIntSetOperator(v, 1, 16);
 
-		assert_eq!(my_test::MyTestGet(v,2), 9);
-		assert_eq!(my_test::MyTestGet(v,0), 5);
-		assert_eq!(my_test::MyTestGet(v,1), 16);
+		assert_eq!(my_test::MyTestVectorOfIntGetOperator(v,2), 9);
+		assert_eq!(my_test::MyTestVectorOfIntGetOperator(v,0), 5);
+		assert_eq!(my_test::MyTestVectorOfIntGetOperator(v,1), 16);
 
-		my_test::MyTestSet(v, 0, my_test::MyTestGet(v,0) * 4);
+		my_test::MyTestVectorOfIntSetOperator(v, 0, my_test::MyTestVectorOfIntGetOperator(v,0) * 4);
 
-		assert_eq!(my_test::MyTestGet(v, 0), 20);
+		assert_eq!(my_test::MyTestVectorOfIntGetOperator(v, 0), 20);
 
-		assert_eq!(my_test::MyTestConsumePointerToInt(my_test::MyTestGetData(v)), 16);
+		assert_eq!(my_test::MyTestConsumePointerToInt(my_test::MyTestDataVectorOfInt(v)), 16);
 
 		// implicit cast to const int *
 		assert_eq!(my_test::MyTestConsumePointerToInt(v), 16);
@@ -291,16 +291,16 @@ fn test() {
 		// construct from Slice
 		let w = my_test::MyTestVectorOfIntWithSequence(&[5, 2, 8]);
 
-		assert_eq!(my_test::MyTestGet(w, 0), 5);
-		assert_eq!(my_test::MyTestGet(w, 1), 2);
-		assert_eq!(my_test::MyTestGet(w, 2), 8);
+		assert_eq!(my_test::MyTestVectorOfIntGetOperator(w, 0), 5);
+		assert_eq!(my_test::MyTestVectorOfIntGetOperator(w, 1), 2);
+		assert_eq!(my_test::MyTestVectorOfIntGetOperator(w, 2), 8);
 
-		let mut v_ptr = my_test::MyTestVectorOfIntPtr();
-		my_test::MyTestGetPushBack(v_ptr, std::ptr::null_mut());
-		my_test::MyTestGetPushBack(v_ptr, my_test::MyTestGetData(v));
+		let mut v_ptr = my_test::MyTestConstructorVectorOfIntPtr();
+		my_test::MyTestPushBackVectorOfIntPtr(v_ptr, std::ptr::null_mut());
+		my_test::MyTestPushBackVectorOfIntPtr(v_ptr, my_test::MyTestDataVectorOfInt(v));
 		
-		assert_eq!(my_test::MyTestGetSize(v_ptr), 2);
-		assert_eq!(my_test::MyTestGetLen(v_ptr), 2);
+		assert_eq!(my_test::MyTestSizeVectorOfIntPtr(v_ptr), 2);
+		assert_eq!(my_test::MyTestVectorOfIntPtrLenOperator(v_ptr), 2);
 	}
 }
 '''

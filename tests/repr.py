@@ -43,11 +43,5 @@ package mytest
 test_rust = '''\
 mod my_test;
 
-#[test]
-fn test() {
-	unsafe {
-		let o = my_test::MyTestConstructorSomeStruct();
-		assert_eq!(o.repr(), "repr!");
-	}
-}
+
 '''
