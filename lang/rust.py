@@ -1241,7 +1241,7 @@ uint32_t %s(void* p) {
 			rust += "("
 			if len(proto["args"]):
 				has_previous_arg = False
-				for argin in proto["argsin"]:
+				for argin in proto["args"]:
 					if has_previous_arg:
 						rust += " ,"
 
@@ -1255,22 +1255,22 @@ uint32_t %s(void* p) {
 			rust += ")"
 
 			# add output(s) declaration
-			rust += " -> ("
-			has_previous_ret_arg = False
+			# has_previous_ret_arg = False
 			if proto["rval"]["conv"]:
+				rust += " -> "
 				rust += self.__get_arg_bound_name_to_rust(proto["rval"])
-				has_previous_ret_arg = True
+				# has_previous_ret_arg = True
 			
 			# only add arg output, NOT ARG IN OUT (pass them by pointer, not return them)
-			if len(proto['args']):
-				for arg in proto['args']:
-					if 'arg_out' in proto['features'] and str(arg['carg'].name) in proto['features']['arg_out']:
-						if has_previous_ret_arg:
-							rust += " ,"
+			# if len(proto['args']):
+			# 	for arg in proto['args']:
+			# 		if 'arg_out' in proto['features'] and str(arg['carg'].name) in proto['features']['arg_out']:
+			# 			if has_previous_ret_arg:
+			# 				rust += " ,"
 
-						rust += self.__get_arg_bound_name_to_rust(arg)
-						has_previous_ret_arg = True
-			rust += ");"
+			# 			rust += self.__get_arg_bound_name_to_rust(arg)
+			# 			has_previous_ret_arg = True
+			rust += ";"
 			return rust
 
 	def __extract_method_signature_rust(self, classname, convClass, method, static=False, name=None, bound_name=None, is_global=False, is_constructor=False):
@@ -1550,6 +1550,84 @@ uint32_t %s(void* p) {
 		return rust
 
 
+	def __rust_temp(self):
+		rust = ""
+		for conv in self._bound_types:
+			if conv.nobind:
+				continue
+
+			cleanBoundName = clean_name_with_title(conv.bound_name)
+
+			# special Slice
+			if isinstance(conv, lib.go.stl.GoSliceToStdVectorConverter):
+				arg_boung_name = self.__get_arg_bound_name_to_go({"conv":conv.T_conv})
+				rust += f"// {clean_name_with_title(conv.bound_name)} ...\n" \
+							f"type {clean_name_with_title(conv.bound_name)} []{arg_boung_name}\n\n"
+
+			# it's class
+			if self.__get_is_type_class_or_pointer_with_class(conv):
+				doc = self.get_symbol_doc(conv.bound_name)
+				if doc == "":
+					doc = " ..."
+				else:
+					doc = " " + re.sub(r'(\[)(.*?)(\])', r'\1harfang.\2\3', doc)
+
+				rust += f"// {cleanBoundName} {doc}\n" \
+							f"type {cleanBoundName} struct{{\n" \
+							f"	h C.{clean_name_with_title(self._name)}{cleanBoundName}\n" \
+							"}\n\n" \
+							f"// New{cleanBoundName}FromCPointer ...\n" \
+							f"func New{cleanBoundName}FromCPointer(p unsafe.Pointer) *{cleanBoundName} {{\n" \
+							f"	retvalGO := &{cleanBoundName}{{h: (C.{clean_name_with_title(self._name)}{cleanBoundName})(p)}}\n" \
+							f"	return retvalGO\n" \
+							"}\n"
+			
+			# it's a sequence
+			if "sequence" in conv._features:
+				rust += self.__extract_sequence_go(conv)
+
+			# static members
+			rust += self.extract_conv_and_bases(conv.static_members, \
+									lambda member: self.__extract_get_set_member_go(conv.bound_name, member, static=True), \
+									[base_class.static_members for base_class in conv._bases])
+
+			# members
+			rust += self.extract_conv_and_bases(conv.members, \
+									lambda member: self.__extract_get_set_member_go(conv.bound_name, member, static=False), \
+									[base_class.members for base_class in conv._bases])
+
+			# constructors
+			if conv.constructor:
+				rust += self.__extract_method_rust(conv.bound_name, conv, conv.constructor, bound_name=f"{conv.bound_name}", is_global=True, is_constructor=True)
+
+			# destructor for all type class
+			if self.__get_is_type_class_or_pointer_with_class(conv) :
+				rust += f"// Free ...\n" \
+				f"func (pointer *{cleanBoundName}) Free(){{\n" \
+				f"	C.{clean_name_with_title(self._name)}{cleanBoundName}Free(pointer.h)\n" \
+				f"}}\n"
+				
+				rust += f"// IsNil ...\n" \
+				f"func (pointer *{cleanBoundName}) IsNil() bool{{\n" \
+				f"	return pointer.h == C.{clean_name_with_title(self._name)}{cleanBoundName}(nil)\n" \
+				f"}}\n"
+
+				# runtime.SetFinalizer(funcret, func(ctx *Ret) { C.free(ctx.bufptr) })
+
+		# enum
+		for bound_name, enum in self._enums.items():
+			rust += f"// {bound_name} ...\n"
+			enum_conv = self._get_conv_from_bound_name(bound_name)
+			if enum_conv is not None and hasattr(enum_conv, "go_type") and enum_conv.go_type is not None:
+				rust += f"type {bound_name} {enum_conv.go_type}\n"
+			else:
+				rust += f"type {bound_name} int\n"
+			rust += "var (\n"
+			for id, name in enumerate(enum.keys()):
+				rust += f"	// {clean_name(name)} ...\n"
+				rust += f"	{clean_name(name)} =  {bound_name}(C.Get{bound_name}({id}))\n"
+			rust += ")\n"
+
 	# VERY SPECIAL
 	# check in every methods, 
 	# if one arg is only out and if it's a class, if there is a constructor with no arg
@@ -1795,7 +1873,23 @@ uint32_t %s(void* p) {
 				for member in type.members:
 					rust_bind += f"pub fn {clean_name_with_title(self._name)}{clean_name_with_title(type.bound_name)}Get{clean_name_with_title(member['name'].naked_name())}({clean_name_with_title(type.bound_name).lower()}: *mut {clean_name_with_title(type.bound_name)}) -> {self.select_ctype_conv(member['ctype']).rust_type};\n"
 					rust_bind += f"pub fn {clean_name_with_title(self._name)}{clean_name_with_title(type.bound_name)}Set{clean_name_with_title(member['name'].naked_name())}({clean_name_with_title(type.bound_name).lower()}: *mut {clean_name_with_title(type.bound_name)},value : {self.select_ctype_conv(member['ctype']).rust_type});\n"
+			# arithmetic operators
+			rust_bind += self.extract_conv_and_bases(type.arithmetic_ops, \
+									lambda arithmetic: self.__extract_method_rust(type.bound_name, type, arithmetic, bound_name=gen.get_clean_symbol_name(arithmetic['op'])), \
+									[base_class.arithmetic_ops for base_class in type._bases])
+			# comparison_ops
+			rust_bind += self.extract_conv_and_bases(type.comparison_ops, \
+									lambda comparison: self.__extract_method_rust(type.bound_name, type, comparison, bound_name=gen.get_clean_symbol_name(comparison['op'])), \
+									[base_class.comparison_ops for base_class in type._bases])
 
+			# static methods
+			rust_bind += self.extract_conv_and_bases(type.static_methods, \
+									lambda method: self.__extract_method_rust(type.bound_name, type, method, static=True), \
+									[base_class.static_methods for base_class in type._bases])
+			# methods
+			rust_bind += self.extract_conv_and_bases(type.methods, \
+									lambda method: self.__extract_method_rust(type.bound_name, type, method), \
+									[base_class.methods for base_class in type._bases])
 
 		# functions
 		for func in self._bound_functions:
@@ -1828,6 +1922,8 @@ uint32_t %s(void* p) {
 			if "group" not in var or var["group"] is None:
 				rust_bind += self.__extract_get_set_member_rust("", var, is_global=True)
 		
+
+
 		
 		rust_bind += "}"
 		return rust_bind
