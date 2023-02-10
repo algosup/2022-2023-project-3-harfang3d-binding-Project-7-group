@@ -1366,7 +1366,7 @@ uint32_t %s(void* p) {
 				rust += proto["suggested_suffix"]
 
 			# add input(s) declaration
-			rust += f"(_this : &mut {clean_name_with_title(classname)}"
+			rust += f"(_this : *mut {clean_name_with_title(classname)}"
 			has_previous_arg = True
 			if len(proto["args"]):
 				for argin in proto["args"]:
@@ -1909,7 +1909,6 @@ uint32_t %s(void* p) {
 			if "group" not in var or var["group"] is None:
 				rust_bind += self.__extract_get_set_member_rust("", var, is_global=True)
 		
-
 
 		
 		rust_bind += "}"
