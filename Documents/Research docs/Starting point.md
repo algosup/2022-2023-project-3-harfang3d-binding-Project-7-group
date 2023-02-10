@@ -20,6 +20,7 @@ Our client is [Harfang](https://www.harfang3d.com/en_US/). They created an effic
 The endproduct is an extention to the [Fabgen](https://github.com/ejulien/FABGen) Python library. The purpose of this library is to create bindings between C++ and a variety of other programming languages.
 At the moment, Fabgen is used to bind towards CPython, Lua and GoLang.
 Our objective is to add Rust to that list.
+The code for Fabgen is licensed under the "GNU General Public License v3.0" which allows us to use it and modify it for our project.
 
 
 ## Skills
