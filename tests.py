@@ -143,7 +143,7 @@ def build_and_deploy_cpython_extension(work_path, build_path, python_interpreter
 	try:
 		subprocess.check_output('cmake .. -G "%s"' % cmake_generator)
 	except subprocess.CalledProcessError as e:
-		print(e.output.decode('utf-8'))
+		sys.stdout.buffer.write(bytes(e.output))
 		return False
 
 	if args.debug_test:
@@ -163,7 +163,7 @@ def build_and_deploy_cpython_extension(work_path, build_path, python_interpreter
 	try:
 		subprocess.check_output('cmake --build . --config Release')
 	except subprocess.CalledProcessError as e:
-		print(e.output.decode('utf-8'))
+		sys.stdout.buffer.write(bytes(e.output))
 		return False
 
 	return True
@@ -224,7 +224,7 @@ class CPythonTestBed:
 		try:
 			subprocess.check_output('%s -m test' % python_interpreter, shell=True)
 		except subprocess.CalledProcessError as e:
-			print(e.output.decode('utf-8'))
+			sys.stdout.buffer.write(bytes(e.output))
 			success = False
 
 		print("Cleanup...")
@@ -264,7 +264,7 @@ def build_and_deploy_lua_extension(work_path, build_path):
 	try:
 		subprocess.check_output('cmake .. -G "%s"' % cmake_generator)
 	except subprocess.CalledProcessError as e:
-		print(e.output.decode('utf-8'))
+		sys.stdout.buffer.write(bytes(e.output))
 		return False
 
 	# deploy Lua runtime from the SDK to the work folder
@@ -288,7 +288,7 @@ def build_and_deploy_lua_extension(work_path, build_path):
 	try:
 		subprocess.check_output('cmake --build . --config Debug')
 	except subprocess.CalledProcessError as e:
-		print(e.output.decode('utf-8'))
+		sys.stdout.buffer.write(bytes(e.output))
 		return False
 
 	return True
@@ -341,7 +341,7 @@ class LuaTestBed:
 		try:
 			subprocess.check_output(lua_interpreter + ' test.lua', shell=True, stderr=subprocess.STDOUT)
 		except subprocess.CalledProcessError as e:
-			print(e.output.decode('utf-8'))
+			sys.stdout.buffer.write(bytes(e.output))
 			success = False
 
 		print("Cleanup...")
@@ -385,7 +385,7 @@ def build_and_deploy_go_extension(work_path, build_path):
 		else:
 			subprocess.check_output('cmake .. -G "%s"' % cmake_generator)
 	except subprocess.CalledProcessError as e:
-		print(e.output.decode('utf-8'))
+		sys.stdout.buffer.write(bytes(e.output))
 		return False
 
 	print("Building extension...")
@@ -395,7 +395,7 @@ def build_and_deploy_go_extension(work_path, build_path):
 		else:
 			subprocess.check_output(['cmake', '--build', '.', '--config', 'Release'])
 	except subprocess.CalledProcessError as e:
-		#// print(e.output.decode('utf-8'))
+		#// sys.stdout.buffer.write(bytes(e.output))
 		sys.stdout.buffer.write(bytes(e.output))
 		return False
 
@@ -406,7 +406,7 @@ def build_and_deploy_go_extension(work_path, build_path):
 		else:
 			subprocess.check_output(['cmake', '--install', '.', '--config', 'Release'])
 	except subprocess.CalledProcessError as e:
-		print(e.output.decode('utf-8'))
+		sys.stdout.buffer.write(bytes(e.output))
 		return False
 
 	return True
@@ -453,7 +453,7 @@ class GoTestBed:
 			subprocess.check_output("goimports -w bind.go", shell=True, stderr=subprocess.STDOUT)
 			subprocess.check_output('go test -run ""', shell=True, stderr=subprocess.STDOUT)
 		except subprocess.CalledProcessError as e:
-			print(e.output.decode('utf-8'))
+			sys.stdout.buffer.write(bytes(e.output))
 			success = False
 
 		print("Cleanup...")
@@ -500,7 +500,7 @@ def build_and_deploy_rust_extension(work_path, build_path):
 		else:
 			subprocess.check_output('cmake .. -G "%s"' % cmake_generator)
 	except subprocess.CalledProcessError as e:
-		print(e.output.decode('utf-8'))
+		sys.stdout.buffer.write(bytes(e.output))
 		return False
 
 	print("Building extension...")
@@ -510,7 +510,7 @@ def build_and_deploy_rust_extension(work_path, build_path):
 		else:
 			subprocess.check_output(['cmake', '--build', '.', '--config', 'Release'])
 	except subprocess.CalledProcessError as e:
-		print(e.output.decode('utf-8'))
+		sys.stdout.buffer.write(bytes(e.output))
 		return False
 
 	print("install extension...")
@@ -520,7 +520,7 @@ def build_and_deploy_rust_extension(work_path, build_path):
 		else:
 			subprocess.check_output(['cmake', '--install', '.', '--config', 'Release'])
 	except subprocess.CalledProcessError as e:
-		print(e.output.decode('utf-8'))
+		sys.stdout.buffer.write(bytes(e.output))
 		return False
 
 	return True
@@ -581,7 +581,7 @@ class RustTestBed:
 
 			# shutil.copyfile(f"{work_path}/test.rs", f"{work_path}/test_rust/src/lib.rs")
 		except subprocess.CalledProcessError as e:
-			print(e.output.decode('utf-8'))
+			sys.stdout.buffer.write(bytes(e.output))
 			success = False
 
 		print("Cleanup...")
