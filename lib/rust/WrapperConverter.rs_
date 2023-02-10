@@ -3,5 +3,15 @@ pub unsafe fn print_c_string(ptr: *mut c_void) -> String {
     let c_str = CStr::from_ptr(ptr as *mut _);
     let rust_str = c_str.to_str().expect("Bad encoding");
     return rust_str.to_owned();
+}
 
+pub unsafe fn cast_rust_string(str :&str) -> *mut i8 {
+    let c_string = CString::new(str).expect("CString::new failed");
+    c_string.into_raw()     // ownership to C
+    // c_string.as_ptr();   // ownership to rust
+}
+
+pub unsafe extern fn free_string(ptr: *mut i8) {
+    // Take the ownership back to rust and drop the owner
+    let _ = CString::from_raw(ptr);
 }
