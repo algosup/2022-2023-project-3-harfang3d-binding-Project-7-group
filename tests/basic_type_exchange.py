@@ -104,7 +104,8 @@ fn test() {
 	unsafe {
 		assert_eq!(my_test::MyTestReturnInt(), 8);
 		assert_eq!(my_test::MyTestReturnFloat(), 8.0);
-		// assert_eq!(my_test::MyTestReturnConstCharPtr(), "const char * -> string");
+		let c_str = my_test::print_c_string(my_test::MyTestReturnConstCharPtr() as *mut std::ffi::c_void);
+		assert_eq!(c_str, "const char * -> string");
 
 		assert_eq!(*my_test::MyTestReturnIntByPointer(), 9);
 		assert_eq!(*my_test::MyTestReturnIntByReference(), 9);
