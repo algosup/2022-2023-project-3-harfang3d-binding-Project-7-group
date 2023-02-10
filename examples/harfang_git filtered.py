@@ -274,7 +274,7 @@ def bind_math(gen):
 	# Come back here if we need arithmetical stuff
 	vector3 = gen.begin_class('hg::Vec3')
 	vector3._inline = True
-	gen.bind_static_members(vector3, ['const hg::Vec3 Zero', 'const hg::Vec3 One', 'const hg::Vec3 Left', 'const hg::Vec3 Right', 'const hg::Vec3 Up', 'const hg::Vec3 Down', 'const hg::Vec3 Front', 'const hg::Vec3 Back'])
+	#gen.bind_static_members(vector3, ['const hg::Vec3 Zero', 'const hg::Vec3 One', 'const hg::Vec3 Left', 'const hg::Vec3 Right', 'const hg::Vec3 Up', 'const hg::Vec3 Down', 'const hg::Vec3 Front', 'const hg::Vec3 Back'])
 	gen.bind_members(vector3, ['float x', 'float y', 'float z'])
 	gen.bind_constructor(vector3, ['float x', 'float y', 'float z']) # Will need to change line 126 of example to avoid other constructor overload
 	gen.end_class(vector3)
@@ -282,7 +282,7 @@ def bind_math(gen):
 	# Come back here if we need arithmetical stuff
 	# This isn't actually created anywhere in the example, its just returned by other functions/methods
 	matrix3 = gen.begin_class('hg::Mat3')
-	gen.bind_static_members(matrix3, ['const hg::Mat3 Zero', 'const hg::Mat3 Identity'])
+	#gen.bind_static_members(matrix3, ['const hg::Mat3 Zero', 'const hg::Mat3 Identity'])
 	gen.bind_constructor(matrix3, [])
 	gen.end_class(matrix3)
 
