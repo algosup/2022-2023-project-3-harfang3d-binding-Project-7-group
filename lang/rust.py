@@ -1104,7 +1104,7 @@ uint32_t %s(void* p) {
 
 		# GET
 		rust += f"// Get ...\n" \
-				f"func (pointer *{classname}) Get(id int) {arg_bound_name} {{\n"
+				f"Option 2 func (pointer *{classname}) Get(id int) {arg_bound_name} {{\n"
 		rust += f"v := C.{clean_name_with_title(self._name)}{classname}GetOperator(pointer.h, C.int(id))\n"
 
 		src, retval_rust = self.__arg_from_c_to_rust({"conv": internal_conv}, "v")
@@ -1114,7 +1114,7 @@ uint32_t %s(void* p) {
 
 		# SET
 		rust += f"// Set ...\n" \
-				f"func (pointer *{classname}) Set(id int, v {arg_bound_name}) {{\n"
+				f"Option 6 func (pointer *{classname}) Set(id int, v {arg_bound_name}) {{\n"
 		# convert to c
 		c_call = self.__arg_from_rust_to_c({"conv": internal_conv}, "v")
 		if c_call != "":
@@ -1127,7 +1127,7 @@ uint32_t %s(void* p) {
 
 		# Len
 		rust += f"// Len ...\n" \
-				f"func (pointer *{classname}) Len() int32 {{\n"
+				f"Option 5func (pointer *{classname}) Len() int32 {{\n"
 		rust += f"return int32(C.{clean_name_with_title(self._name)}{classname}LenOperator(pointer.h))\n"
 		rust += "}\n"
 
@@ -1166,25 +1166,25 @@ uint32_t %s(void* p) {
 				rust += "// "
 				if do_static:
 					rust += f"{clean_name_with_title(classname)}"
-				rust += f"Get{name} ...\n"
-				rust += f"func "
-				if do_static:
-					rust += f"{clean_name_with_title(classname)}"
-				else:
-					rust += f"(pointer *{clean_name_with_title(classname)}) "
+				rust += f"{clean_name_with_title(self._name)}Get{name} ...\n"
+				rust += f"pub fn "
+				# if do_static:
+				# 	rust += f"{clean_name_with_title(classname)}"
+				# else:
+				# 	rust += f"(pointer *{clean_name_with_title(classname)}) "
 
-				rust += f"Get{name}() {arg_bound_name} {{\n"
-				rust += f"v := C.{clean_name_with_title(self._name)}{clean_name_with_title(classname)}Get{name}("
-				if not static and not is_global:
-					rust += "pointer.h"
-				rust += ")\n"
+				rust += f"{clean_name_with_title(self._name)}Get{name}() -> {arg_bound_name};\n"
+				# rust += f"v := C.{clean_name_with_title(self._name)}{clean_name_with_title(classname)}Get{name}("
+				# if not static and not is_global:
+				# 	rust += "pointer.h"
+				# rust += ")\n"
 
-				# check if need convert from c
-				src, retval_rust = self.__arg_from_c_to_rust({"conv": conv}, "v", True)
-				rust += src
-				rust += f"return {retval_rust}\n"
+				# # check if need convert from c
+				# src, retval_rust = self.__arg_from_c_to_rust({"conv": conv}, "v", True)
+				# rust += src
+				# rust += f"return {retval_rust}\n"
 
-				rust += "}\n"
+				# rust += "}\n"
 
 			# SET
 			# add set only if the member is not const
@@ -1192,28 +1192,28 @@ uint32_t %s(void* p) {
 				rust += f"// "
 				if do_static:
 					rust += f"{clean_name_with_title(classname)}"
-				rust += f"Set{name} ...\n" \
-						f"func "
+				rust += f"{clean_name_with_title(self._name)}Set{name} ...\n" \
+						f"pub fn "
 						
-				if do_static:
-					rust += f"{clean_name_with_title(classname)}"
-				else:
-					rust += f"(pointer *{clean_name_with_title(classname)}) "
+				# if do_static:
+				# 	rust += f"{clean_name_with_title(classname)}"
+				# else:
+				# 	rust += f"(pointer *{clean_name_with_title(classname)}) "
 
-				rust += f"Set{name}(v {arg_bound_name}) {{\n"
+				rust += f"{clean_name_with_title(self._name)}Set{name}({name.lower()} : {arg_bound_name});\n"
 
-				# convert to c
-				c_call = self.__arg_from_rust_to_c({"conv": conv}, "v")
-				if c_call != "":
-					rust += c_call
-				else:
-					rust += "vToC := v\n"
+			# 	# convert to c
+			# 	c_call = self.__arg_from_rust_to_c({"conv": conv}, "v")
+			# 	if c_call != "":
+			# 		rust += c_call
+			# 	else:
+			# 		rust += "vToC := v\n"
 
-				rust += f"	C.{clean_name_with_title(self._name)}{clean_name_with_title(classname)}Set{name}("
-				if not static and not is_global:
-					rust += "pointer.h, "
-				rust += "vToC)\n"
-				rust += "}\n"
+			# 	rust += f"	C.{clean_name_with_title(self._name)}{clean_name_with_title(classname)}Set{name}("
+			# 	if not static and not is_global:
+			# 		rust += "pointer.h, "
+			# 	rust += "vToC)\n"
+			# 	rust += "}\n"
 			return rust
 
 		# create twice, with and without static, to use it with the class and standalone
@@ -1284,7 +1284,7 @@ uint32_t %s(void* p) {
 		if bound_name == "OpenVRStateToViewState":
 			bound_name = bound_name
 		
-		name_rust = name
+		name_rust = clean_name_with_title(name)
 		if is_constructor:
 			name_rust = "new_" + name_rust
 
@@ -1345,7 +1345,7 @@ uint32_t %s(void* p) {
 			if proto["rval"]["conv"]:
 				retval = proto["rval"]["conv"].bound_name
 
-			rust += "// " + clean_name_with_title(name_rust)
+			rust += "//" + clean_name_with_title(name_rust)
 			# add bounding_name to the overload function
 			if "bound_name" in proto["features"]:
 				rust += proto["features"]["bound_name"]
@@ -1364,7 +1364,7 @@ uint32_t %s(void* p) {
 			else:
 				rust += " " + re.sub(r'(\[)(.*?)(\])', r'\1harfang.\2\3', doc) + "\n"
 
-			rust += "func "
+			rust += "Option 1 func "
 			if not is_global:
 				rust += f"(pointer *{clean_name_with_title(classname)}) "
 			rust += f"{clean_name_with_title(name_rust)}"

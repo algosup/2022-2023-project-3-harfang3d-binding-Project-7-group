@@ -574,7 +574,7 @@ class FABGen:
 	#
 	def begin_type(self, conv, features, nobind=False):
 		"""Declare a new type converter."""
-		if True:#self.verbose:
+		if False:#self.verbose:
 			print('Binding type %s (%s)' % (conv.bound_name, conv.ctype))
 
 		self._header += conv.get_type_api(self._name)
@@ -722,7 +722,7 @@ class FABGen:
 
 			if ctype.get_ref() == '':
 				break
-
+			#alt 
 			ctype = ctype.dereference_once()
 
 		raise Exception("Unknown type %s (no converter available)" % ctype)
@@ -1576,7 +1576,7 @@ static void *_type_tag_cast(void *in_ptr, uint32_t in_type_tag, uint32_t out_typ
 		out += ' - %d member\n' % member_count
 		out += ' - %d static member\n' % static_member_count
 
-		return out
+		return ""
 
 	def __print_stats(self):  # pragma: no cover
 		print(self.__get_stats())
