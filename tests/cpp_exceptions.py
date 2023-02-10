@@ -53,16 +53,6 @@ mod my_test;
 fn test() {
 	unsafe {
 		// No exception in rust
-		// let do_step = || -> Result<(),Box<dyn std::error::Error>> {
-		//	assert_eq!(my_test::MyTestGetInt(), 8);
-		//	Ok(())
-		// };
-		// let mut write_to_const_failed = false;
-
-		// if let Err(_err) = do_step() {
-		//	write_to_const_failed = true;
-		// }
-		// assert!(write_to_const_failed);
 	}
 }
 '''
