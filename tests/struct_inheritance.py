@@ -175,14 +175,14 @@ mod my_test;
 #[test]
 fn test() {
 	unsafe {
-		let base = my_test::MyTestBaseClass();
-		assert_eq!(my_test::MyTestBaseClassBaseMethod(base), 4);
-		assert_eq!(my_test::MyTestBaseClassBaseMethodOverride(base), 4);
+		let base = my_test::MyTestConstructorBaseClass();
+		assert_eq!(my_test::MyTestBaseMethodBaseClass(base), 4);
+		assert_eq!(my_test::MyTestBaseMethodOverrideBaseClass(base), 4);
 
-		let derived = my_test::MyTestDerivedClass();
-		assert_eq!(my_test::MyTestBaseClassBaseMethod(derived), 4);  // can still access base class
-		assert_eq!(my_test::MyTestDerivedClassDerivedMethod(derived), 8);  // can access its own methods
-		assert_eq!(my_test::MyTestBaseClassBaseMethodOverride(derived), 8);  // properly overshadows redeclared base methods
+		let derived = my_test::MyTestConstructorDerivedClass();
+		assert_eq!(my_test::MyTestBaseMethodBaseClass(derived), 4);  // can still access base class
+		assert_eq!(my_test::MyTestDerivedMethodDerivedClass(derived), 8);  // can access its own methods
+		assert_eq!(my_test::MyTestBaseMethodOverrideBaseClass(derived), 8);  // properly overshadows redeclared base methods
 
 		// argument casting through inheritance tree
 		assert_eq!(my_test::MyTestReadVirtualMethodThroughBaseClass(base), 6);
