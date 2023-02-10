@@ -1354,7 +1354,7 @@ uint32_t %s(void* p) {
 
 			rust += "pub fn "
 			if not is_global:
-				rust += f"{clean_name_with_title(self._name)}{clean_name_with_title(classname)}{clean_name_with_title(name_rust)} "
+				rust += f"{clean_name_with_title(self._name)}{clean_name_with_title(name_rust)}{clean_name_with_title(classname)} "
 			else:
 				rust += f"{clean_name_with_title(self._name)}{clean_name_with_title(name_rust)}"
 
