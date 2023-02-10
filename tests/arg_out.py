@@ -126,20 +126,21 @@ mod my_test;
 #[test]
 fn test() {
 	unsafe {
-		let a = my_test::MyTestConstructorA();
-		my_test::MyTestModifyInOutStruct(a);
-		assert_eq!(my_test::MyTestAGetV(a), 3);
+		let struct_a = my_test::MyTestConstructorA();
+		my_test::MyTestModifyInOutStruct(struct_a);
+		assert_eq!(my_test::MyTestAGetV(struct_a), 3);
+		let (a,b) = (&mut 0,&mut 0);
 
-		let (a, b) = my_test::MyTestOutValuesFunctionCall(2, 3.0);
+		my_test::MyTestOutValuesFunctionCall(a, 2, b, 3.0);
 		assert_eq!(*a, 16);
 		assert_eq!(*b, 42);
 
-		let (r, a, b) = my_test::MyTestOutValuesFunctionCallRval(2);
+		let r = my_test::MyTestOutValuesFunctionCallRval(a,2,b);
 		assert_eq!(r, 2);
 		assert_eq!(*a, 16);
 		assert_eq!(*b, 28);
 
-		let (r, a, b) = my_test::MyTestOutValuesFunctionCallRvalWithK(2, 2.0);
+		let r= my_test::MyTestOutValuesFunctionCallRvalWithK(a,2, b, 2.0);
 		assert_eq!(r, 4);
 		assert_eq!(*a, 16);
 		assert_eq!(*b, 28);
