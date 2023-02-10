@@ -201,6 +201,13 @@ def bind_render(gen):
 
 	gen.bind_function('bgfx::frame', 'uint32_t', [], bound_name='Frame')
 
+	model_ref = gen.begin_class('hg::ModelRef')
+	model_ref._inline = True
+	#gen.bind_comparison_ops(model_ref, ['==', '!='], ['const hg::ModelRef &m'])
+	gen.end_class(model_ref)
+
+	mdl = gen.begin_class('hg::Model')
+	gen.end_class(mdl)
 
 def bind_scene(gen):
 	gen.add_include('engine/scene.h')
