@@ -2044,8 +2044,9 @@ uint32_t %s(void* p) {
 			rust_bind += f"pub fn {clean_name_with_title(self._name)}Get{bound_name}(id : {arg_bound_name}) -> {bound_name};\n"
 			
 
-		rust_bind += "}"
+		rust_bind += "}\n"
 		# enum
+		rust_bind += "lazy_static! {"
 		for bound_name, enum in self._enums.items():
 			rust_bind += f"// {bound_name} ...\n"
 			enum_conv = self._get_conv_from_bound_name(bound_name)
@@ -2053,11 +2054,10 @@ uint32_t %s(void* p) {
 				arg_bound_name = enum_conv.rust_type
 			else:
 				arg_bound_name = "i32"
-			rust_bind += f"type {bound_name} = {enum_conv.rust_type}\n"
 			for id, name in enumerate(enum.keys()):
 				rust_bind += f"	// {clean_name(name)} ...\n"
-				rust_bind += f"	const {clean_name(name).upper()} : {arg_bound_name} =  {clean_name_with_title(self._name)}Get{bound_name}({id});\n"
-
+				rust_bind += f"	pub static ref {clean_name(name).upper()} : {arg_bound_name} =  unsafe\u007b{clean_name_with_title(self._name)}Get{bound_name}({id})\u007d;\n"
+		rust_bind += "}\n"
 		return rust_bind
 
 	def _write_rust_binder_header(self):
