@@ -1944,7 +1944,7 @@ uint32_t %s(void* p) {
 				arg_bound_name = enum_conv.rust_type
 			else:
 				arg_bound_name = "i32"
-			rust_bind += f"type {bound_name} = {enum_conv.rust_type};\n"
+			rust_bind += f"type {bound_name} = {arg_bound_name};\n"
 		return rust_bind
 
 	def _write_rust_extern(self):
