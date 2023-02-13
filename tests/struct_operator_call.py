@@ -180,30 +180,30 @@ fn test() {
 		let a = my_test::MyTestConstructorSimpleStruct(4);
 		let b = my_test::MyTestConstructorSimpleStruct(8);
 		
-		let mut s = my_test::MyTestAddSimpleStructSimpleStruct(a, &b);
-		assert_eq!(my_test::MyTestGetV(s), 12);
-		my_test::MyTestInplaceAddSimpleStructSimpleStruct(s, &b);
-		assert_eq!(my_test::MyTestGetV(s), 20);
+		let mut s = my_test::MyTestAddSimpleStructSimpleStruct(a, b);
+		assert_eq!(my_test::MyTestSimpleStructGetV(s), 12);
+		my_test::MyTestInplaceAddSimpleStructSimpleStruct(s, b);
+		assert_eq!(my_test::MyTestSimpleStructGetV(s), 20);
 		my_test::MyTestInplaceAddSimpleStructInt(s,4);
-		assert_eq!(my_test::MyTestGetV(s), 24);
+		assert_eq!(my_test::MyTestSimpleStructGetV(s), 24);
 		
 		s = my_test::MyTestDivSimpleStructInt(s, 4);
-		assert_eq!(my_test::MyTestGetV(s), 6);
-		my_test::MyTestInplaceDivSimpleStructnt(s, 3);
-		assert_eq!(my_test::MyTestGetV(s), 2);
-		my_test::MyTestInplaceAddSimpleStructSimpleStruct(s, &a);
-		assert_eq!(my_test::MyTestGetV(s), 6);
+		assert_eq!(my_test::MyTestSimpleStructGetV(s), 6);
+		my_test::MyTestInplaceDivSimpleStructInt(s, 3);
+		assert_eq!(my_test::MyTestSimpleStructGetV(s), 2);
+		my_test::MyTestInplaceAddSimpleStructSimpleStruct(s, a);
+		assert_eq!(my_test::MyTestSimpleStructGetV(s), 6);
 
 
-		s = my_test::MyTestMulSimpleStructSimpleStruct(s, &a);
-		assert_eq!(my_test::MyTestGetV(s), 24);
+		s = my_test::MyTestMulSimpleStructSimpleStruct(s, a);
+		assert_eq!(my_test::MyTestSimpleStructGetV(s), 24);
 		my_test::MyTestInplaceMulSimpleStructInt(s, 2);
-		assert_eq!(my_test::MyTestGetV(s), 48);
+		assert_eq!(my_test::MyTestSimpleStructGetV(s), 48);
 
-		s = my_test::MyTestSubSimpleStructSimpleStruct(s, &b);
-		assert_eq!(my_test::MyTestGetV(s), 40);
+		s = my_test::MyTestSubSimpleStructSimpleStruct(s, b);
+		assert_eq!(my_test::MyTestSimpleStructGetV(s), 40);
 		my_test::MyTestInplaceSubSimpleStructInt(s, 32);
-		assert_eq!(my_test::MyTestGetV(s), 8);
+		assert_eq!(my_test::MyTestSimpleStructGetV(s), 8);
 
 		let c = my_test::MyTestMulSimpleStructInt(a, 2);
 		assert!(c.eq(&b));

@@ -102,21 +102,21 @@ mod my_test;
 #[test]
 fn test() {
 	unsafe {
-		assert_eq!(my_test::GE_a, 0);
-		assert_eq!(my_test::GE_b, 1);
-		assert_eq!(my_test::GE_c, 8);
+		assert_eq!(my_test::GEA, 0);
+		assert_eq!(my_test::GEB, 1);
+		assert_eq!(my_test::GEC, 8);
 
-		assert_eq!(my_test::SE_a, 0);
-		assert_eq!(my_test::SE_b, 128);
-		assert_eq!(my_test::SE_c, 512);
+		assert_eq!(my_test::SEA, 0);
+		assert_eq!(my_test::SEB, 128);
+		assert_eq!(my_test::SEC, 512);
 
-		assert_eq!(my_test::TE_a, 0);
-		assert_eq!(my_test::TE_b, 1);
-		assert_eq!(my_test::TE_c, 16384);
+		assert_eq!(my_test::TEA, 0);
+		assert_eq!(my_test::TEB, 1);
+		assert_eq!(my_test::TEC, 16384);
 
-		assert_eq!(my_test::NE_a, 0);
-		assert_eq!(my_test::NE_b, 1);
-		assert_eq!(my_test::NE_c, 4096);
+		assert_eq!(my_test::NEA, 0);
+		assert_eq!(my_test::NEB, 1);
+		assert_eq!(my_test::NEC, 4096);
 	}                           
 }
 '''

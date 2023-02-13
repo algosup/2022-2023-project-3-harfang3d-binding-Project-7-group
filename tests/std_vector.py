@@ -265,9 +265,9 @@ fn test() {
 		assert_eq!(my_test::MyTestSizeVectorOfInt(v), 3);
 		assert_eq!(my_test::MyTestVectorOfIntLenOperator(v), 3);
 
-		assert_eq!(my_test::MyTestAtVectorOfInt(v,1), 1);
-		assert_eq!(my_test::MyTestAtVectorOfInt(v,2), 9);
-		assert_eq!(my_test::MyTestAtVectorOfInt(v,0), 5);
+		assert_eq!(*my_test::MyTestAtVectorOfInt(v,1), 1);
+		assert_eq!(*my_test::MyTestAtVectorOfInt(v,2), 9);
+		assert_eq!(*my_test::MyTestAtVectorOfInt(v,0), 5);
 
 		assert_eq!(my_test::MyTestVectorOfIntGetOperator(v,1), 1);
 		assert_eq!(my_test::MyTestVectorOfIntGetOperator(v,2), 9);
