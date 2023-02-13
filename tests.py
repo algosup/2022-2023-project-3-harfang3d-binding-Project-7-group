@@ -563,8 +563,8 @@ class RustTestBed:
 		try:
 			
 			subprocess.check_output('cargo new test_rust', shell=True, stderr=subprocess.STDOUT)
-			subprocess.check_output('cargo add lazy_static', shell=True, stderr=subprocess.STDOUT)
 			os.chdir(os.path.join(work_path, 'test_rust'))
+			subprocess.check_output('cargo add lazy_static', shell=True, stderr=subprocess.STDOUT)
 			# subprocess.Popen('notepad.exe "%s"' % os.getcwd())
 			# print(work_path)
 			shutil.move(f"{work_path}/test.rs", f"{work_path}/test_rust/src/main.rs")
