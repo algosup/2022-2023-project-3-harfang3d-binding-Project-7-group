@@ -16,7 +16,7 @@ out/build.so: $(OBJ)
 windows: out/build.dll out/build.lib
 
 out/build.lib: $(OBJ)
-	ar -rcs $@ $(OBJ)
+	ar rcs $@ $(OBJ)
 
 out/build.dll: $(OBJ)
 	$(CC) -shared -o $@ $(OBJ)
