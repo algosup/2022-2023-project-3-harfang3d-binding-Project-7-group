@@ -2046,8 +2046,11 @@ uint32_t %s(void* p) {
 
 		rust_bind += "}\n"
 		# enum
-		rust_bind += "lazy_static! {"
+		wrote_brace = False
 		for bound_name, enum in self._enums.items():
+			if not wrote_brace:
+				rust_bind += "lazy_static! {"
+				wrote_brace = True
 			rust_bind += f"// {bound_name} ...\n"
 			enum_conv = self._get_conv_from_bound_name(bound_name)
 			if enum_conv is not None and hasattr(enum_conv, "rust_type") and enum_conv.rust_type is not None:
@@ -2057,7 +2060,8 @@ uint32_t %s(void* p) {
 			for id, name in enumerate(enum.keys()):
 				rust_bind += f"	// {clean_name(name)} ...\n"
 				rust_bind += f"	pub static ref {clean_name(name).upper()} : {arg_bound_name} =  unsafe\u007b{clean_name_with_title(self._name)}Get{bound_name}({id})\u007d;\n"
-		rust_bind += "}\n"
+		if wrote_brace:
+			rust_bind += "}\n"
 		return rust_bind
 
 	def _write_rust_binder_header(self):
