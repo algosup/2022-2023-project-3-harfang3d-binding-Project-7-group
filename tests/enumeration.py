@@ -97,27 +97,26 @@ func Test(t *testing.T) {
 '''
 
 test_rust = '''\
-#[macro_use]
-extern crate lazy_static;
 mod my_test;
 
 #[test]
 fn test() {
+	unsafe{
+		assert_eq!(my_test::MyTestGetGlobalEnum(0), 0);
+		assert_eq!(my_test::MyTestGetGlobalEnum(1), 1);
+		assert_eq!(my_test::MyTestGetGlobalEnum(2), 8);
 
-		assert_eq!(*my_test::GEA, 0);
-		assert_eq!(*my_test::GEB, 1);
-		assert_eq!(*my_test::GEC, 8);
+		assert_eq!(my_test::MyTestGetStructEnum(0), 0);
+		assert_eq!(my_test::MyTestGetStructEnum(1), 128);
+		assert_eq!(my_test::MyTestGetStructEnum(2), 512);
 
-		assert_eq!(*my_test::SEA, 0);
-		assert_eq!(*my_test::SEB, 128);
-		assert_eq!(*my_test::SEC, 512);
+		assert_eq!(my_test::MyTestGetTypedEnum(0), 0);
+		assert_eq!(my_test::MyTestGetTypedEnum(1), 1);
+		assert_eq!(my_test::MyTestGetTypedEnum(2), 16384);
 
-		assert_eq!(*my_test::TEA, 0);
-		assert_eq!(*my_test::TEB, 1);
-		assert_eq!(*my_test::TEC, 16384);
-
-		assert_eq!(*my_test::NEA, 0);
-		assert_eq!(*my_test::NEB, 1);
-		assert_eq!(*my_test::NEC, 4096);                     
+		assert_eq!(my_test::MyTestGetNamedEnum(0), 0);
+		assert_eq!(my_test::MyTestGetNamedEnum(1), 1);
+		assert_eq!(my_test::MyTestGetNamedEnum(2), 4096);   
+	}                       
 }
 '''
