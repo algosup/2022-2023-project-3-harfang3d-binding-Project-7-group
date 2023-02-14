@@ -48,30 +48,30 @@
 	    </li>
     <li><a href="#proposed-solution"> ➤ Proposed Solution</a>
 	<ul>
-		<li><a href="">➭ Dependencies & External Elements</a></li>
-		<li><a href="">➭ Architecture Diagrams</a>
+		<li><a href="#dependencies--external-elements">➭ Dependencies & External Elements</a></li>
+		<li><a href="#architecture-diagrams">➭ Architecture Diagrams</a>
 			<ul>
-				<li><a href="">➧ Main Architecture</a></li>
-				<li><a href="">➧ Example of a Binding</a></li>
-				<li><a href="">➧ Example of a Test</a></li>
+				<li><a href="#main-architecture">➧ Main Architecture</a></li>
+				<li><a href="#example-of-a-binding">➧ Example of a Binding</a></li>
+				<li><a href="#example-of-a-test">➧ Example of a Test</a></li>
 			</ul>
 		</li>
-		<li><a href="">➭ Technical Specifications</a>
+		<li><a href="#technical-specifications">➭ Technical Specifications</a>
 			<ul>
-				<li><a href="">➧ Conversion Tables</a></li>
-				<li><a href="">➧ Idiomatic Writing</a></li>
-				<li><a href="">➧ Step by Step Build</a></li>
+				<li><a href="#conversion-tables">➧ Conversion Tables</a></li>
+				<li><a href="#idiomatic-writing">➧ Idiomatic Writing</a></li>
+				<li><a href="#step-by-step-build">➧ Step by Step Build</a></li>
 			</ul>
 		</li>
-		<li><a href="">➭ Risk assessment and security risks/measures</a>
+		<li><a href="#risk-assessment-and-security-risksmeasures">➭ Risk assessment and security risks/measures</a>
 			<ul>
-				<li><a href="">➧ Risk Prevention Matrix</a></li>
-				<li><a href="">➧ Rollback Plan</a></li>
+				<li><a href="#risk-prevention-matrix">➧ Risk Prevention Matrix</a></li>
+				<li><a href="#rollback-plan">➧ Rollback Plan</a></li>
 			</ul>
 		</li>
-		<li><a href="">➭ Performance</a></li>
-		<li><a href="">➭ Pros and Cons</a></li>
-		<li><a href="">➭ Alternate designs or solutions</a></li>
+		<li><a href="#performance">➭ Performance</a></li>
+		<li><a href="#pros-and-cons">➭ Pros and Cons</a></li>
+		<li><a href="#alternate-designs-or-solutions">➭ Alternate designs or solutions</a></li>
 	</ul>
     </li>
     <li><a href="#development--maintenance"> ➤ Development & Maintenance</a>
@@ -267,9 +267,12 @@
 	- ![image.png](/Documents/images/technical/image_1675436220671_0.png)
 	- *Main architecture diagram*:
 - #### Example of a binding
+- > WIP
 - #### Example of a test
+- > WIP
 - ### Technical Specifications
 - #### Conversion Tables
+- > WIP
 - #### Idiomatic Writing:
 	- ##### Idiomatic C/C++ & Rust Code
 		- *Basic Features Comparison:*
