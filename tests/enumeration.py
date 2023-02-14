@@ -97,8 +97,6 @@ func Test(t *testing.T) {
 '''
 
 test_rust = '''\
-#[macro_use]
-extern crate lazy_static;
 mod my_test;
 
 #[test]
