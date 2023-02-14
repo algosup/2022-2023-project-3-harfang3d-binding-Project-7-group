@@ -14,7 +14,9 @@
 						<li><a href="#benefits-to-the-team">➧ Benefits to the team</a></li>
 					</ul>
 			    </li>
-			    <li><a href="#points-of-contact">➭ Points of Contact</a>
+			    <li><a href="#points-of-contact">➭ Points of Contact</a>![image](https://user-images.githubusercontent.com/114522530/218783855-fe85fb53-7880-451c-ad1f-753d76b5f811.png)![image](https://user-images.githubusercontent.com/114522530/218783910-a37500dc-1138-41c1-96b8-a971d2ba75d2.png)
+
+
 			    	<ul>
 					<li><a href="#points-of-contact-1">➧ Points of Contact</a></li>
 					<li><a href="#authors-roles-etc">➧ Authors, roles etc.</a></li>
@@ -131,12 +133,12 @@
 		- As stated in the Functional Requirements Document (FSD), the main goal of this project is to be able to use **HARFANG® 3D Framework** library, which is implemented in C/C++ in Rust language, through the use of their custom made code binder **FABGen** (designed as a replacement for SWIG) which already supports transpiling to CPython, Lua and Go. Therefore, the code binder can be described as an interface generator, more specifically as an Application Binary Interface generator, as it has to interface between two languages at low levels. This implies good knowledge of source and target languages, since (especially in the case of C/C++  Rust) where syntax and functioning greatly differ.
 	- ### Methodology (DMAIC Framework)
 		- Although the project consists mostly of identifying code implementations, writing them and passing predefined tests, we made sure to follow the DMAIC framework seen during our lessons. Tracking was vital for us, since we did not feature a dedicated quality assurance engineer/manager, and had to cross check everything we did before moving on. We did daily meetings to learn about our progress and came up with new ideas to be implemented until the end.
-		- ![DMAIC.png](/Documents/images/technical/DMAIC_1675431865139_0.png)
+		![DMAIC.png](/Documents/images/technical/DMAIC_1675431865139_0.png)
 	- ### What is HARFANG 3D ?
 		- **HARFANG® 3D Framework** is a 3D Engine built in C/C++ that is sold to diverse companies in various sectors such as automotive, railway, risk prevention, design etc. .  **HARFANG® 3D Framework**, which we will call "the engine" is able to be run with other languages thanks to an ABI generator (FABGen), which will be the main focus of our work, since we need to add another language (Rust) to it.
 	- ### What is a code binder used for ?
 		- *Here is a simplified view of how FABGen is expected to function:*
-			- ![simplified diagram.png](/Documents/images/technical/simplified_diagram_1674828088999_0.png)
+			![simplified diagram.png](/Documents/images/technical/simplified_diagram_1674828088999_0.png)
 	- ### Existing Solutions & Similar technologies
 		- #### Automatic binding generation
 			- rust-bindgen
@@ -163,7 +165,7 @@
 					* Everything was done through a single Object struct which hides the real types of variables, making it difficult to debug or extend the functionalities.
 					* Uneven feature support between languages
 			- https://cxx.rs/
-				- ![image.png](/Documents/images/technical/image_1675162623380_0.png)
+				![image.png](/Documents/images/technical/image_1675162623380_0.png)
 				- Requires custom code/data to generate bindings for C++ and Rust. A CFFI interface is hidden between the two bindings.
 				- Its Aim is to describe interface and generate safe and fast bindings from and to C++ code.
 				- **Safe** in the rust sense: Rust compiler enforces its invariants.
@@ -269,7 +271,7 @@
   * Visual Studio 2019
 - ## Architecture Diagrams:
 - ### Main Architecture
-	- ![image.png](/Documents/images/technical/image_1675436220671_0.png)
+	![image.png](/Documents/images/technical/image_1675436220671_0.png)
 	- *Main architecture diagram*:
 - ### Example of a binding
 - > WIP
