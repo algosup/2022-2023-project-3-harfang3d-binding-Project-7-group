@@ -224,3 +224,5 @@ Consider the following example scenario when binding `std::vector<int>` to CPyth
 
 This can have serious performance implications as the PySequence always need to be extracted to a temporary `std::vector<int>` before the native call is made.  
 A wrapped `std::vector<int>` object does not undergo any transformation and is passed right away to the native layer.
+
+  <div align="right"><a href="#rust--fabgen"><img src="/Documents/images/technical/back.png" width="75px"></a></div>
