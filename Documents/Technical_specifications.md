@@ -2,13 +2,63 @@
 <h2 id="table-of-contents"> :book: Table of Contents</h2>
 
 <details open="open">
-  <summary>Table of Contents</summary>
-  <ol>
-    <li><a href="#introduction"> ➤ Introduction</a></li>
-    <li><a href="#proposed-solution"> ➤ Proposed Solution</a></li>
-    <li><a href="#development--maintenance"> ➤ Development & Maintenance</a></li>
-    <li><a href="#conclusion"> ➤ Conclusion</a></li>
-  </ol>
+    <summary><em>click to collapse...</em></summary>
+    <ol>
+	    <li><a href="#introduction"> ➤ Introduction</a>
+		    <ul>
+			    <li><a href="#document-tracking-and-version-revision-history">↳ Document Tracking and version (Revision History)</a></li>
+			    <li><a href="#purpose-of-document">↳ Purpose of Document</a>
+				<ul>
+					<li><a href="#global-definition">Global Definition</a></li>
+					<li><a href="#benefits-to-engineers">Benefits to engineers</a></li>
+					<li><a href="#benefits-to-the-team">Benefits to the team</a></li>
+				</ul>
+			    </li>
+			    <li><a href="#points-of-contact">↳ Points of Contact</a>
+			    	<ul>
+					<li><a href="#points-of-contact-1">Points of Contact</a></li>
+					<li><a href="#authors-roles-etc">Authors, roles etc.</a></li>
+					<li><a href="#reviewers">Reviewers</a></li>
+			    	</ul>
+			    </li>
+			    <li><a href="#project-overview">↳ Project Overview</a>
+			    	<ul>
+					<li><a href="#contextbackground">Context/Background</a>
+						<ul>
+							<li><a href="#project-genesis">Project Genesis</a></li>
+							<li><a href="#methodology-dmaic-framework">Methodology (DMAIC Framework)</a></li>
+							<li><a href="#what-is-harfang-3d-">What is HARFANG 3D ?</a></li>
+							<li><a href="#what-is-a-code-binder-used-for-">What is a code binder used for ?</a></li>
+							<li><a href="#existing-solutions--similar-technologies">Existing Solutions & Similar technologies</a></li>
+						</ul>
+					</li>
+					<li><a href="#goals-productclient-requirements">Goals, Product/Client requirements</a>
+						<ul>
+							<li><a href="#functional-requirements">Functional Requirements</a></li>
+							<li><a href="#scope">Scope</a></li>
+							<li><a href="#quality-assurance-expectations">Quality Assurance Expectations</a></li>
+							<li><a href="#license">License</a></li>
+						</ul>
+					</li>
+					<li><a href="#assumptions--constraints">Assumptions & Constraints</a></li>
+		    		</ul>
+			    </li>
+			    <li><a href="#glossary">↳ Glossary</a></li>
+		    </ul>
+	    </li>
+    <li><a href="#proposed-solution"> ➤ Proposed Solution</a>
+	<ul>
+	</ul>
+    </li>
+    <li><a href="#development--maintenance"> ➤ Development & Maintenance</a>
+	<ul>
+	</ul>
+    </li>
+    <li><a href="#conclusion"> ➤ Conclusion</a>
+	<ul>
+	</ul>
+    </li>
+    </ol>
 </details>
 
 
@@ -46,7 +96,7 @@
 			| *Functional Requirements Document *| Mathieu CHAPUT (Program Manager) | mathieu.chaput@algosup.com|
 			| *Technical Requirements Document*| Mathis KAKAL (Tech Lead)| mathis.kakal@algosup.com |
 			| *Quality Assurance Document*| **Undefined**| **Undefined** |
-	- #### Reviewers:  
+	- #### Reviewers  
 		- This Document has been reviewed by the whole team thanks to our small numbers, allowing for accuracy in the rendition of the specifications. This excludes a designated quality assurance manager/engineer for establishing which functions and KPI's to monitor and test, task that will be performed by the whole team. The program manager will also review the Technical Requirements Document for iteration with the the Functional Requirements, the project manager to ensure compliance with the project's expectations and finally the software engineer to ensure that it is in a language that they can understand and to develop the product.
 - ### Project Overview
 	- ### Context/Background
