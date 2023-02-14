@@ -76,28 +76,28 @@
     </li>
     <li><a href="#development--maintenance"> ➤ Development & Maintenance</a>
 	<ul>
-		<li><a href="#schedule-of-development">Schedule of development</a>
+		<li><a href="#schedule-of-development">➭ Schedule of development</a>
 			<ul>
-				<li><a href="#planning">Planning</a></li>
-				<li><a href="#efforts-and-costs">Efforts & Costs</a></li>
+				<li><a href="#planning">➧ Planning</a></li>
+				<li><a href="#efforts-and-costs">➧ Efforts & Costs</a></li>
 			</ul>
 		</li>
-		<li><a href="#success-assessment">Success Assessment</a>
+		<li><a href="#success-assessment">➭ Success Assessment</a>
 			<ul>
-				<li><a href="#impact">Impact</a></li>
-				<li><a href="#metrics">Metrics</a></li>
+				<li><a href="#impact">➧ Impact</a></li>
+				<li><a href="#metrics">➧ Metrics</a></li>
 			</ul>
 		</li>
-		<li><a href="#cicd-pipeline">CI/CD Pipeline</a></li>
+		<li><a href="#cicd-pipeline">➭ CI/CD Pipeline</a></li>
 	</ul>
     </li>
     <li><a href="#conclusion"> ➤ Conclusion</a>
 	<ul>
-		<li><a href="#future-improvements">Future Improvements</a></li>
-		<li><a href="#end-matter">End Matter</a>
+		<li><a href="#future-improvements">➭ Future Improvements</a></li>
+		<li><a href="#end-matter">➭ End Matter</a>
 			<ul>
-				<li><a href="#footnotes">Footnotes</a></li>
-				<li><a href="#acknowledgements">Acknowledgments</a></li>
+				<li><a href="#footnotes">➧ Footnotes</a></li>
+				<li><a href="#acknowledgements">➧ Acknowledgments</a></li>
 			</ul>
 		</li>
 	</ul>
