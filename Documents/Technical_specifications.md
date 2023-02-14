@@ -6,24 +6,24 @@
     <ol>
 	    <li><a href="#introduction"> ➤ Introduction</a>
 		    <ul>
-			    <li><a href="#document-tracking-and-version-revision-history">↳ Document Tracking and version (Revision History)</a></li>
-			    <li><a href="#purpose-of-document">↳ Purpose of Document</a>
-				<ul>
-					<li><a href="#global-definition">Global Definition</a></li>
-					<li><a href="#benefits-to-engineers">Benefits to engineers</a></li>
-					<li><a href="#benefits-to-the-team">Benefits to the team</a></li>
-				</ul>
+			    <li><a href="#document-tracking-and-version-revision-history">➭ Document Tracking and version (Revision History)</a></li>
+			    <li><a href="#purpose-of-document">➭ Purpose of Document</a>
+					<ul>
+						<li><a href="#global-definition">➧ Global Definition</a></li>
+						<li><a href="#benefits-to-engineers">➧ Benefits to engineers</a></li>
+						<li><a href="#benefits-to-the-team">➧ Benefits to the team</a></li>
+					</ul>
 			    </li>
-			    <li><a href="#points-of-contact">↳ Points of Contact</a>
+			    <li><a href="#points-of-contact">➭ Points of Contact</a>
 			    	<ul>
-					<li><a href="#points-of-contact-1">Points of Contact</a></li>
-					<li><a href="#authors-roles-etc">Authors, roles etc.</a></li>
-					<li><a href="#reviewers">Reviewers</a></li>
+					<li><a href="#points-of-contact-1">➧ Points of Contact</a></li>
+					<li><a href="#authors-roles-etc">➧ Authors, roles etc.</a></li>
+					<li><a href="#reviewers">➧ Reviewers</a></li>
 			    	</ul>
 			    </li>
-			    <li><a href="#project-overview">↳ Project Overview</a>
+			    <li><a href="#project-overview">➭ Project Overview</a>
 			    	<ul>
-					<li><a href="#contextbackground">Context/Background</a>
+					<li><a href="#contextbackground">➧ Context/Background</a>
 						<ul>
 							<li><a href="#project-genesis">Project Genesis</a></li>
 							<li><a href="#methodology-dmaic-framework">Methodology (DMAIC Framework)</a></li>
@@ -32,7 +32,7 @@
 							<li><a href="#existing-solutions--similar-technologies">Existing Solutions & Similar technologies</a></li>
 						</ul>
 					</li>
-					<li><a href="#goals-productclient-requirements">Goals, Product/Client requirements</a>
+					<li><a href="#goals-productclient-requirements">➧ Goals, Product/Client requirements</a>
 						<ul>
 							<li><a href="#functional-requirements">Functional Requirements</a></li>
 							<li><a href="#scope">Scope</a></li>
@@ -40,14 +40,38 @@
 							<li><a href="#license">License</a></li>
 						</ul>
 					</li>
-					<li><a href="#assumptions--constraints">Assumptions & Constraints</a></li>
+					<li><a href="#assumptions--constraints">➧ Assumptions & Constraints</a></li>
 		    		</ul>
 			    </li>
-			    <li><a href="#glossary">↳ Glossary</a></li>
+			    <li><a href="#glossary">➭ Glossary</a></li>
 		    </ul>
 	    </li>
     <li><a href="#proposed-solution"> ➤ Proposed Solution</a>
 	<ul>
+		<li><a href="">➭ Dependencies & External Elements</a></li>
+		<li><a href="">➭ Architecture Diagrams</a>
+			<ul>
+				<li><a href="">➧ Main Architecture</a></li>
+				<li><a href="">➧ Example of a Binding</a></li>
+				<li><a href="">➧ Example of a Test</a></li>
+			</ul>
+		</li>
+		<li><a href="">➭ Technical Specifications</a>
+			<ul>
+				<li><a href="">➧ Conversion Tables</a></li>
+				<li><a href="">➧ Idiomatic Writing</a></li>
+				<li><a href="">➧ Step by Step Build</a></li>
+			</ul>
+		</li>
+		<li><a href="">➭ Risk assessment and security risks/measures</a>
+			<ul>
+				<li><a href="">➧ Risk Prevention Matrix</a></li>
+				<li><a href="">➧ Rollback Plan</a></li>
+			</ul>
+		</li>
+		<li><a href="">➭ Performance</a></li>
+		<li><a href="">➭ Pros and Cons</a></li>
+		<li><a href="">➭ Alternate designs or solutions</a></li>
 	</ul>
     </li>
     <li><a href="#development--maintenance"> ➤ Development & Maintenance</a>
@@ -238,14 +262,15 @@
   * Cargo
   * GCC and G++
   * Visual Studio 2019
-- ### Architecture Diagram:
-- #### The whole thing
+- ### Architecture Diagrams:
+- #### Main Architecture
 	- ![image.png](/Documents/images/technical/image_1675436220671_0.png)
 	- *Main architecture diagram*:
 - #### Example of a binding
 - #### Example of a test
 - ### Technical Specifications
-- #### Define Languages:
+- #### Conversion Tables
+- #### Idiomatic Writing:
 	- ##### Idiomatic C/C++ & Rust Code
 		- *Basic Features Comparison:*
 			- |Mutable Access|Multi-threaded|C++|Rust|
