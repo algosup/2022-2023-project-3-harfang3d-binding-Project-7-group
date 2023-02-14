@@ -14,9 +14,7 @@
 						<li><a href="#benefits-to-the-team">➧ Benefits to the team</a></li>
 					</ul>
 			    </li>
-			    <li><a href="#points-of-contact">➭ Points of Contact</a>![image](https://user-images.githubusercontent.com/114522530/218783855-fe85fb53-7880-451c-ad1f-753d76b5f811.png)![image](https://user-images.githubusercontent.com/114522530/218783910-a37500dc-1138-41c1-96b8-a971d2ba75d2.png)
-
-
+			    <li><a href="#points-of-contact">➭ Points of Contact</a>
 			    	<ul>
 					<li><a href="#points-of-contact-1">➧ Points of Contact</a></li>
 					<li><a href="#authors-roles-etc">➧ Authors, roles etc.</a></li>
@@ -78,6 +76,14 @@
     </li>
     <li><a href="#development--maintenance"> ➤ Development & Maintenance</a>
 	<ul>
+		<li><a href="#schedule-of-development">Schedule of development</a>
+			<ul>
+				<li><a href="">Planning</a></li>
+				<li><a href="">Efforts & Costs</a></li>
+			</ul>
+		</li>
+		<li><a href="#success-assessment">Success Assessment</a></li>
+		<li><a href="#cicd-pipeline">CI/CD Pipeline</a></li>
 	</ul>
     </li>
     <li><a href="#conclusion"> ➤ Conclusion</a>
@@ -346,8 +352,8 @@
 
 # Development & Maintenance
 - ## Schedule of development
-- define each phases
-- Efforts and costs planning
+- ### Planning
+- ### Efforts and costs
 	- **a. Work estimates and timelines**
 		- List of specific, measurable, and time-bound tasks
 		- Resources needed to finish each task
