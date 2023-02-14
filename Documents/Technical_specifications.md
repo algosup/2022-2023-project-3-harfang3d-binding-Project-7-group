@@ -93,6 +93,13 @@
     </li>
     <li><a href="#conclusion"> ➤ Conclusion</a>
 	<ul>
+		<li><a href="#future-improvements">Future Improvements</a></li>
+		<li><a href="#end-matter">End Matter</a>
+			<ul>
+				<li><a href="#footnotes">Footnotes</a></li>
+				<li><a href="#acknowledgements">Acknowledgments</a></li>
+			</ul>
+		</li>
 	</ul>
     </li>
     </ol>
