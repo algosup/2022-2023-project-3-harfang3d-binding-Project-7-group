@@ -11,6 +11,8 @@
   </ol>
 </details>
 
+
+
 # Introduction
 - ### Document Tracking and version (Revision History)
 	- |Version n°|Edits completed by|Date|Description of edit|
@@ -53,12 +55,12 @@
 			- As stated in the Functional Requirements Document (FSD), the main goal of this project is to be able to use **HARFANG® 3D Framework** library, which is implemented in C/C++ in Rust language, through the use of their custom made code binder **FABGen** (designed as a replacement for SWIG) which already supports transpiling to CPython, Lua and Go. Therefore, the code binder can be described as an interface generator, more specifically as an Application Binary Interface generator, as it has to interface between two languages at low levels. This implies good knowledge of source and target languages, since (especially in the case of C/C++  Rust) where syntax and functioning greatly differ.
 		- #### Methodology (DMAIC Framework)
 			- Although the project consists mostly of identifying code implementations, writing them and passing predefined tests, we made sure to follow the DMAIC framework seen during our lessons. Tracking was vital for us, since we did not feature a dedicated quality assurance engineer/manager, and had to cross check everything we did before moving on. We did daily meetings to learn about our progress and came up with new ideas to be implemented until the end.
-			- ![DMAIC.png](/Documents/images/technical/DMAIC_1675431865139_0.png){:height 525, :width 793}
+			- ![DMAIC.png](/Documents/images/technical/DMAIC_1675431865139_0.png)
 		- #### What is HARFANG 3D ?
 			- **HARFANG® 3D Framework** is a 3D Engine built in C/C++ that is sold to diverse companies in various sectors such as automotive, railway, risk prevention, design etc. .  **HARFANG® 3D Framework**, which we will call "the engine" is able to be run with other languages thanks to an ABI generator (FABGen), which will be the main focus of our work, since we need to add another language (Rust) to it.
 		- #### What is a code binder used for ?
 			- *Here is a simplified view of how FABGen is expected to function:*
-				- ![simplified diagram.png](/Documents/images/technical/simplified_diagram_1674828088999_0.png){:height 472, :width 640}
+				- ![simplified diagram.png](/Documents/images/technical/simplified_diagram_1674828088999_0.png)
 		- #### Existing Solutions & Similar technologies
 			- ##### Automatic binding generation
 				- rust-bindgen
@@ -85,7 +87,7 @@
 						* Everything was done through a single Object struct which hides the real types of variables, making it difficult to debug or extend the functionalities.
 						* Uneven feature support between languages
 				- https://cxx.rs/
-					- ![image.png](/Documents/images/technical/image_1675162623380_0.png){:height 177, :width 542}
+					- ![image.png](/Documents/images/technical/image_1675162623380_0.png)
 					- Requires custom code/data to generate bindings for C++ and Rust. A CFFI interface is hidden between the two bindings.
 					- Its Aim is to describe interface and generate safe and fast bindings from and to C++ code.
 					- **Safe** in the rust sense: Rust compiler enforces its invariants.
@@ -115,8 +117,9 @@
 				- Be as well optimized as possible not to slow down programs using the library
 				- Make the Rust code as user-friendly as possible by using idiomatic language.
 		- #### Scope
-			- |**In Scope** ![In Scope.png](/Documents/images/technical/inScope.png){:height 175, :width 103} |**Out of Scope** ![out of scope.png](/Documents/images/technical/outOfScope.png){:height 210, :width 131} |
+			- |<p align="center" padding-top="15px"><img src="/Documents/images/technical/inScope.png" height="150px"></p>|<p align="center"><img src="/Documents/images/technical/outOfScope.png" height="150px"></p>|
 				|--|--|
+				|<p align="center"><strong>In Scope</strong></p>|<p align="center"><strong>Out of Scope</strong></p>|
 				|Reverse Engineering FABGen|Modifying FABGen core logic|
 				|Adding Rust language to fabgen|Using 3rd party binders|
 				|Trying out FABGen on harfang.py|Modifying other language implementations in FABGen|
@@ -136,21 +139,22 @@
 					|✅ Patent use||☝️Same License|
 					|✅ Private use|||
 	- ### Assumptions & Constraints
-		- |**Assumptions** ![Assumptions.png](/Documents/images/technical/assumptions.png){:height 144, :width 91} |**Constraints** ![constraints.png](/Documents/images/technical/constraints.png){:height 147, :width 99} |
+		- |<p align="center" padding-top="15px"><img src="/Documents/images/technical/assumptions.png" height="130px"></p> |<p align="center"><img src="/Documents/images/technical/constraints.png" height="150px"></p>|
 			|--|--|
+			|<p align="center"><strong>Assumptions</strong></p>|<p align="center"><strong>Constraints</strong></p>|
 			|We assume that FABGen is already "perfect" and that the existing code would not be responsible of further bugs|Not a two way binding for the moment, unlike FABGen README states.|
 			|The tests are representative of the foolproofness of the algorithm|No one has actual great knowledge of target language in group|
 			|We assume that we are on a 64bits system so size_t == long||
 			|We assume that Rust is compatible with FABGen||
 - ### Glossary
 	- **Code binder**:
-		- *Also explained in 'What is a code binder used for |ETIQUETTE| '*
+		- <em>Also explained in <a href="#what-is-a-code-binder-used-for-">'What is a code binder used for'</a></em><b
 	- **Application Binary Interface (A.B.I.)**:
 		- An application binary interface (ABI) is a low-level interface between an operating system or a microprocessor architecture and an application program. It defines how the binary code for a program should be formatted so that it can be executed by a system. The ABI specifies various details such as data types, register usage, exception handling, system call conventions, and other implementation-specific details that are required for an application to run on a particular platform.
-		- ABIs are important because they ensure compatibility between different components in a system. By adhering to a common ABI, different components can be developed and maintained independently, while still being able to work together. This helps to avoid the problems that can arise when different parts of a system are built with different assumptions about how they will interact with each other.
+		- ABIs are important because they ensure compatibility between different components in a system. By adhering to a common ABI, different components can be developed and maintained independently, while still being able to work together. This helps to avoid the problems that can arise when different parts of a system are built with different assumptions about how they will interact with each other. 
 	- **Makefile**:
 		- In C/C++, a makefile is a text file that is used in C/C++ projects to specify how the software should be built and the dependencies between different components. The makefile is processed by the "make" utility, which is a standard tool in most Unix-like operating systems.
-		- The makefile contains a series of rules that describe how the target files should be built from their dependencies. A rule in a makefile typically consists of a target, a list of dependencies, and a series of commands that should be executed to build the target.
+		- The makefile contains a series of rules that describe how the target files should be built from their dependencies. A rule in a makefile typically consists of a target, a list of dependencies, and a series of commands that should be executed to build the target. 
 	- **Idiomatic (language)**:
 		- Having idiomatic knowledge of a language refers to the understanding of expressions, phrases and specificities that are unique to a particular language and culture. These expressions are usually not easily translated or understood by someone who is ignorant of that said language/culture.
 		- For example, in [Malbolge](https://fr.wikipedia.org/wiki/Malbolge) the following is a valid Hello World:
@@ -165,7 +169,7 @@
 	- **API**:
 		- An **application programming interface** (**API**) is a way for two or more computer programs to communicate with each other. It is a type of software interface, offering a service to other pieces of software. A document or standard that describes how to build or use such a connection or interface is called an *API specification*. A computer system that meets this standard is said to *implement* or *expose* an API. The term API may refer either to the specification or to the implementation.
 		- In contrast to a user interface, which connects a computer to a person, an application programming interface connects computers or pieces of software to each other. It is not intended to be used directly by a person (the end user) other than a computer programmer who is incorporating it into the software. An API is often made up of different parts which act as tools or services that are available to the programmer. A program or a programmer that uses one of these parts is said to *call* that portion of the API. The calls that make up the API are also known as subroutines, methods, requests, or endpoints. An API specification *defines* these calls, meaning that it explains how to use or implement them.
-		- One purpose of APIs is to hide the internal details of how a system works, exposing only those parts a programmer will find useful and keeping them consistent even if the internal details later change. An API may be custom-built for a particular pair of systems, or it may be a shared standard allowing interoperability among many systems.
+		- One purpose of APIs is to hide the internal details of how a system works, exposing only those parts a programmer will find useful and keeping them consistent even if the internal details later change. An API may be custom-built for a particular pair of systems, or it may be a shared standard allowing interoperability among many systems. 
 	- **Wrapper Object**:
 		- A **wrapper function** is a function in a software library or a computer program whose main purpose is to call a second subroutine or a system call with little or no additional computation. Wrapper functions are used to make writing computer programs easier by abstracting away the details of a subroutine's underlying implementation.
 		- Wrapper functions are a means of delegation and can be used for a number of purposes.
@@ -173,7 +177,7 @@
 		- In computer science and computer programming, a data type (or simply type) is a collection or grouping of data values, usually specified by a set of possible values, a set of allowed operations on these values, and/or a representation of these values as machine types. A data type specification in a program constrains the possible values that an expression, such as a variable or a function call, might take. On literal data, it tells the compiler or interpreter how the programmer intends to use the data.
 		- Most programming languages support basic data types of integer numbers (of varying sizes), floating-point numbers (which approximate real numbers), characters and Booleans.
 	- **Compiler**:
-		- In computing, a compiler is a computer program that translates computer code written in one programming language (the source language) into another language (the target language). The name "compiler" is primarily used for programs that translate source code from a high-level programming language to a low-level programming language (e.g. assembly language, object code, or machine code) to create an executable program.
+		- In computing, a compiler is a computer program that translates computer code written in one programming language (the source language) into another language (the target language). The name "compiler" is primarily used for programs that translate source code from a high-level programming language to a low-level programming language (e.g. assembly language, object code, or machine code) to create an executable program. 
 # Proposed Solution
 - ### Dependencies & External Elements
 - > * 64bit Windows or linux OS
@@ -228,8 +232,9 @@
 	- > WIP
 - ### Risk assessment and security risks/measures
 - #### Risk Prevention Matrix
-	- |**Possible Risk** ![risk.png](/Documents/images/technical/risk.png){:height 138, :width 124} |**Preventive Action** ![riskPrevention.png](/Documents/images/technical/riskPrevention.png){:height 214, :width 128} |
+	- |<p align="center" padding-top="15px"><img src="/Documents/images/technical/risk.png" height="130px"></p>|<p align="center" padding-top="15px"><img src="/Documents/images/technical/riskPrevention.png" height="130px"></p>|
 	  |--|--|
+	  |<p align="center"><strong>Possible Risks</strong></p>|<p align="center"><strong>Preventive Action</strong></p>|
 	  |Program Errors|Already Handled by FABGen |
 	  |Security Risks|Out of Scope (considering resources)|
 	  |Privacy Risks|Out of Scope (considering resources)|
@@ -243,8 +248,9 @@
 - ### Performance
 - > WIP Compile time => must keep more or less the same performance as the other implementations
 - ### Pros and Cons
-- |**Pros** ![pros.png](/Documents/images/technical/pros.png){:height 71, :width 60} |**Cons** ![constraints.png](/Documents/images/technical/constraints.png){:height 185, :width 105} |
+- |<p align="center" padding-top="15px"><img src="/Documents/images/technical/pros.png" height="130px"></p>|<p align="center" padding-top="15px"><img src="/Documents/images/technical/minus.png" height="130px"></p>|
   |--|--|
+  |<p align="center"><strong>Pros</strong></p>|<p align="center"><strong>Cons</strong></p>|
   |More stable than if we had used bind gen in addition to FABGen.|Given the constraints, we cannot ensure complete coverage of the features.|
   |For FABgen: it is integrated in their existing workflow.|Given the constraints, we cannot ensure idiomatic Rust.|
   |It remains 🌈FABulous✨||
