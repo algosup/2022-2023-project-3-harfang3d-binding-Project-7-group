@@ -1,8 +1,8 @@
 <!-- TABLE OF CONTENTS -->
 <h2 id="table-of-contents"> :book: Table of Contents</h2>
 
-<details open="open">
-    <summary><em>click to collapse...</em></summary>
+<details>
+    <summary><em>click to expand...</em></summary>
     <ol>
 	    <li><a href="#introduction"> ➤ Introduction</a>
 		    <ul>
@@ -86,6 +86,8 @@
 </details>
 
 
+![-----------------------------------------------------](https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.png)
+
 
 # Introduction
 - ### Document Tracking and version (Revision History)
@@ -117,7 +119,7 @@
 	- #### Authors, roles etc.
 		- | **Deliverable**| **Author**| **E-mail address**|
 			|--|--|--|
-			| *Functional Requirements Document *| Mathieu CHAPUT (Program Manager) | mathieu.chaput@algosup.com|
+			| *Functional Requirements Document*| Mathieu CHAPUT (Program Manager) | mathieu.chaput@algosup.com|
 			| *Technical Requirements Document*| Mathis KAKAL (Tech Lead)| mathis.kakal@algosup.com |
 			| *Quality Assurance Document*| **Undefined**| **Undefined** |
 	- #### Reviewers  
@@ -252,6 +254,9 @@
 		- Most programming languages support basic data types of integer numbers (of varying sizes), floating-point numbers (which approximate real numbers), characters and Booleans.
 	- **Compiler**:
 		- In computing, a compiler is a computer program that translates computer code written in one programming language (the source language) into another language (the target language). The name "compiler" is primarily used for programs that translate source code from a high-level programming language to a low-level programming language (e.g. assembly language, object code, or machine code) to create an executable program. 
+
+![-----------------------------------------------------](https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.png)
+
 # Proposed Solution
 - ### Dependencies & External Elements
 - > * 64bit Windows or linux OS
@@ -334,6 +339,9 @@
   |It remains 🌈FABulous✨||
 - ### Alternate designs or solutions
 - *Please Refer to Existing solutions*
+
+![-----------------------------------------------------](https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.png)
+
 # Development & Maintenance
 - ### Schedule of development
 - define each phases
@@ -358,6 +366,9 @@
 	- List of metrics to capture
 - ### CI/CD Pipeline
 - Tests are run automatically when pushed in main
+
+![-----------------------------------------------------](https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.png)
+
 # Conclusion
 - ### Future improvements
 - > WIP
