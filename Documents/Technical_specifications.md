@@ -82,7 +82,12 @@
 				<li><a href="#efforts-and-costs">Efforts & Costs</a></li>
 			</ul>
 		</li>
-		<li><a href="#success-assessment">Success Assessment</a></li>
+		<li><a href="#success-assessment">Success Assessment</a>
+			<ul>
+				<li><a href="#impact">Impact</a></li>
+				<li><a href="#metrics">Metrics</a></li>
+			</ul>
+		</li>
 		<li><a href="#cicd-pipeline">CI/CD Pipeline</a></li>
 	</ul>
     </li>
