@@ -404,3 +404,5 @@
 		- <a href="https://www.flaticon.com/free-icons/prevention" title="prevention icons">Prevention icons created by Freepik - Flaticon</a>
 		- <a href="https://www.flaticon.com/free-icons/plus" title="plus icons">Plus icons created by Freepik - Flaticon</a>
 		- <a href="https://www.flaticon.com/free-icons/minus" title="minus icons">Minus icons created by Google - Flaticon</a>
+
+<div align="right"><a href="##-book-table-of-contents"><img src="/Documents/images/technical/back.png" width="75px"></a></div>
