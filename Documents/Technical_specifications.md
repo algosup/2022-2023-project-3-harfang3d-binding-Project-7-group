@@ -130,35 +130,35 @@
 	- Moreover, it saves the team from repeatedly explaining design and technical choices to teammates and other stakeholders.
 		A well-written specification document will allow the team to arrive at a mutual understanding regarding the technical aspects of the project and development process.
 - ## Points of contact
-	- ### Points of Contact
+- ### Points of Contact
 	- | Ivan MOLNAR| Project Manager | ivan.molnar@algosup.com |
 		|--|--|--|
 		| Mathieu CHAPUT| Program Manager | mathieu.chaput@algosup.com |
 		| Franck JEANNIN| Algosup CEO & Project overseer | franck.jeannin@algosup.com |
 		| Mathis KAKAL| Tech Lead| mathis.kakal@algosup.com |
-	- #### Authors, roles etc.
+- ### Authors, roles etc.
 	- | **Deliverable**| **Author**| **E-mail address**|
 		|--|--|--|
 		| *Functional Requirements Document*| Mathieu CHAPUT (Program Manager) | mathieu.chaput@algosup.com|
 		| *Technical Requirements Document*| Mathis KAKAL (Tech Lead)| mathis.kakal@algosup.com |
 		| *Quality Assurance Document*| **Undefined**| **Undefined** |
-	- ### Reviewers  
+- ### Reviewers  
 	- This Document has been reviewed by the whole team thanks to our small numbers, allowing for accuracy in the rendition of the specifications. This excludes a designated quality assurance manager/engineer for establishing which functions and KPI's to monitor and test, task that will be performed by the whole team. The program manager will also review the Technical Requirements Document for iteration with the the Functional Requirements, the project manager to ensure compliance with the project's expectations and finally the software engineer to ensure that it is in a language that they can understand and to develop the product.
 - ## Project Overview
 - ### Context/Background
 	- ### Project Genesis
-		- This project was initiated on Tuesday, January 3rd 2023 as a collaboration between the customer, **HARFANG**® **3D**, a french company known for developing real-time 3D visualization tools and **ALGOSUP**, the *international software development school*.
-		- As stated in the Functional Requirements Document (FSD), the main goal of this project is to be able to use **HARFANG® 3D Framework** library, which is implemented in C/C++ in Rust language, through the use of their custom made code binder **FABGen** (designed as a replacement for SWIG) which already supports transpiling to CPython, Lua and Go. Therefore, the code binder can be described as an interface generator, more specifically as an Application Binary Interface generator, as it has to interface between two languages at low levels. This implies good knowledge of source and target languages, since (especially in the case of C/C++  Rust) where syntax and functioning greatly differ.
+	- This project was initiated on Tuesday, January 3rd 2023 as a collaboration between the customer, **HARFANG**® **3D**, a french company known for developing real-time 3D visualization tools and **ALGOSUP**, the *international software development school*.
+	- As stated in the Functional Requirements Document (FSD), the main goal of this project is to be able to use **HARFANG® 3D Framework** library, which is implemented in C/C++ in Rust language, through the use of their custom made code binder **FABGen** (designed as a replacement for SWIG) which already supports transpiling to CPython, Lua and Go. Therefore, the code binder can be described as an interface generator, more specifically as an Application Binary Interface generator, as it has to interface between two languages at low levels. This implies good knowledge of source and target languages, since (especially in the case of C/C++  Rust) where syntax and functioning greatly differ.
 	- ### Methodology (DMAIC Framework)
-		- Although the project consists mostly of identifying code implementations, writing them and passing predefined tests, we made sure to follow the DMAIC framework seen during our lessons. Tracking was vital for us, since we did not feature a dedicated quality assurance engineer/manager, and had to cross check everything we did before moving on. We did daily meetings to learn about our progress and came up with new ideas to be implemented until the end.
-		![DMAIC.png](/Documents/images/technical/DMAIC_1675431865139_0.png)
+	- Although the project consists mostly of identifying code implementations, writing them and passing predefined tests, we made sure to follow the DMAIC framework seen during our lessons. Tracking was vital for us, since we did not feature a dedicated quality assurance engineer/manager, and had to cross check everything we did before moving on. We did daily meetings to learn about our progress and came up with new ideas to be implemented until the end.
+	![DMAIC.png](/Documents/images/technical/DMAIC_1675431865139_0.png)
 	- ### What is HARFANG 3D ?
-		- **HARFANG® 3D Framework** is a 3D Engine built in C/C++ that is sold to diverse companies in various sectors such as automotive, railway, risk prevention, design etc. .  **HARFANG® 3D Framework**, which we will call "the engine" is able to be run with other languages thanks to an ABI generator (FABGen), which will be the main focus of our work, since we need to add another language (Rust) to it.
+	- **HARFANG® 3D Framework** is a 3D Engine built in C/C++ that is sold to diverse companies in various sectors such as automotive, railway, risk prevention, design etc. .  **HARFANG® 3D Framework**, which we will call "the engine" is able to be run with other languages thanks to an ABI generator (FABGen), which will be the main focus of our work, since we need to add another language (Rust) to it.
 	- ### What is a code binder used for ?
-		- *Here is a simplified view of how FABGen is expected to function:*
-			![simplified diagram.png](/Documents/images/technical/simplified_diagram_1674828088999_0.png)
+	- *Here is a simplified view of how FABGen is expected to function:*
+		![simplified diagram.png](/Documents/images/technical/simplified_diagram_1674828088999_0.png)
 	- ### Existing Solutions & Similar technologies
-		- #### Automatic binding generation
+		- ### Automatic binding generation
 			- rust-bindgen
 				- https://github.com/rust-lang/rust-bindgen
 				- Parses header files and generates a rust code out of it
@@ -204,36 +204,36 @@
 				- `cpp!` macro enables embedding of C++ code right into the middle of the Rust code.
 				- but we want for libraries that are already written..
 - ## Goals, Product/Client requirements
-	- ### Functional Requirements
-		- As mentioned in the *Functional Specifications*, the main objectives of our work are:
-			- Provide Rust programs with access to all of C++'s functions and data structures.
-			- Be easy to use and integrate into Rust programs, with a clear and simple API that is easy to learn and use.
-			- Be well-tested, following Fabgen's existing templates, to ensure that it works correctly and is reliable.
-			- Be released under an open-source license, allowing developers to use and modify it as needed.
-			- Be as well optimized as possible not to slow down programs using the library
-			- Make the Rust code as user-friendly as possible by using idiomatic language.
-	- ### Scope
-		- |<p align="center" padding-top="15px"><img src="/Documents/images/technical/inScope.png" height="150px"></p>|<p align="center"><img src="/Documents/images/technical/outOfScope.png" height="150px"></p>|
-			|--|--|
-			|<p align="center"><strong>In Scope</strong></p>|<p align="center"><strong>Out of Scope</strong></p>|
-			|Reverse Engineering FABGen|Modifying FABGen core logic|
-			|Adding Rust language to fabgen|Using 3rd party binders|
-			|Trying out FABGen on harfang.py|Modifying other language implementations in FABGen|
-			|Functional on Windows & Linux|Cannot run on Mac M1|
-			|Documenting the program to allow for easier developement in the future|Security => Out of scope|
-			|Passing all the tests provided by the customer|Privacy => Out of scope|
-			|Test Run on the Harfang 3D Engine||
-	- ### Quality Assurance Expectations
-		- The test coverage of FABGen was of 92%, A total of 29 tests provided by the customer, and and passing rate must be 100% to validate the implementation. The same should be true for the delivered product
-	- ### License
-		- GNU GPL 3.0
-			- |Permissions|Limitations|Conditions|
-				|--|--|--|
-				|✅ Commercial Use|❌ Liability|☝️ License and copyright notice|
-				|✅ Modification|❌ Warranty|☝️ State changes|
-				|✅ Distribution||☝️Disclose source|
-				|✅ Patent use||☝️Same License|
-				|✅ Private use|||
+- ### Functional Requirements
+	- As mentioned in the *Functional Specifications*, the main objectives of our work are:
+		- Provide Rust programs with access to all of C++'s functions and data structures.
+		- Be easy to use and integrate into Rust programs, with a clear and simple API that is easy to learn and use.
+		- Be well-tested, following Fabgen's existing templates, to ensure that it works correctly and is reliable.
+		- Be released under an open-source license, allowing developers to use and modify it as needed.
+		- Be as well optimized as possible not to slow down programs using the library
+		- Make the Rust code as user-friendly as possible by using idiomatic language.
+- ### Scope
+	- |<p align="center" padding-top="15px"><img src="/Documents/images/technical/inScope.png" height="150px"></p>|<p align="center"><img src="/Documents/images/technical/outOfScope.png" height="150px"></p>|
+		|--|--|
+		|<p align="center"><strong>In Scope</strong></p>|<p align="center"><strong>Out of Scope</strong></p>|
+		|Reverse Engineering FABGen|Modifying FABGen core logic|
+		|Adding Rust language to fabgen|Using 3rd party binders|
+		|Trying out FABGen on harfang.py|Modifying other language implementations in FABGen|
+		|Functional on Windows & Linux|Cannot run on Mac M1|
+		|Documenting the program to allow for easier developement in the future|Security => Out of scope|
+		|Passing all the tests provided by the customer|Privacy => Out of scope|
+		|Test Run on the Harfang 3D Engine||
+- ### Quality Assurance Expectations
+	- The test coverage of FABGen was of 92%, A total of 29 tests provided by the customer, and and passing rate must be 100% to validate the implementation. The same should be true for the delivered product
+- ### License
+	- GNU GPL 3.0
+		- |Permissions|Limitations|Conditions|
+			|--|--|--|
+			|✅ Commercial Use|❌ Liability|☝️ License and copyright notice|
+			|✅ Modification|❌ Warranty|☝️ State changes|
+			|✅ Distribution||☝️Disclose source|
+			|✅ Patent use||☝️Same License|
+			|✅ Private use|||
 - ## Assumptions & Constraints
 	- |<p align="center" padding-top="15px"><img src="/Documents/images/technical/assumptions.png" height="130px"></p> |<p align="center"><img src="/Documents/images/technical/constraints.png" height="150px"></p>|
 		|--|--|
@@ -299,7 +299,7 @@
 - ### Conversion Tables
 - > WIP
 - ### Idiomatic Writing:
-	- #### Idiomatic C/C++ & Rust Code
+	- ### Idiomatic C/C++ & Rust Code
 		- *Basic Features Comparison:*
 			- |Mutable Access|Multi-threaded|C++|Rust|
 			  |--|--|--|--|
@@ -358,7 +358,7 @@
   |For FABgen: it is integrated in their existing workflow.|Given the constraints, we cannot ensure idiomatic Rust.|
   |It remains 🌈FABulous✨||
 - ## Alternate designs or solutions
-- *Please Refer to Existing solutions*
+- <em>Please Refer to <a href="#existing-solutions--similar-technologies">Existing solutions</a></em>
 
 ![-----------------------------------------------------](https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.png)
 
@@ -395,7 +395,7 @@
 - ## End Matter
 - ### Footnotes
 - ### Acknowledgements
-	- #### Icons
+	- ### Icons
 		- <a href="https://www.flaticon.com/free-icons/audit" title="audit icons">Audit icons created by Freepik - Flaticon</a>
 		- <a href="https://www.flaticon.com/free-icons/constraint" title="constraint icons">Constraint icons created by orvipixel - Flaticon</a>
 		- <a href="https://www.flaticon.com/free-icons/aim" title="aim icons">Aim icons created by Prosymbols - Flaticon</a>
