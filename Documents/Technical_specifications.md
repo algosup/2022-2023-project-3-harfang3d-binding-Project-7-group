@@ -349,7 +349,7 @@
 - ### Rollback Plan
 	- Since our work is on a Fork from the original product, there is no need to establish a specific Rollback plan, other than mentioning that preserving the Git history of changes is necessary to enable this safeguard.
 - ## Performance
-- > WIP Compile time => must keep more or less the same performance as the other implementations
+- > WIP
 - ## Pros and Cons
 - |<p align="center" padding-top="15px"><img src="/Documents/images/technical/pros.png" height="130px"></p>|<p align="center" padding-top="15px"><img src="/Documents/images/technical/minus.png" height="130px"></p>|
   |--|--|
@@ -365,25 +365,14 @@
 # Development & Maintenance
 - ## Schedule of development
 - ### Planning
+	- > WIP
 - ### Efforts and costs
-	- **a. Work estimates and timelines**
-		- List of specific, measurable, and time-bound tasks
-		- Resources needed to finish each task
-		- Time estimates for how long each task needs to be completed
-	- **b. Prioritization**
-		- Categorization of tasks by urgency and impact
-	- **c. Milestones**
-		- Dated checkpoints when significant chunks of work will have been completed
-		- Metrics to indicate the passing of the milestone
-	- **d. Future work**
-		- List of tasks that will be completed in the future
+	- > WIP
 - ## Success Assessment
-- Throughout the whole project, we have identified the passing of the tests
 - ### Impact
-	- (Security, cost, performance impact)
+	- > WIP
 - ### Metrics
-	- Tools to capture and measure metrics
-	- List of metrics to capture
+	- > WIP
 - ## CI/CD Pipeline
 - Tests are run automatically when pushed in main
 
@@ -394,6 +383,7 @@
 - > WIP
 - ## End Matter
 - ### Footnotes
+	- > WIP
 - ### Acknowledgements
 	- ### Icons
 		- <a href="https://www.flaticon.com/free-icons/audit" title="audit icons">Audit icons created by Freepik - Flaticon</a>
