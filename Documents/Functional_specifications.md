@@ -203,3 +203,5 @@ This functional specification outlines the requirements for the addition of a Ru
 * Unit test: A test that checks the behavior of a single unit of code, such as a function or class.
 * Integration test: A test that checks the behavior of multiple units of code, such as a module or program.
 * Library: A collection of code that can be used by other programs.
+
+<div align="right"><a href="#functional-specifications"><img src="/Documents/images/technical/back.png" width="75px"></a></div>
