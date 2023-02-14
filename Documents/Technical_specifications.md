@@ -78,8 +78,8 @@
 	<ul>
 		<li><a href="#schedule-of-development">Schedule of development</a>
 			<ul>
-				<li><a href="">Planning</a></li>
-				<li><a href="">Efforts & Costs</a></li>
+				<li><a href="#planning">Planning</a></li>
+				<li><a href="#efforts-and-costs">Efforts & Costs</a></li>
 			</ul>
 		</li>
 		<li><a href="#success-assessment">Success Assessment</a></li>
@@ -367,9 +367,9 @@
 		- List of tasks that will be completed in the future
 - ## Success Assessment
 - Throughout the whole project, we have identified the passing of the tests
-- ### a. Impact
+- ### Impact
 	- (Security, cost, performance impact)
-- ### b. Metrics
+- ### Metrics
 	- Tools to capture and measure metrics
 	- List of metrics to capture
 - ## CI/CD Pipeline
