@@ -455,21 +455,34 @@
 
 ![-----------------------------------------------------](https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.png)
 
-# Conclusion
+- # Conclusion
 - ## Future improvements
-- > WIP
-- ## End Matter
-- ### Footnotes
-	- > WIP
-- ### Acknowledgements
-	- ### Icons
-		- <a href="https://www.flaticon.com/free-icons/audit" title="audit icons">Audit icons created by Freepik - Flaticon</a>
-		- <a href="https://www.flaticon.com/free-icons/constraint" title="constraint icons">Constraint icons created by orvipixel - Flaticon</a>
-		- <a href="https://www.flaticon.com/free-icons/aim" title="aim icons">Aim icons created by Prosymbols - Flaticon</a>
-		- <a href="https://www.flaticon.com/free-icons/pet" title="pet icons">Pet icons created by Freepik - Flaticon</a>
-		- <a href="https://www.flaticon.com/free-icons/risk" title="risk icons">Risk icons created by bsd - Flaticon</a>
-		- <a href="https://www.flaticon.com/free-icons/prevention" title="prevention icons">Prevention icons created by Freepik - Flaticon</a>
-		- <a href="https://www.flaticon.com/free-icons/plus" title="plus icons">Plus icons created by Freepik - Flaticon</a>
-		- <a href="https://www.flaticon.com/free-icons/minus" title="minus icons">Minus icons created by Google - Flaticon</a>
+- Considering we did not reach our goal of binding `harfang.py`, reaching this objective would be our first future perspective.
+- After that, adding reverse binding functionality like [Flapigen](https://github.com/Dushistov/flapigen-rs) would be interesting (which seems to be FABGen's original statement)
+- As of now, FABGen is a semi-automatic binding generator because the user has to manually write the application-specific bindings. It would be interesting to work on making it an automatic binding generator by automatically generating interface files like [Rifgen](https://crates.io/crates/rifgen)
+- We would also like to be granted more time to write more idiomatic rust, whilst testing for security and privacy concerns for instance, as we have focused our efforts on binding `harfang.py`
+- ### Acknowledgments
+    - ### People
+  	- |<a href="https://www.linkedin.com/in/franck-jeannin/">Franck Jeannin</a>|<a href="https://algosup.com/">Algosup</a> CEO & Project Overseer|
+  	  |--|--|
+  	  |<a href="https://www.linkedin.com/in/astrofra/">François Gutherz</a>|CTO & Project Lead @<a href="https://www.harfang3d.com/">Harfang</a>|
+  	  |<a href="https://www.linkedin.com/in/ejulien/">Emmanuel Julien</a>|Lead Developer @<a href="https://www.harfang3d.com/">Harfang</a>|
+  	  |<a href="https://www.linkedin.com/in/thomas-simonnet-39968480/">Thomas Simonnet</a>|Lead Developer @<a href="https://www.harfang3d.com/">Harfang</a>|
+  	  |<a href="https://www.linkedin.com/in/jihane-billacois/">Jihane Billacois</a>|Research @E-STANCE|
+  	  |<a href="https://www.linkedin.com/in/delphine-prousteau/">Delphine Prousteau</a>|Customer Satisfaction @<a href="https://www.linkedin.com/company/quanaup/">QuanauP</a>|
+  	  |<a href="https://www.linkedin.com/in/caroline-cordier-dpo/">Caroline Cordier</a>|Project Management & Quality Assurance @<a href="https://www.linkedin.com/company/enablon/">Enablon</a>|
+    - ### Media
+  	- <a href="https://www.flaticon.com/free-icons/audit" title="audit icons">Audit icons created by Freepik - Flaticon</a>
+  	- <a href="https://www.flaticon.com/free-icons/constraint" title="constraint icons">Constraint icons created by orvipixel - Flaticon</a>
+  	- <a href="https://www.flaticon.com/free-icons/aim" title="aim icons">Aim icons created by Prosymbols - Flaticon</a>
+  	- <a href="https://www.flaticon.com/free-icons/pet" title="pet icons">Pet icons created by Freepik - Flaticon</a>
+  	- <a href="https://www.flaticon.com/free-icons/risk" title="risk icons">Risk icons created by bsd - Flaticon</a>
+  	- <a href="https://www.flaticon.com/free-icons/prevention" title="prevention icons">Prevention icons created by Freepik - Flaticon</a>
+  	- <a href="https://www.flaticon.com/free-icons/plus" title="plus icons">Plus icons created by Freepik - Flaticon</a>
+  	- <a href="https://www.flaticon.com/free-icons/minus" title="minus icons">Minus icons created by Google - Flaticon</a>
+  	- <a href="https://www.flaticon.com/free-icons/functional" title="functional icons">Functional icons created by Eucalyp - Flaticon</a>
+  	- <div> Icons made by <a href="https://www.flaticon.com/authors/orvipixel" title="orvipixel"> orvipixel </a> from <a href="https://www.flaticon.com/" title="Flaticon">www.flaticon.com</a></div>
+  	- <div> Icons made by <a href="https://www.freepik.com" title="Freepik"> Freepik </a> from <a href="https://www.flaticon.com/" title="Flaticon">www.flaticon.com</a></div>
+  	- <div> Icons made by <a href="https://www.flaticon.com/authors/hajicon" title="HAJICON"> HAJICON </a> from <a href="https://www.flaticon.com/" title="Flaticon">www.flaticon.com</a></div>
 
 <div align="right"><a href="#-book-table-of-contents"><img src="/Documents/images/technical/back.png" width="75px"></a></div>
