@@ -2034,6 +2034,7 @@ uint32_t %s(void* p) {
 			if "group" not in var or var["group"] is None:
 				rust_bind += self.__extract_get_set_member_rust(
 					"", var, is_global=True)
+
 		for bound_name, enum in self._enums.items():
 			rust_bind += f"// {bound_name} ...\n"
 			enum_conv = self._get_conv_from_bound_name(bound_name)
@@ -2041,7 +2042,8 @@ uint32_t %s(void* p) {
 				arg_bound_name = enum_conv.rust_type
 			else:
 				arg_bound_name = "i32"
-			rust_bind += f"pub fn {clean_name_with_title(self._name)}Get{bound_name}(id : {arg_bound_name}) -> {bound_name};\n"
+				#enums are the only methods that aren't using the _name prefix, it doesn't work if you add them, i have no idea why
+			rust_bind += f"pub fn Get{bound_name}(id : {arg_bound_name}) -> {bound_name};\n"
 			
 
 		rust_bind += "}\n"
