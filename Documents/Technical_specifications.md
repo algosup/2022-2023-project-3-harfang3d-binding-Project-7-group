@@ -60,7 +60,11 @@
 			<ul>
 				<li><a href="#conversion-tables">➧ Conversion Tables</a></li>
 				<li><a href="#idiomatic-writing">➧ Idiomatic Writing</a></li>
-				<li><a href="#step-by-step-build">➧ Step by Step Build</a></li>
+				<li><a href="#step-by-step-build">➧ Step by Step Build</a>
+					<ul>
+						<li><a href="#new-folder-structure">New Folder Structure</a></li>
+					</ul>
+				</li>
 			</ul>
 		</li>
 		<li><a href="#risk-assessment-and-security-risksmeasures">➭ Risk assessment and security risks/measures</a>
@@ -155,8 +159,9 @@
 	- ### What is HARFANG 3D ?
 	- **HARFANG® 3D Framework** is a 3D Engine built in C/C++ that is sold to diverse companies in various sectors such as automotive, railway, risk prevention, design etc. .  **HARFANG® 3D Framework**, which we will call "the engine" is able to be run with other languages thanks to an ABI generator (FABGen), which will be the main focus of our work, since we need to add another language (Rust) to it.
 	- ### What is a code binder used for ?
-	- *Here is a simplified view of how FABGen is expected to function:*
-		![simplified diagram.png](/Documents/images/technical/simplified_diagram_1674828088999_0.png)
+	- > *Here is a simplified view of how FABGen is expected to function:*
+
+	![simplified diagram.png](/Documents/images/technical/simplified_diagram_1674828088999_0.png)
 	- ### Existing Solutions & Similar technologies
 		- ### Automatic binding generation
 			- rust-bindgen
@@ -279,14 +284,14 @@
 
 # Proposed Solution
 - ## Dependencies & External Elements
-- > * 64bit Windows or linux OS
-  * Python 3.2 minimum except ?
-  * FABGen
-  * Optionally: Harfang 3D
-  * Rustc compiler
-  * Cargo
-  * GCC and G++
-  * Visual Studio 2019
+- 64bit Windows or linux OS
+- Python 3.2 minimum except ?
+- FABGen
+- Optionally: Harfang 3D
+- Rustc compiler
+- Cargo
+- GCC and G++
+- Visual Studio 2019
 - ## Architecture Diagrams:
 - ### Main Architecture
 	![image.png](/Documents/images/technical/image_1675436220671_0.png)
@@ -329,10 +334,63 @@
 			  | `void` | `()` | The unit type (see below) |
 			- [1]: Rust's `char` type, is 4 bytes wide, enough to hold any Unicode character. This is equivalent to the belated `char32_t` that appears in C++11 to rectify the abused C++98 `wchar_t` type which on operating systems such as Windows is only 2 bytes wide. When you iterate strings in Rust you may do so either by character or `u8`, i.e. a byte.
 			- [2]: Rust has a specific numeric type for indexing on arrays and collections called `usize`. A `usize` is designed to be able to reference as many elements in an array as there is addressable memory. i.e. if memory is 64-bit addressable then usize is 64-bits in length. There is also a signed `isize` which is less used but also available.
-		-
 	- > WIP
+
 - ### Step by Step Build
-	- > WIP
+	- ### New Folder Structure
+	<pre>root
+	├── <em>.github/workflows</em>
+	│   └── <strong>main.yml</strong>
+	├── <em>examples</em>
+	│   ├── <strong>harfang_libs</strong>
+	│   └── <em>harfang.py</em>
+	├── <em>lang</em>
+	│   └── <strong>rust.py</strong>
+	├── <em>lib</em>
+	│   ├── <strong>rust</strong>
+	│   │   ├── <strong>WrapperConverter.rs_</strong>
+	│   │   ├── <strong>__init__.py</strong>
+	│   │   ├── <strong>std.py</strong>
+	│   │   └── <strong>stl.py</strong>
+	│   ├── <em>stl.py</em>
+	│   └── <em>__init__.py</em>
+	├── <em>tests</em>
+	│   ├── <em>arg_out.py</em>
+	│   ├── <em>basic_type_exchange.py</em>
+	│   ├── <em>cpp_exceptions.py</em>
+	│   ├── <em>enumeration.py</em>
+	│   ├── <em>extern_type.py</em>
+	│   ├── <em>function_call.py</em>
+	│   ├── <em>function_template_call.py</em>
+	│   ├── <em>method_route_feature.py</em>
+	│   ├── <em>repr.py</em>
+	│   ├── <em>return_nullptr_as_none.py</em>
+	│   ├── <em>shared_ptr.py</em>
+	│   ├── <em>shared_ptr_default_comparison.py</em>
+	│   ├── <em>std_function.py</em>
+	│   ├── <em>std_future.py</em>
+	│   ├── <em>std_vector.py</em>
+	│   ├── <em>struct_bitfield_member_access.py</em>
+	│   ├── <em>struct_default_comparison.py</em>
+	│   ├── <em>struct_exchange.py</em>
+	│   ├── <em>struct_inheritance.py</em>
+	│   ├── <em>struct_inheritance_cast.py</em>
+	│   ├── <em>struct_instantiation.py</em>
+	│   ├── <em>struct_member_access.py</em>
+	│   ├── <em>struct_method_call.py</em>
+	│   ├── <em>struct_nesting.py</em>
+	│   ├── <em>struct_operator_call.py</em>
+	│   ├── <em>struct_static_const_member_access.py</em>
+	│   ├── <em>template_struct_nesting.py</em>
+	│   ├── <em>transform_rval.py</em>
+	│   └── <em>variable_access.py</em>
+	├── <strong>Dockerfile</strong>
+	├── <em>bind.py</em>
+	├── <em>gen.py</em>
+	└── <em>tests.py</em></pre>
+	
+
+
 - ## Risk assessment and security risks/measures
 - ### Risk Prevention Matrix
 	- |<p align="center" padding-top="15px"><img src="/Documents/images/technical/risk.png" height="130px"></p>|<p align="center" padding-top="15px"><img src="/Documents/images/technical/riskPrevention.png" height="130px"></p>|
