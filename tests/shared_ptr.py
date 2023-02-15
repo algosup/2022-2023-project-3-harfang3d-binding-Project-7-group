@@ -117,7 +117,7 @@ fn test() {
 		assert_eq!(my_test::MyTestSsimpleStructGetV(sp), 7);
 
 		let sp2 = my_test::MyTestConstructorSsimpleStruct(9.0);
-
+		
 		assert_eq!(my_test::MyTestSsimpleStructGetU(sp2), 9.0);
 		assert_eq!(my_test::MyTestSsimpleStructGetV(sp2), 90);
 
