@@ -159,7 +159,7 @@
 	- ### What is HARFANG 3D ?
 	- **HARFANG® 3D Framework** is a 3D Engine built in C/C++ that is sold to diverse companies in various sectors such as automotive, railway, risk prevention, design etc. .  **HARFANG® 3D Framework**, which we will call "the engine" is able to be run with other languages thanks to an ABI generator (FABGen), which will be the main focus of our work, since we need to add another language (Rust) to it.
 	- ### What is a code binder used for ?
-	- > *Here is a simplified view of how FABGen is expected to function:*
+	> *Here is a simplified view of how FABGen is expected to function:*
 
 	![simplified diagram.png](/Documents/images/technical/simplified_diagram_1674828088999_0.png)
 	- ### Existing Solutions & Similar technologies
@@ -338,6 +338,7 @@
 
 - ### Step by Step Build
 	- ### New Folder Structure
+	> Keep in mind the *italic text* represents modified files/folders, while **bold** text represents newly created files/folders
 	<pre>root
 	├── <em>.github/workflows</em>
 	│   └── <strong>main.yml</strong>
