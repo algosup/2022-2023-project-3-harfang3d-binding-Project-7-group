@@ -86,10 +86,10 @@ mod my_test;
 fn test() {
 	unsafe {
 		let future = my_test::MyTestGetFutureValue();
-		assert!(future.valid());
+		assert!(my_test::MyTestValidFutureInt(future));
 
-		future.wait();
-		assert_eq!(future.get(), 8);
+		my_test::MyTestWaitFutureInt(future);
+		assert_eq!(my_test::MyTestGetFutureInt(future), 8);
 	}
 }
 """

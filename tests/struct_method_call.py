@@ -146,7 +146,7 @@ mod my_test;
 #[test]
 fn test() {
 	unsafe {
-		let s = my_test::MyTestConstructorSimpleStruct();
+		let s = my_test::MyTestConstructorSimpleStructSimplestConstructor();
 
 		assert_eq!(my_test::MyTestGetASimpleStruct(s), 1);
 		assert_eq!(my_test::MyTestSetASimpleStructWithV0V1(s,8, 2), true);
@@ -169,7 +169,7 @@ fn test() {
 		my_test::MyTestGetModifyArgOut2(s2);
 		assert_eq!(my_test::MyTestSimpleStruct2GetA(s2), 4);
 
-		let mut s_out2 = my_test::MyTestGetModifyArgOut2WithK(s2,s);
+		my_test::MyTestGetModifyArgOut2WithK(s2,s);
 		assert_eq!(my_test::MyTestSimpleStruct2GetA(s2), 28);
 	}
 }
