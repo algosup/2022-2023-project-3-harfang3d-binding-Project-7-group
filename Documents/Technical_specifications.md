@@ -406,7 +406,8 @@
 - We used a Trello to keep track of the tasks in a day-to-day fashion and to identify bugs and bottlenecks.
 <img src="/Documents/images/technical/trello.png">
 <br>
-- We used multiple PERT graphs to force us to have a critical path, which allowed us to lay out a basic retro planning on a Gantt diagram to prioritize the work and give better estimates for the deliverables and milestones.
+<div>We used multiple PERT graphs to force us to have a critical path, which allowed us to lay out a basic retro planning on a Gantt diagram to prioritize the work and give better estimates for the deliverables and milestones.</div>
+<br>
 <img src="/Documents/images/technical/gantt.png">
 
 - ## Success Assessment
