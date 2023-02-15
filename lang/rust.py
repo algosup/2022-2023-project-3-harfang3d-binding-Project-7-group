@@ -1944,7 +1944,7 @@ uint32_t %s(void* p) {
 				arg_bound_name = enum_conv.rust_type
 			else:
 				arg_bound_name = "i32"
-			rust_bind += f"type {bound_name} = {enum_conv.rust_type};\n"
+			rust_bind += f"type {bound_name} = {arg_bound_name};\n"
 		return rust_bind
 
 	def _write_rust_extern(self):
@@ -2045,23 +2045,6 @@ uint32_t %s(void* p) {
 			
 
 		rust_bind += "}\n"
-		# enum
-		wrote_brace = False
-		for bound_name, enum in self._enums.items():
-			if not wrote_brace:
-				rust_bind += "lazy_static! {"
-				wrote_brace = True
-			rust_bind += f"// {bound_name} ...\n"
-			enum_conv = self._get_conv_from_bound_name(bound_name)
-			if enum_conv is not None and hasattr(enum_conv, "rust_type") and enum_conv.rust_type is not None:
-				arg_bound_name = enum_conv.rust_type
-			else:
-				arg_bound_name = "i32"
-			for id, name in enumerate(enum.keys()):
-				rust_bind += f"	// {clean_name(name)} ...\n"
-				rust_bind += f"	pub static ref {clean_name(name).upper()} : {arg_bound_name} =  unsafe\u007b{clean_name_with_title(self._name)}Get{bound_name}({id})\u007d;\n"
-		if wrote_brace:
-			rust_bind += "}\n"
 		return rust_bind
 
 	def _write_rust_binder_header(self):

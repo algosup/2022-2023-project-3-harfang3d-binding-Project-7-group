@@ -130,6 +130,7 @@ def bind_window_system(gen):
 	gen.bind_function('hg::DestroyWindow', 'bool', ['const hg::Window *window'])
 	gen.bind_function('hg::IsWindowOpen', 'bool', ['const hg::Window *window'])
 	gen.bind_function('hg::UpdateWindow', 'bool', ['const hg::Window *window'])
+	gen.bind_ptr('hg::Window *', bound_name='Window')
 
 def bind_audio(gen):
 	gen.add_include('engine/audio_stream_interface.h')
@@ -159,6 +160,64 @@ static hg::SpatializedSourceState *__ConstructSpatializedSourceState(hg::Mat4 mt
 
 def bind_render(gen):
 	gen.add_include('engine/render_pipeline.h')
+
+	gen.bind_named_enum('bgfx::RendererType::Enum', [
+		'Noop', 'Direct3D9', 'Direct3D11', 'Direct3D12', 'Gnm', 'Metal', 'Nvn', 'OpenGLES', 'OpenGL', 'Vulkan', 'Count'
+	], bound_name='RendererType', prefix='RT_')
+
+	gen.bind_named_enum('bgfx::TextureFormat::Enum', [
+		'BC1', 'BC2', 'BC3', 'BC4', 'BC5', 'BC6H', 'BC7', 'ETC1', 'ETC2', 'ETC2A', 'ETC2A1', 'PTC12', 'PTC14', 'PTC12A', 'PTC14A', 'PTC22', 'PTC24',
+		'ATC', 'ATCE', 'ATCI', 'ASTC4x4', 'ASTC5x5', 'ASTC6x6', 'ASTC8x5', 'ASTC8x6', 'ASTC10x5',
+		'Unknown',
+		'R1', 'A8', 'R8', 'R8I', 'R8U', 'R8S', 'R16', 'R16I', 'R16U', 'R16F', 'R16S', 'R32I', 'R32U', 'R32F', 'RG8', 'RG8I', 'RG8U', 'RG8S',
+		'RG16', 'RG16I', 'RG16U', 'RG16F', 'RG16S', 'RG32I', 'RG32U', 'RG32F', 'RGB8', 'RGB8I', 'RGB8U', 'RGB8S', 'RGB9E5F', 'BGRA8', 'RGBA8',
+		'RGBA8I', 'RGBA8U', 'RGBA8S', 'RGBA16', 'RGBA16I', 'RGBA16U', 'RGBA16F', 'RGBA16S', 'RGBA32I', 'RGBA32U', 'RGBA32F', 'R5G6B5', 'RGBA4',
+		'RGB5A1', 'RGB10A2', 'RG11B10F',
+		'UnknownDepth',
+		'D16', 'D24', 'D24S8', 'D32', 'D16F', 'D24F', 'D32F', 'D0S8',
+	], bound_name='TextureFormat', prefix='TF_')
+
+	gen.bind_named_enum('bgfx::Attrib::Enum', ['Position', 'Normal', 'Tangent', 'Bitangent', 'Color0', 'Color1', 'Color2', 'Color3', 'Indices', 'Weight',
+		'TexCoord0', 'TexCoord1', 'TexCoord2', 'TexCoord3', 'TexCoord4', 'TexCoord5', 'TexCoord6', 'TexCoord7'
+	], bound_name='Attrib', prefix='A_')
+	gen.bind_named_enum('bgfx::AttribType::Enum', ['Uint8', 'Uint10', 'Int16', 'Half', 'Float'], bound_name='AttribType', prefix='AT_')
+
+	vtx_decl = gen.begin_class('bgfx::VertexLayout')
+	gen.bind_constructor(vtx_decl, [])
+	gen.bind_method(vtx_decl, 'begin', 'bgfx::VertexLayout &', [], bound_name='Begin')
+	gen.bind_method(vtx_decl, 'add', 'bgfx::VertexLayout &', ['bgfx::Attrib::Enum attrib', 'uint8_t count', 'bgfx::AttribType::Enum type', '?bool normalized', '?bool as_int'], bound_name='Add')
+	gen.bind_method(vtx_decl, 'skip', 'bgfx::VertexLayout &', ['uint8_t size'], bound_name='Skip')
+	gen.bind_method(vtx_decl, 'end', 'void', [], bound_name='End')
+	gen.bind_method(vtx_decl, 'has', 'bool', ['bgfx::Attrib::Enum attrib'], bound_name='Has')
+	gen.bind_method(vtx_decl, 'getOffset', 'uint16_t', ['bgfx::Attrib::Enum attrib'], bound_name='GetOffset')
+	gen.bind_method(vtx_decl, 'getStride', 'uint16_t', [], bound_name='GetStride')
+	gen.bind_method(vtx_decl, 'getSize', 'uint32_t', ['uint32_t count'], bound_name='GetSize')
+	gen.end_class(vtx_decl)
+
+	bgfx_program_handle = gen.begin_class('bgfx::ProgramHandle')
+	bgfx_program_handle._inline = True
+	gen.end_class(bgfx_program_handle)
+
+	render_state = gen.begin_class('hg::RenderState')
+	gen.end_class(render_state)
+
+	pprogram_ref = gen.begin_class('hg::PipelineProgramRef')
+	pprogram_ref._inline = True
+	#gen.bind_comparison_ops(pprogram_ref, ['==', '!='], ['const hg::PipelineProgramRef &p'])
+	gen.end_class(pprogram_ref)
+
+	pipeline_info = gen.begin_class('hg::PipelineInfo')
+	gen.bind_member(pipeline_info, 'std::string name')
+	gen.end_class(pipeline_info)
+
+	material = gen.begin_class('hg::Material')
+	gen.bind_constructor(material, [])
+	gen.end_class(material)
+	bind_std_vector(gen, material)
+
+	# frame
+	fbh = gen.begin_class('bgfx::FrameBufferHandle')
+	gen.end_class(fbh)
 
 	# Overloads here are funky, I'm only guessing
 	gen.bind_function('hg::RenderInit', 'hg::Window *', ['const char *window_title', 'int width', 'int height', 'bgfx::RendererType::Enum type', '?uint32_t reset_flags', '?bgfx::TextureFormat::Enum format', '?uint32_t debug_flags'], {'constants_group': {'reset_flags': 'ResetFlags', 'debug_flags': 'DebugFlags'}})
@@ -209,6 +268,9 @@ def bind_render(gen):
 	mdl = gen.begin_class('hg::Model')
 	gen.end_class(mdl)
 
+	pipeline = gen.begin_class('hg::Pipeline')
+	gen.end_class(pipeline)
+
 def bind_scene(gen):
 	gen.add_include('engine/scene.h')
 
@@ -254,10 +316,17 @@ static bool _LoadSceneFromAssets(const char *name, hg::Scene &scene, hg::Pipelin
 ''')
 	gen.bind_function('_LoadSceneFromAssets', 'bool', ['const char *name', 'hg::Scene &scene', 'hg::PipelineResources &resources', 'const hg::PipelineInfo &pipeline', '?uint32_t flags'], {'constants_group': {'flags': 'LoadSaveSceneFlags'}}, bound_name = 'LoadSceneFromAssets')
 
+	sfppo = gen.begin_class('hg::SceneForwardPipelinePassViewId')
+	gen.bind_constructor(sfppo, [])
+	gen.end_class(sfppo)
 
 def bind_forward_pipeline(gen):
 	gen.add_include('engine/forward_pipeline.h')
 
+	forward_pipeline = gen.begin_class('hg::ForwardPipeline')
+	gen.add_base(forward_pipeline, gen.get_conv('hg::Pipeline'))
+	gen.end_class(forward_pipeline)
+	
 	gen.bind_function('hg::CreateForwardPipeline', 'hg::ForwardPipeline', ['?int shadow_map_resolution', '?bool spot_16bit_shadow_map'])
 
 def bind_assets(gen):
@@ -270,6 +339,7 @@ def bind_math(gen):
 	gen.add_include('foundation/vector4.h')
 	gen.add_include('foundation/vector3.h')
 	gen.add_include('foundation/matrix3.h')
+	gen.add_include('foundation/matrix4.h')
 
 	# Come back here if we need arithmetical stuff
 	vector4 = gen.begin_class('hg::Vec4')
@@ -293,6 +363,11 @@ def bind_math(gen):
 	gen.bind_constructor(matrix3, [])
 	gen.end_class(matrix3)
 
+	matrix4 = gen.begin_class('hg::Mat4')
+	#gen.bind_static_members(matrix4, ['const hg::Mat4 Zero', 'const hg::Mat4 Identity'])
+	gen.insert_binding_code('static hg::Mat4 *_Mat4_Copy(const hg::Mat4 &m) { return new hg::Mat4(m); }')
+	gen.bind_constructor(matrix4, [])
+	gen.end_class(matrix4)
 
 	gen.bind_function('hg::Vec4I', 'hg::Vec4', ['int x', 'int y', 'int z', '?int w'])
 
@@ -311,6 +386,20 @@ def bind_math(gen):
 
 	gen.bind_function('hg::Normalize', 'hg::Vec3', ['const hg::Vec3 &v'])
 
+	vector2 = gen.begin_class('hg::tVec2<float>', bound_name='Vec2')
+	vector2._inline = True
+	# gen.bind_static_members(vector2, ['const hg::tVec2<float> Zero', 'const hg::tVec2<float> One'])
+	# gen.bind_members(vector2, ['float x', 'float y'])
+	gen.bind_constructor(vector2, [])
+	gen.insert_binding_code('static void _Vector2_float_Set(hg::tVec2<float> *v, float x, float y) { v->x = x; v->y = y; }')
+	gen.bind_method(vector2, 'Set', 'void', ['float x', 'float y'], {'route': route_lambda('_Vector2_float_Set')})
+	gen.end_class(vector2)
+
+	rect = gen.begin_class('hg::Rect<int>', bound_name='IntRect')
+	rect._inline = True
+	gen.bind_members(rect, ['int sx', 'int sy', 'int ex', 'int ey'])
+	gen.bind_constructor(rect, [])
+	gen.end_class(rect)
 
 def bind_bullet3_physics(gen):
 	gen.add_include('engine/scene_bullet3_physics.h')
@@ -378,7 +467,9 @@ def bind(gen):
 	bind_math(gen)
 	bind_projection(gen)
 	bind_window_system(gen)
+	bind_color(gen)
 	bind_render(gen)
+	bind_forward_pipeline(gen)
 	bind_scene(gen)
 	if gen.defined('HG_ENABLE_BULLET3_SCENE_PHYSICS'):
 		bind_bullet3_physics(gen)

@@ -97,8 +97,6 @@ func Test(t *testing.T) {
 '''
 
 test_rust = '''\
-#[macro_use]
-extern crate lazy_static;
 mod my_test;
 
 #[test]
@@ -119,6 +117,6 @@ fn test() {
 		assert_eq!(my_test::MyTestGetNamedEnum(0), 0);
 		assert_eq!(my_test::MyTestGetNamedEnum(1), 1);
 		assert_eq!(my_test::MyTestGetNamedEnum(2), 4096);   
-	}                     
+	}                       
 }
 '''

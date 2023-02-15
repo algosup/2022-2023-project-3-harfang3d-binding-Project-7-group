@@ -199,10 +199,10 @@ fn test() {
 		assert_eq!(my_test::MyTestBaseClassGetOverride(derived), 12);  // member overshadowing
 		assert_eq!(my_test::MyTestBaseClassGetStaticOverride(derived), 42);  // static member overshadowing
 
-		assert_eq!(my_test::MyTestBaseClassGetV(), 7);
-		assert_eq!(my_test::MyTestDerivedClassGetV(), 7);
-		assert_eq!(my_test::MyTestBaseClassGetStaticOverride(), 1);
-		assert_eq!(my_test::MyTestDerivedClassGetStaticOverride(), 42);	
+		assert_eq!(my_test::MyTestBaseClassGetV(base), 7);
+		assert_eq!(my_test::MyTestDerivedClassGetV(derived), 7);
+		assert_eq!(my_test::MyTestBaseClassGetStaticOverride(base), 1);
+		assert_eq!(my_test::MyTestDerivedClassGetStaticOverride(derived), 42);	
 	}
 }
 '''
