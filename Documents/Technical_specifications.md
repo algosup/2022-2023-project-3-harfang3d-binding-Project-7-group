@@ -364,17 +364,94 @@
 
 # Development & Maintenance
 - ## Schedule of development
-- ### Planning
-	- > WIP
 - ### Efforts and costs
-	- > WIP
+    - ### Priority Matrix
+  	- |Flexibility|Importance|
+  		|--|--|
+  		|F0|Most Important|
+  		|F1|Important|
+  		|F2|Less Important|
+
+  	- |Task|Priority|
+  		|--|--|
+  		|Make it work on Mac M1|F2|
+  		|Implementing Async/Future|F2|
+  		|Implementing Structs|F0|
+  		|Make Tests Pass|F0|
+  		|Implementing Vectors|F1|
+  		|Implementing Strings|F1|
+  		|Implementing Bindings for enums|F1|
+  		|Create Exhaustive documentation |F2|
+  		|Create Documentation for the implementation|F0|
+  		|Implementing all Basic types|F0|
+  		|Binding Harfang.py|F1|
+  		|Implement Functions|F0|
+    - ### Milestones
+  	- |**Milestone**|**Date**|
+  		|--|--|
+  		|Kickoff Meeting|By Wednesday 4th, January 2023|
+  		|Understanding the Project|By Friday 6th, January 2023|
+  		|First Meeting with the client|By Thursday 12th, January 2023|
+  		|Finishing the functional Specifications|By Tuesday 24th, January 2023|
+  		|Finishing the technical Specifications|By Tuesday 31th, January 2023|
+  		|Getting a simple binding working|By Tuesday 7th, February|
+  		|Passing all the tests|By Friday 10th, February 2023|
+  		|Getting `harfang.py` working|By Tuesday 14th, February 2023|
+  		|Oral Exam|By Friday 17th, February 2023|
+  		|Closure Meeting|By Friday 17th, February 2023|
+    - ### Work estimates
+  	- We estimate being able to finish the project on time (approx. 7 weeks), even though lack of idiomatic knowledge on Rust will probably set us back at some point.
+  	- As stated in the <a href="#risk-assessment-and-security-risksmeasures">risk prevention</a>, some of our team members will train during project time and in their personal time as well, to allow us to fully grasp the specificities of the project and the language.
+- ### Planning
+- We used a Trello to keep track of the tasks in a day-to-day fashion and to identify bugs and bottlenecks.
+<img src="/Documents/images/technical/trello.png">
+<br>
+- We used multiple PERT graphs to force us to have a critical path, which allowed us to lay out a basic retro planning on a Gantt diagram to prioritize the work and give better estimates for the deliverables and milestones.
+<img src="/Documents/images/technical/gantt.png">
+
 - ## Success Assessment
+- Throughout the whole project, we have identified the passing of the tests as the main metric for our success. We can also mention overall implementation (100% is impossible) of the language as an important one as well. As we want to improve from our previous projects, we would like documentation coverage to be on watchlist as well.
 - ### Impact
-	- > WIP
+- Our goal is to help HARFANG port their engine to more languages and thus, customers. If we have succeeded in our mission, HARFANG should be able to deploy our solution with minimal work left from us and from them.
+- We are proud to be part of a project that may impact the field of systems programming languages: indeed, this project creates new bridges between old codebases and newer ones, contributing to the advent of `Rust`.
 - ### Metrics
-	- > WIP
+- We use Trello, counting cards and checklists to measure the state of different topics.
+	- Objects can be either in `Backlog`, `Todo`, `Doing`, `On Hold`, `Done`, `Abandoned`.
+		- `Backlog` can be filled infinitely.
+		- `Doing` can only feature one task per person at a given time.
+		- `On Hold` should only be filled to pause something and resume later, otherwise checklists are recommended
+		- There are actually multiple `Done` states
+			- `Done`
+			- `Proof-Read`
+			- `Peer-Reviewed`
+			- `Formatted`
+			- `Documented`
+		- An object is really considered done when it has been documented.
+- Therefore, our progress rate is calculated with documentation, hence the longer time to completion.
 - ## CI/CD Pipeline
-- Tests are run automatically when pushed in main
+- Tests are run automatically when pushed in main, via the following github actions code:
+- ```yaml
+	name: Global Testing
+	
+	on:
+	pull_request:
+		branches:
+		- main
+	jobs:
+	Build_Linux:
+		runs-on: ubuntu-latest
+		steps:
+		- uses: actions/checkout@v3
+		- name: Set up Python 3.10
+		uses: actions/setup-python@v3
+		with:
+			python-version: '3.10'
+		- run: pip install pypeg2
+		- run: pip install coverage
+		- run: pip install PyYAML==5.1
+		- run: pip install python-coveralls==2.9.1
+		- run: python3 tests.py --x64 --linux --pybase "/opt/hostedtoolcache/Python/3.10.9/x64"
+	```
 
 ![-----------------------------------------------------](https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.png)
 
