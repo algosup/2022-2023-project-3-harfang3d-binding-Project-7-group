@@ -53,7 +53,6 @@
 			<ul>
 				<li><a href="#main-architecture">➧ Main Architecture</a></li>
 				<li><a href="#example-of-a-binding">➧ Example of a Binding</a></li>
-				<li><a href="#example-of-a-test">➧ Example of a Test</a></li>
 			</ul>
 		</li>
 		<li><a href="#technical-specifications">➭ Technical Specifications</a>
@@ -144,7 +143,7 @@
 	- | **Deliverable**| **Author**| **E-mail address**|
 		|--|--|--|
 		| *Functional Requirements Document*| Mathieu CHAPUT (Program Manager) | mathieu.chaput@algosup.com|
-		| *Technical Requirements Document*| Mathis KAKAL (Tech Lead)| mathis.kakal@algosup.com |
+		| *Technical Specifications Document*| Mathis KAKAL (Tech Lead)| mathis.kakal@algosup.com |
 		| *Quality Assurance Document*| **Undefined**| **Undefined** |
 - ### Reviewers  
 	- This Document has been reviewed by the whole team thanks to our small numbers, allowing for accuracy in the rendition of the specifications. This excludes a designated quality assurance manager/engineer for establishing which functions and KPI's to monitor and test, task that will be performed by the whole team. The program manager will also review the Technical Requirements Document for iteration with the the Functional Requirements, the project manager to ensure compliance with the project's expectations and finally the software engineer to ensure that it is in a language that they can understand and to develop the product.
@@ -297,8 +296,6 @@
 	![image.png](/Documents/images/technical/image_1675436220671_0.png)
 	- *Main architecture diagram*:
 - ### Example of a binding
-- > WIP
-- ### Example of a test
 - > WIP
 - ## Technical Specifications
 - ### Conversion Tables
