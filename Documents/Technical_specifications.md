@@ -522,9 +522,10 @@
 
 - ## Success Assessment
 - Throughout the whole project, we have identified the passing of the tests as the main metric for our success. We can also mention overall implementation (100% is impossible) of the language as an important one as well. As we want to improve from our previous projects, we would like documentation coverage to be on watchlist as well.
+- You may find the test reports by clicking [this link](https://github.com/algosup/2022-2023-project-3-harfang3d-binding-Project-7-group/blob/main/Documents/test_report.md).
 - ### Impact
 - Our goal is to help HARFANG port their engine to more languages and thus, customers. If we have succeeded in our mission, HARFANG should be able to deploy our solution with minimal work left from us and from them.
-- We are proud to be part of a project that may impact the field of systems programming languages: indeed, this project creates new bridges between old codebases and newer ones, contributing to the advent of `Rust`.
+- We are proud to be part of a project that may impact the field of systems programming languages: indeed, this project creates new bridges between old codebases and newer ones, contributing to the advent of Rust.
 - ### Metrics
 - We use Trello, counting cards and checklists to measure the state of different topics.
 	- Objects can be either in `Backlog`, `Todo`, `Doing`, `On Hold`, `Done`, `Abandoned`.
