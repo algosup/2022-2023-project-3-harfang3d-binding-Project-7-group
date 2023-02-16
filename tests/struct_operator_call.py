@@ -206,8 +206,8 @@ fn test() {
 		assert_eq!(my_test::MyTestSimpleStructGetV(s), 8);
 
 		let c = my_test::MyTestMulSimpleStructInt(a, 2);
-		assert!(c.eq(&b));
-		assert!(!a.ne(&b));
+		assert!(my_test::MyTestEqSimpleStruct(c, b));
+        assert!(my_test::MyTestNeSimpleStruct(a, b));
 	}
 }
 '''
