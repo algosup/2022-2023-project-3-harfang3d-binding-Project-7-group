@@ -104,3 +104,26 @@ func Test(t *testing.T) {
 	assert.True(t, spn.IsNil(), "should be nil.")
 }
 '''
+
+test_rust = '''\
+mod my_test;
+
+#[test]
+fn test() {
+	unsafe {
+		let sp = my_test::MyTestGetSharedPtrToSimpleStruct();
+
+		assert_eq!(my_test::MyTestSsimpleStructGetU(sp), 4.0);
+		assert_eq!(my_test::MyTestSsimpleStructGetV(sp), 7);
+
+		let sp2 = my_test::MyTestConstructorSsimpleStruct(9.0);
+		
+		assert_eq!(my_test::MyTestSsimpleStructGetU(sp2), 9.0);
+		assert_eq!(my_test::MyTestSsimpleStructGetV(sp2), 90);
+
+		let spn = my_test::MyTestGetEmptySharedPtr();
+
+        assert!(spn.is_null());
+	}
+}
+'''

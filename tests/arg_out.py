@@ -2,7 +2,7 @@ import lib
 
 
 def bind_test(gen):
-	gen.start('my_test')
+	gen.start('my_test')          
 
 	lib.bind_defaults(gen)
 
@@ -120,3 +120,34 @@ func Test(t *testing.T) {
 	assert.Equal(t, w, int32(20), "should be the same.")
 }
 '''
+
+test_rust = '''\
+mod my_test;
+#[test]
+fn test() {
+	unsafe {
+		let struct_a = my_test::MyTestConstructorA();
+		my_test::MyTestModifyInOutStruct(struct_a);
+		assert_eq!(my_test::MyTestAGetV(struct_a), 3);
+		let (a,b) = (&mut 0,&mut 0);
+
+		my_test::MyTestOutValuesFunctionCall(a, 2, b, 3.0);
+		assert_eq!(*a, 16);
+		assert_eq!(*b, 42);
+
+		let r = my_test::MyTestOutValuesFunctionCallRval(a,2,b);
+		assert_eq!(r, 2);
+		assert_eq!(*a, 16);
+		assert_eq!(*b, 28);
+
+		let r= my_test::MyTestOutValuesFunctionCallRvalWithK(a,2, b, 2.0);
+		assert_eq!(r, 4);
+		assert_eq!(*a, 16);
+		assert_eq!(*b, 28);
+
+		let mut w = 5;
+		let rb = my_test::MyTestInOutValue(&mut w);
+		assert!(rb);
+		assert_eq!(w, 20);
+	}
+}'''

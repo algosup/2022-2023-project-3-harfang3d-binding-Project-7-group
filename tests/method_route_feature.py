@@ -54,3 +54,14 @@ func Test(t *testing.T) {
 }
 """
 
+test_rust = """\
+mod my_test;
+
+#[test]
+fn test() {
+	unsafe {
+		let o = my_test::MyTestConstructorObject();
+		assert_eq!(my_test::MyTestGetObject(o,4), 15);
+	}
+}
+"""

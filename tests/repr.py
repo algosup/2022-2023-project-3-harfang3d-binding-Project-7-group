@@ -39,3 +39,9 @@ test_go = '''\
 package mytest
 
 '''
+
+test_rust = '''\
+mod my_test;
+
+
+'''

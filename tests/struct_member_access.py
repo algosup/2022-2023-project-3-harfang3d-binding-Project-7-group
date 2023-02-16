@@ -137,3 +137,37 @@ func Test(t *testing.T) {
 	assert.Equal(t, s.GetD(), int32(9), "should be the same.")
 }
 """
+
+test_rust = '''\
+mod my_test;
+
+#[test]
+fn test() {
+	unsafe {
+		let s = my_test::MyTestConstructorSimpleStruct();
+
+		assert_eq!(my_test::MyTestSimpleStructGetA(s) 7);
+		assert_eq!(my_test::MyTestSimpleStructGetB(s), 17.5);
+		assert_eq!(my_test::MyTestSimpleStructGetC(s), true);
+		assert_eq!(my_test::MyTestSimpleStructGetD(s), 9);
+		assert_eq!(my_test::MyTestSimpleStructGetTextField(s), "some content");
+
+		my_test::MyTestSimpleStructSetA(s, -2);
+		my_test::MyTestSimpleStructSetB(s, -4.5);
+		my_test::MyTestSimpleStructSetC(s, false);
+		
+		assert_eq!(my_test::MyTestSimpleStructGetA(s), -2);
+		assert_eq!(my_test::MyTestSimpleStructGetB(s), -4.5);
+		assert_eq!(my_test::MyTestSimpleStructGetC(s), false);
+
+		my_test::MyTestSimpleStructSetA(s,(my_test::MyTestSimpleStructGetA(s)+4)
+		assert_eq!(my_test::MyTestSimpleStructGetA(s), 2);
+
+		// write to const member
+		// can't set d because it's a const
+		// check if it didn't bind it
+		
+		// Since there is no try catch in rust we're not checking this
+	}
+}
+'''

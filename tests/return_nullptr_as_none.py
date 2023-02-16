@@ -43,3 +43,14 @@ func Test(t *testing.T) {
 	assert.Nil(t, v, "should be nil.")
 }
 '''
+
+test_rust = '''\
+mod my_test;
+
+#[test]
+fn test() {
+	unsafe {
+		assert_eq!(my_test::MyTestReturnNullptr(), std::ptr::null_mut());
+	}
+}
+'''
