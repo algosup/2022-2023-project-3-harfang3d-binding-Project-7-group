@@ -52,7 +52,7 @@
 		<li><a href="#architecture-diagrams">➭ Architecture Diagrams</a>
 			<ul>
 				<li><a href="#main-architecture">➧ Main Architecture</a></li>
-				<li><a href="#example-of-a-binding">➧ Example of a Binding</a></li>
+				<li><a href="#example-of-a-rust-binding">➧ Example of a Rust Binding</a></li>
 			</ul>
 		</li>
 		<li><a href="#technical-specifications">➭ Technical Specifications</a>
@@ -296,8 +296,10 @@
 	> *FABGen's functional diagram*
 
 	![image.png](/Documents/images/technical/image_1675436220671_0.png)
-- ### Example of a binding
-- > WIP
+- ### Example of a Rust binding
+	> *Detailed view of the C++ to Rust binding architecture*
+
+	![Architecture of the Rust Binding.png](/Documents/images/technical/rustBindingArchitecture.png)
 - ## Technical Specifications
 - ### Conversion Tables
 - > WIP
