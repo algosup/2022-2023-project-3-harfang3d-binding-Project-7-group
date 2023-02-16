@@ -22,9 +22,9 @@
 | struct_inheritance_cast.py           | [OK]     | [OK]     |         |
 | struct_instantiation.py              | [OK]     | [OK]     |         |
 | struct_member_access.py              | [OK]     | [FAILED] | Error generated in the wrapper.cpp: The function MyTestSimpleStructGetTextField should return a `char*`but returns a `char`. ![ErrorImage](./ErrorMessages/struct_member_access.png)|
-| struct_method_call.py                | [OK]     | [FAILED] | Error in the creation of a function which causes a compilation error. ![ErrorImage](./ErrorMessages/struct_method_call.png)|
+| struct_method_call.py                | [OK]     | [OK].    |         |
 | struct_nesting.py                    | [OK]     | [FAILED] | None returns are not implemented which causes an error in this test. ![ErrorImage](./ErrorMessages/struct_nesting.png)|
-| struct_operator_call.py              | [OK]     | [FAILED] | Error in the name generation of the function which writed a whitespace in the name creates a compilation error. ![ErrorImage](./ErrorMessages/struct_operator_call.png)|
+| struct_operator_call.py              | [OK]     | [OK].    |         |
 | struct_static_const_member_access.py | [OK]     | [FAILED] | Error generated in the wrapper.cpp: The function MyTestSimpleStructGetTextField should return a `char*`but returns a `char`. ![ErrorImage](./ErrorMessages/struct_member_access.png)|        |
 | template_struct_nesting.py           | [OK]     | [FAILED] | None returns are not implemented which causes an error in this test. ![ErrorImage](./ErrorMessages/struct_nesting.png)|
 | transform_rval.py                    | [OK]     | [FAILED] | `string` return type is not recognized and generates a compilation error. ![ErrorImage](./ErrorMessages/transform_rval.png)|
