@@ -158,19 +158,19 @@ fn test() {
 		assert_eq!(my_test::MyTestGetStaticIntSimpleStruct(s), 4);
 
 		my_test::MyTestGetModifyArgOut(s);
-		assert_eq!(my_test::MyTestGetASimpleStruct(s), 4);
+		assert_eq!(my_test::MyTestGetASimpleStruct(s), 12);
 
 		my_test::MyTestGetModifyArgOutWithK(s,my_test::MyTestConstructorSimpleStructWithV(5));
-		assert_eq!(my_test::MyTestGetASimpleStruct(s), 16);
+		assert_eq!(my_test::MyTestGetASimpleStruct(s), 27);
 
 		let s2 = my_test::MyTestConstructorSimpleStruct2WithOtherStruct(s);
-		assert_eq!(my_test::MyTestSimpleStruct2GetA(s2), 16);
+		assert_eq!(my_test::MyTestSimpleStruct2GetA(s2), 27);
 
 		my_test::MyTestGetModifyArgOut2(s2);
-		assert_eq!(my_test::MyTestSimpleStruct2GetA(s2), 4);
+		assert_eq!(my_test::MyTestSimpleStruct2GetA(s2),30);
 
 		my_test::MyTestGetModifyArgOut2WithK(s2,s);
-		assert_eq!(my_test::MyTestSimpleStruct2GetA(s2), 28);
+		assert_eq!(my_test::MyTestSimpleStruct2GetA(s2), 111);
 	}
 }
 '''
