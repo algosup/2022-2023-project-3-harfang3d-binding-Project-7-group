@@ -443,7 +443,7 @@
 - ### Rollback Plan
 	- Since our work is on a Fork from the original product, there is no need to establish a specific Rollback plan, other than mentioning that preserving the Git history of changes is necessary to enable this safeguard.
 - ## Performance
-- > WIP
+- In terms of performance, we only have to monitor the time it takes to generate the binding. Normally it should last a few seconds only. The only thing that could take more time is for the makefile to install all the dependencies, however this is out of our scope.
 - ## Pros and Cons
 	- |<p align="center" padding-top="15px"><img src="/Documents/images/technical/pros.png" height="130px"></p>|<p align="center" padding-top="15px"><img src="/Documents/images/technical/minus.png" height="130px"></p>|
 	  |--|--|
