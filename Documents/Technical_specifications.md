@@ -57,8 +57,8 @@
 		</li>
 		<li><a href="#technical-specifications">➭ Technical Specifications</a>
 			<ul>
-				<li><a href="#conversion-tables">➧ Conversion Tables</a></li>
 				<li><a href="#idiomatic-writing">➧ Idiomatic Writing</a></li>
+				<li><a href="#conversion-tables">➧ Conversion Tables</a></li>
 				<li><a href="#step-by-step-build">➧ Step by Step Build</a>
 					<ul>
 						<li><a href="#new-folder-structure">New Folder Structure</a></li>
@@ -301,94 +301,128 @@
 
 	![Architecture of the Rust Binding.png](/Documents/images/technical/rustBindingArchitecture.png)
 - ## Technical Specifications
-- ### Conversion Tables
-- > WIP
+
 - ### Idiomatic Writing:
-	- ### Idiomatic C/C++ & Rust Code
-		- *Basic Features Comparison:*
-			- |Mutable Access|Multi-threaded|C++|Rust|
-			  |--|--|--|--|
-			  |No|No|`std::shared_ptr<const T>`|`std::rc::Rc<T>`|
-			  |Yes|No|`std::shared_ptr<T>`|`std::rc::Rc<std::cell::RefCell<T>>`|
-			  |No|Yes|`std::shared_ptr<const T>`|`std::sync::Arc<T>`|
-			  |Yes|Yes|`std::shared_ptr<T>` + some other sync*|`std::sync::Arc<std::sync::Mutex<T>>`|
-		- *Most likely type associations*
-			- | C/C++ | Rust | Notes |
-			  |--|--|--|
-			  | `char` | `i8` (or `u8`) | The signedness of a C++ char can be signed or unsigned - the assumption here is signed but it varies by target system. A Rust char is not the same as a C/C++ char since it can hold any Unicode character. [1] |
-			  | `unsigned char` | `u8` |  |
-			  | `signed char` | `i8` |  |
-			  | `short int` | `i16` |  |
-			  | `unsigned short int` | `u16` |  |
-			  | `(signed) int` | `i32` or `i16` | In C/C++ this is data model dependent |
-			  | `unsigned int` | `u32` or `u16` | In C/C++ this is data model dependent |
-			  | `(signed) long int` | `i32` or `i64` | In C/C++ this is data model dependent |
-			  | `unsigned long int` | `u32` or `u64` | In C/C++ this is data model dependent |
-			  | `(signed) long long int` | `i64` |  |
-			  | `unsigned long long int` | `u64` |  |
-			  | `size_t` | `usize` | `usize` holds numbers as large as the address space [2] |
-			  | `float` | `f32` |  |
-			  | `double` | `f64` |  |
-			  | `long double` | `f128` | `f128` support was present in Rust but removed due to issues for some platforms in implementing it. |
-			  | `bool` | `bool` |  |
-			  | `void` | `()` | The unit type (see below) |
-			- [1]: Rust's `char` type, is 4 bytes wide, enough to hold any Unicode character. This is equivalent to the belated `char32_t` that appears in C++11 to rectify the abused C++98 `wchar_t` type which on operating systems such as Windows is only 2 bytes wide. When you iterate strings in Rust you may do so either by character or `u8`, i.e. a byte.
-			- [2]: Rust has a specific numeric type for indexing on arrays and collections called `usize`. A `usize` is designed to be able to reference as many elements in an array as there is addressable memory. i.e. if memory is 64-bit addressable then usize is 64-bits in length. There is also a signed `isize` which is less used but also available.
-	- > WIP
+- Rust and C++ are not the most straightforward languages to bind.
+- They are hard to compare when it comes to concepts like inheritance, lifetimes, templates, traits etc.
+- Data types do not exactly "match up", and even if they did, they may have different requirements for the representation of contained data.
+> *Example:* Rust strings are utf-8 encoded while in C++ they are mere bytes. In a similar fashion, macros are a good example of the divergence between rust and C++ as they work very differently in the two languages.
+
+- Here is another example of key differences between the two:
+
+	|Mutable Access|Multi-threaded|C++|Rust|
+	|--|--|--|--|
+	|No|No|`std::shared_ptr<const T>`|`std::rc::Rc<T>`|
+	|Yes|No|`std::shared_ptr<T>`|`std::rc::Rc<std::cell::RefCell<T>>`|
+	|No|Yes|`std::shared_ptr<const T>`|`std::sync::Arc<T>`|
+	|Yes|Yes|`std::shared_ptr<T>` + some other sync*|`std::sync::Arc<std::sync::Mutex<T>>`|
+	
+- For this project, we have decided to make extensive use of the `unsafe` keyword in Rust, to unlock its permissive superpowers, to match C++ ways.
+- Listing all those differences is a tedious task and overkill for our goal, especially considering our knowledge of Rust. However, one final point must be mentioned: Naming and writing conversions.
+- Indeed, Rust developers follow the RFC 0430 name convention, which states the following:
+	| Item | Convention |
+	| ---- | ---------- |
+	| Crates | `snake_case` (but prefer single word) |
+	| Modules | `snake_case` |
+	| Types | `UpperCamelCase` |
+	| Traits | `UpperCamelCase` |
+	| Enum variants | `UpperCamelCase` |
+	| Functions | `snake_case` |
+	| Methods | `snake_case` |
+	| General constructors | `new` or `with_more_details` |
+	| Conversion constructors | `from_some_other_type` |
+	| Local variables | `snake_case` |
+	| Static variables | `SCREAMING_SNAKE_CASE` |
+	| Constant variables | `SCREAMING_SNAKE_CASE` |
+	| Type parameters | concise `UpperCamelCase`, usually single uppercase letter: `T` |
+	| Lifetimes | short, lowercase: `'a` |
+	- More explanations on [RFC 430's](https://github.com/rust-lang/rfcs/blob/master/text/0430-finalizing-naming-conventions.md) `readme`.
+
+- ### Conversion Tables
+- This is the type conversion table that we have decided to go with for this project.
+	|cpp            |rs         |
+	|---------------|-----------|
+	|bool           |bool      |
+	|char           |i8         |
+	|short          |i16        |
+	|int            |i32        |
+	|long           |i64        |
+	|int8_t         |i8         |
+	|int16_t        |i16        |
+	|int32_t        |i32        |
+	|int64_t        |i64        |
+	|char16_t       |int16      |
+	|char32_t       |int32      |
+	|unsigned char  |u8         |
+	|unsigned short |u16        |
+	|unsigned int   |u32        |
+	|unsigned long  |u64        |
+	|uint8_t        |u8         |
+	|uint16_t       |u16        |
+	|uint32_t       |u32        |
+	|uint64_t       |u64        |
+	|intptr_t       |IntPtr32 / IntPtr64 ? |
+	|size_t         |isize      |
+	|float          |f32        |
+	|double         |f64        |
+	|const char*    |??         |
+	|---------------|-----------|
+	|?              |i128       |
+	|?              |u128       |
 
 - ### Step by Step Build
 	- ### New Folder Structure
-	> Keep in mind the *italic text* represents modified files/folders, while **bold** text represents newly created files/folders
-	<pre>root
-	├── <em>.github/workflows</em>
-	│   └── <strong>main.yml</strong>
-	├── <em>examples</em>
-	│   ├── <strong>harfang_libs</strong>
-	│   └── <em>harfang.py</em>
-	├── <em>lang</em>
-	│   └── <strong>rust.py</strong>
-	├── <em>lib</em>
-	│   ├── <strong>rust</strong>
-	│   │   ├── <strong>WrapperConverter.rs_</strong>
-	│   │   ├── <strong>__init__.py</strong>
-	│   │   ├── <strong>std.py</strong>
-	│   │   └── <strong>stl.py</strong>
-	│   ├── <em>stl.py</em>
-	│   └── <em>__init__.py</em>
-	├── <em>tests</em>
-	│   ├── <em>arg_out.py</em>
-	│   ├── <em>basic_type_exchange.py</em>
-	│   ├── <em>cpp_exceptions.py</em>
-	│   ├── <em>enumeration.py</em>
-	│   ├── <em>extern_type.py</em>
-	│   ├── <em>function_call.py</em>
-	│   ├── <em>function_template_call.py</em>
-	│   ├── <em>method_route_feature.py</em>
-	│   ├── <em>repr.py</em>
-	│   ├── <em>return_nullptr_as_none.py</em>
-	│   ├── <em>shared_ptr.py</em>
-	│   ├── <em>shared_ptr_default_comparison.py</em>
-	│   ├── <em>std_function.py</em>
-	│   ├── <em>std_future.py</em>
-	│   ├── <em>std_vector.py</em>
-	│   ├── <em>struct_bitfield_member_access.py</em>
-	│   ├── <em>struct_default_comparison.py</em>
-	│   ├── <em>struct_exchange.py</em>
-	│   ├── <em>struct_inheritance.py</em>
-	│   ├── <em>struct_inheritance_cast.py</em>
-	│   ├── <em>struct_instantiation.py</em>
-	│   ├── <em>struct_member_access.py</em>
-	│   ├── <em>struct_method_call.py</em>
-	│   ├── <em>struct_nesting.py</em>
-	│   ├── <em>struct_operator_call.py</em>
-	│   ├── <em>struct_static_const_member_access.py</em>
-	│   ├── <em>template_struct_nesting.py</em>
-	│   ├── <em>transform_rval.py</em>
-	│   └── <em>variable_access.py</em>
-	├── <strong>Dockerfile</strong>
-	├── <em>bind.py</em>
-	├── <em>gen.py</em>
-	└── <em>tests.py</em></pre>
+		> Keep in mind the *italic text* represents modified files/folders, while **bold** text represents newly created files/folders
+		<pre>root
+		├── <em>.github/workflows</em>
+		│   └── <strong>main.yml</strong>
+		├── <em>examples</em>
+		│   ├── <strong>harfang_libs</strong>
+		│   └── <em>harfang.py</em>
+		├── <em>lang</em>
+		│   └── <strong>rust.py</strong>
+		├── <em>lib</em>
+		│   ├── <strong>rust</strong>
+		│   │   ├── <strong>WrapperConverter.rs_</strong>
+		│   │   ├── <strong>__init__.py</strong>
+		│   │   ├── <strong>std.py</strong>
+		│   │   └── <strong>stl.py</strong>
+		│   ├── <em>stl.py</em>
+		│   └── <em>__init__.py</em>
+		├── <em>tests</em>
+		│   ├── <em>arg_out.py</em>
+		│   ├── <em>basic_type_exchange.py</em>
+		│   ├── <em>cpp_exceptions.py</em>
+		│   ├── <em>enumeration.py</em>
+		│   ├── <em>extern_type.py</em>
+		│   ├── <em>function_call.py</em>
+		│   ├── <em>function_template_call.py</em>
+		│   ├── <em>method_route_feature.py</em>
+		│   ├── <em>repr.py</em>
+		│   ├── <em>return_nullptr_as_none.py</em>
+		│   ├── <em>shared_ptr.py</em>
+		│   ├── <em>shared_ptr_default_comparison.py</em>
+		│   ├── <em>std_function.py</em>
+		│   ├── <em>std_future.py</em>
+		│   ├── <em>std_vector.py</em>
+		│   ├── <em>struct_bitfield_member_access.py</em>
+		│   ├── <em>struct_default_comparison.py</em>
+		│   ├── <em>struct_exchange.py</em>
+		│   ├── <em>struct_inheritance.py</em>
+		│   ├── <em>struct_inheritance_cast.py</em>
+		│   ├── <em>struct_instantiation.py</em>
+		│   ├── <em>struct_member_access.py</em>
+		│   ├── <em>struct_method_call.py</em>
+		│   ├── <em>struct_nesting.py</em>
+		│   ├── <em>struct_operator_call.py</em>
+		│   ├── <em>struct_static_const_member_access.py</em>
+		│   ├── <em>template_struct_nesting.py</em>
+		│   ├── <em>transform_rval.py</em>
+		│   └── <em>variable_access.py</em>
+		├── <strong>Dockerfile</strong>
+		├── <em>bind.py</em>
+		├── <em>gen.py</em>
+		└── <em>tests.py</em></pre>
 	
 
 
