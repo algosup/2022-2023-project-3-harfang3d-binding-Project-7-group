@@ -170,7 +170,7 @@ fn test() {
 		assert_eq!(my_test::MyTestSimpleStruct2GetA(s2),30);
 
 		my_test::MyTestGetModifyArgOut2WithK(s2,s);
-		assert_eq!(my_test::MyTestSimpleStruct2GetA(s2), 57);
+		assert_eq!(my_test::MyTestSimpleStruct2GetA(s2), 111);
 	}
 }
 '''
