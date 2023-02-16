@@ -374,12 +374,12 @@
 - ### Step by Step Build
 	- ### New Folder Structure
 		> Keep in mind the *italic text* represents modified files/folders, while **bold** text represents newly created files/folders
+		
 		<pre>root
 		├── <em>.github/workflows</em>
 		│   └── <strong>main.yml</strong>
 		├── <em>examples</em>
 		│   ├── <strong>harfang_libs</strong>
-		│   └── <em>harfang.py</em>
 		├── <em>lang</em>
 		│   └── <strong>rust.py</strong>
 		├── <em>lib</em>
@@ -420,7 +420,6 @@
 		│   ├── <em>template_struct_nesting.py</em>
 		│   ├── <em>transform_rval.py</em>
 		│   └── <em>variable_access.py</em>
-		├── <strong>Dockerfile</strong>
 		├── <em>bind.py</em>
 		├── <em>gen.py</em>
 		└── <em>tests.py</em></pre>
