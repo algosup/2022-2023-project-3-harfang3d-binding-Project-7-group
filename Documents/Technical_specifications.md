@@ -62,6 +62,7 @@
 				<li><a href="#step-by-step-build">➧ Step by Step Build</a>
 					<ul>
 						<li><a href="#new-folder-structure">New Folder Structure</a></li>
+						<li><a href="#new-folder-structure">Brief Description</a></li>
 					</ul>
 				</li>
 			</ul>
@@ -306,7 +307,7 @@
 - Rust and C++ are not the most straightforward languages to bind.
 - They are hard to compare when it comes to concepts like inheritance, lifetimes, templates, traits etc.
 - Data types do not exactly "match up", and even if they did, they may have different requirements for the representation of contained data.
-> *Example:* Rust strings are utf-8 encoded while in C++ they are mere bytes. In a similar fashion, macros are a good example of the divergence between rust and C++ as they work very differently in the two languages.
+	> *Example:* Rust strings are utf-8 encoded while in C++ they are mere bytes. In a similar fashion, macros are a good example of the divergence between rust and C++ as they work very differently in the two languages.
 
 - Here is another example of key differences between the two:
 
@@ -423,6 +424,22 @@
 		├── <em>bind.py</em>
 		├── <em>gen.py</em>
 		└── <em>tests.py</em></pre>
+	- ### Brief Description
+		|File|Description|
+		|--|--|
+		|`.github/workflows/main.yml`|Contains the CI/CD for the project, most specifically the tests that have to be run on push.|
+		|`examples/harfang_libs`|*note: this has been replaced with ImGui last minute for demonstration purposes*|
+		|`lang/rust.py`|The core of the program. Contains all the language-specific definitions.|
+		|`lib/rust/WrapperConverter.rs_`|Contains helper functions that ease the the handling of the `String` type.|
+		|`/lib/rust/__init__.py`|Empty.|
+		|`/lib/rust/std.py`|Allows to bind most basic types. (see [Types conversion table](#conversion-tables))|
+		|`/lib/rust/stl.py`|Allows to bind `Function`, `String` and `Vector` types more specifically.|
+		|`/lib/stl.py`|Same as above but generic to other implementations as well.|
+		|`/lib/__init__.py`|Allows to define which files to use depending on the selected language (imports)|
+		|`tests/[TESTNAME].py`|The 29 tests. Each file contains a specific test written in all of the implemented languages. Ours will be translated then appended as such.|
+		|`bind.py`|The entrypoint to the program. Small modifications needed to handle the new implementation.|
+		|`gen.py`|No Significant modification made to this file.|
+		|`tests.py`|Handling Rust and adding rust testbed.|
 	
 
 
