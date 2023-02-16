@@ -78,3 +78,22 @@ func Test(t *testing.T) {
 	assert.NotEqual(t, b, c, "should not be the same.")
 }
 '''
+
+test_rust = '''\
+mod my_test;
+
+#[test]
+fn test() {
+	unsafe {
+		let a = my_test::MyTestGetObj0();
+		let b = my_test::MyTestGetObj0();
+		
+		assert!((a as *mut i32) == (b as *mut i32), "should be the same.");
+
+		let c = my_test::MyTestGetObj1();
+		
+		assert!((a as *mut i32) != (c as *mut i32), "should not be the same.");
+		assert!((b as *mut i32) != (c as *mut i32), "should not be the same.");
+	}
+}
+'''

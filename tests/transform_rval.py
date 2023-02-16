@@ -109,3 +109,20 @@ func Test(t *testing.T) {
 	assert.Equal(t, C.GetBaseValue(), int32(12), "should be the same.")
 }
 '''
+
+test_rust = '''\
+mod my_test;
+
+#[test]
+fn test() {
+	unsafe {
+		let b = my_test::MyTestGetB();
+		assert_eq!(my_test::MyTestBGetB(b), 3);
+		assert_eq!(my_test::MyTestGetBaseValueB(b), 12);
+		
+		let c = my_test::MyTestGetC();
+		assert_eq!(my_test::MyTestCGetC(c), 7);
+		assert_eq!(my_test::MyTestGetBaseValueC(c), 12);
+	}
+}
+'''

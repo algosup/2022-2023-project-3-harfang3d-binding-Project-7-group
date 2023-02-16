@@ -71,7 +71,6 @@ assert(my_test.add_int_by_pointer(3, 4) == 7)
 assert(my_test.add_int_by_reference(3, 4) == 7)
 '''
 
-
 test_go = '''\
 package mytest
 
@@ -94,5 +93,28 @@ func Test(t *testing.T) {
 	b := int32(4)
 	assert.Equal(t, AddIntByPointer(&a, &b), 7, "should be the same.")
 	assert.Equal(t, AddIntByReference(&a, &b), 7, "should be the same.")
+}
+'''
+
+
+test_rust = '''\
+mod my_test;
+#[test]
+fn test() {
+	unsafe {
+		assert_eq!(my_test::MyTestReturnInt(), 8);
+		assert_eq!(my_test::MyTestReturnFloat(), 8.0);
+		let c_str = my_test::print_c_string(my_test::MyTestReturnConstCharPtr() as *mut std::ffi::c_void);
+		assert_eq!(c_str, "const char * -> string");
+
+		assert_eq!(*my_test::MyTestReturnIntByPointer(), 9);
+		assert_eq!(*my_test::MyTestReturnIntByReference(), 9);
+
+		assert_eq!(my_test::MyTestAddIntByValue(3, 4), 7);
+		let mut a = 3;
+		let mut b = 4;
+		assert_eq!(my_test::MyTestAddIntByPointer(&mut a, &mut b), 7);
+		assert_eq!(my_test::MyTestAddIntByReference(&mut a, &mut b), 7);
+	}
 }
 '''

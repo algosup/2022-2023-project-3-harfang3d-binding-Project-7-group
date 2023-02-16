@@ -122,3 +122,37 @@ func Test(t *testing.T) {
 	assert.Equal(t, v, int32(14), "should be the same.")
 }
 '''
+
+test_rust = '''\
+mod my_test;
+
+#[test]
+fn test() {
+	unsafe {
+		assert_eq!(my_test::MyTestGetInt(), 8);
+
+		assert_eq!(my_test::MyTestGetGlobalInt(), 0);
+		my_test::MyTestSetGlobalInt();
+		assert_eq!(my_test::MyTestGetGlobalInt(), 8);
+
+		// overload
+		assert_eq!(my_test::MyTestGet(), 0);
+		assert_eq!(my_test::MyTestGetWithV(2), 1);
+		assert_eq!(my_test::MyTestGetWithVK(4, 3), 12);
+		assert_eq!(my_test::MyTestGetWithVKB(4, 3, 2), 14);
+
+		// optional argument
+		assert_eq!(my_test::MyTestGetGlobalIntMultiplied(), 15);
+		assert_eq!(my_test::MyTestGetGlobalIntMultipliedWithK(2), 6);
+		
+		// argument in out
+		let mut v = 2;
+		my_test::MyTestGetModifyArgInOut(&mut v);
+		assert_eq!(v, 17);
+
+		let mut v = 2;
+		my_test::MyTestGetModifyArgInOutWithK(&mut v, 4);
+		assert_eq!(v, 14);
+	}
+}
+'''

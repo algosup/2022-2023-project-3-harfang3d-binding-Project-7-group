@@ -70,3 +70,16 @@ func Test(t *testing.T) {
 	assert.Equal(t, b.GetU(), int32(7), "should be the same.")
 }
 '''
+
+test_rust = '''\
+mod my_test;
+
+#[test]
+fn test() {
+	unsafe {
+		let a = my_test::MyTestGetBaseClass();
+		let b = my_test::MyTestCastBaseClassToDerivedClass(a);
+		assert_eq!(my_test::MyTestDerivedClassGetU(b), 7);
+	}
+}
+'''

@@ -13,6 +13,7 @@ import lang.lua
 import lang.go
 import lang.cpython
 import lang.xml
+import lang.rust
 
 import lib.std
 import lib.stl
@@ -28,6 +29,7 @@ parser.add_argument('script', nargs=1)
 parser.add_argument('--lua', help='Bind to Lua 5.2+', action='store_true')
 parser.add_argument('--cpython', help='Bind to CPython', action='store_true')
 parser.add_argument('--go', help='Bind to Go', action='store_true')
+parser.add_argument('--rust', help='Bind to Rust', action='store_true')
 parser.add_argument('--xml', help='Bind to CPython', action='store_true')
 parser.add_argument('--out', help='Path to output generated files', required=True)
 parser.add_argument('--out_prefix', help='Prefix to append to output generated files name', default='')
@@ -115,7 +117,18 @@ if args.go:
 		os.system("clang-format -i wrapper.cpp wrapper.h")
 	except:
 		print("clang-format was not found, ideally use to have beautiful .h file")
+	os.chdir("..")
 
+if args.rust:
+	rust_gen = lang.rust.RustGenerator()
+	output_binding(setup_generator(rust_gen))
+	os.chdir(args.out)
+	os.system(f"cargo init {rust_gen._name}")
+	os.chdir("..")
+	#create a build.rs file
+	with open(os.path.join(args.out, "build.rs"), "w") as f:
+		f.write("fn main() {\n\tprintln!(\"cargo:rustc-link-lib=dylib=python3.8\");\n}")
+		
 if args.xml:
 	output_binding(setup_generator(lang.xml.XMLGenerator()))
 
@@ -123,7 +136,7 @@ if args.xml:
 # output Fabgen API
 if not args.no_fabgen_api:
 	path = os.path.join(args.out, 'fabgen.h')
-	with open(path, mode='w', encoding='utf-8') as f:
+	with open(path, mode='a+', encoding='utf-8') as f:
 		f.write(gen.get_fabgen_api())
 	print('FABgen API written to %s' % path)
 else:

@@ -139,3 +139,38 @@ func Test(t *testing.T) {
 	assert.Equal(t, sOut2.GetA(), int32(28), "should be the same.")
 }
 '''
+
+test_rust = '''\
+mod my_test;
+
+#[test]
+fn test() {
+	unsafe {
+		let s = my_test::MyTestConstructorSimpleStructSimplestConstructor();
+
+		assert_eq!(my_test::MyTestGetASimpleStruct(s), 1);
+		assert_eq!(my_test::MyTestSetASimpleStructWithV0V1(s,8, 2), true);
+
+		assert_eq!(my_test::MyTestGetASimpleStruct(s), 10);
+		assert_eq!(my_test::MyTestSetASimpleStruct(s,9), 9);
+		assert_eq!(my_test::MyTestGetASimpleStruct(s), 9);
+
+		assert_eq!(my_test::MyTestGetStaticIntSimpleStruct(s), 4);
+
+		my_test::MyTestGetModifyArgOut(s);
+		assert_eq!(my_test::MyTestGetASimpleStruct(s), 4);
+
+		my_test::MyTestGetModifyArgOutWithK(s,my_test::MyTestConstructorSimpleStructWithV(5));
+		assert_eq!(my_test::MyTestGetASimpleStruct(s), 16);
+
+		let s2 = my_test::MyTestConstructorSimpleStruct2WithOtherStruct(s);
+		assert_eq!(my_test::MyTestSimpleStruct2GetA(s2), 16);
+
+		my_test::MyTestGetModifyArgOut2(s2);
+		assert_eq!(my_test::MyTestSimpleStruct2GetA(s2), 4);
+
+		my_test::MyTestGetModifyArgOut2WithK(s2,s);
+		assert_eq!(my_test::MyTestSimpleStruct2GetA(s2), 28);
+	}
+}
+'''

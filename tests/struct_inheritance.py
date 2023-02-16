@@ -168,3 +168,41 @@ func Test(t *testing.T) {
 	assert.Equal(t, DerivedClassGetStaticOverride(), int32(42), "should be the same.")
 }
 '''
+
+test_rust = '''\
+mod my_test;
+
+#[test]
+fn test() {
+	unsafe {
+		let base = my_test::MyTestConstructorBaseClass();
+		assert_eq!(my_test::MyTestBaseMethodBaseClass(base), 4);
+		assert_eq!(my_test::MyTestBaseMethodOverrideBaseClass(base), 4);
+
+		let derived = my_test::MyTestConstructorDerivedClass();
+		assert_eq!(my_test::MyTestBaseMethodBaseClass(derived), 4);  // can still access base class
+		assert_eq!(my_test::MyTestDerivedMethodDerivedClass(derived), 8);  // can access its own methods
+		assert_eq!(my_test::MyTestBaseMethodOverrideBaseClass(derived), 8);  // properly overshadows redeclared base methods
+
+		// argument casting through inheritance tree
+		assert_eq!(my_test::MyTestReadVirtualMethodThroughBaseClass(base), 6);
+		assert_eq!(my_test::MyTestReadVirtualMethodThroughBaseClass(derived), 9);
+
+		// member access through inheritance tree
+		assert_eq!(my_test::MyTestBaseClassGetU(base), 6);
+		assert_eq!(my_test::MyTestBaseClassGetU(derived), 6);  // can access base class member
+		assert_eq!(my_test::MyTestBaseClassGetV(base), 7);
+		assert_eq!(my_test::MyTestBaseClassGetV(derived), 7);  // can access base class static member
+
+		assert_eq!(my_test::MyTestBaseClassGetOverride(base), 4);
+		assert_eq!(my_test::MyTestBaseClassGetStaticOverride(base), 1);
+		assert_eq!(my_test::MyTestBaseClassGetOverride(derived), 12);  // member overshadowing
+		assert_eq!(my_test::MyTestBaseClassGetStaticOverride(derived), 42);  // static member overshadowing
+
+		assert_eq!(my_test::MyTestBaseClassGetV(base), 7);
+		assert_eq!(my_test::MyTestDerivedClassGetV(derived), 7);
+		assert_eq!(my_test::MyTestBaseClassGetStaticOverride(base), 1);
+		assert_eq!(my_test::MyTestDerivedClassGetStaticOverride(derived), 42);	
+	}
+}
+'''

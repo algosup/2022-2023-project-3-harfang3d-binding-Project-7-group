@@ -67,3 +67,18 @@ func Test(t *testing.T) {
 	assert.Equal(t, SimpleStructGetS(), "some string", "should be the same.")
 }
 '''
+
+test_rust = '''\
+mod my_test;
+
+#[test]
+fn test() {
+	unsafe {
+		let v = my_test::MyTestConstructorSimpleStruct();
+		assert_eq!(my_test::MyTestSimpleStructGetV(v), 3);
+
+		assert_eq!(my_test::MyTestSimpleStructGetI(), 5);
+		assert_eq!(my_test::MyTestSimpleStructGetS(), "some string");
+	}
+}
+'''

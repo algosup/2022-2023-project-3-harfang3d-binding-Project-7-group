@@ -98,3 +98,27 @@ func Test(t *testing.T) {
 	assert.Equal(t, e.GetN().GetV(), int32(24), "should be the same.")
 }
 '''
+
+test_rust = '''\
+mod my_test;
+
+#[test]
+fn test() {
+	unsafe {
+		let n = my_test::MyTestConstructorNestedStruct();
+		assert_eq!(my_test::MyTestNestedStructGetV(n), 8);
+		my_test::MyTestNestedStructSetV(n, my_test::MyTestNestedStructGetV(n) - 4);
+		assert_eq!(my_test::MyTestNestedStructGetV(n), 4);
+
+		//
+		let e = my_test::MyTestConstructorEnclosingStruct();
+		assert_eq!(my_test::MyTestNestedStructGetV(my_test::MyTestEnclosingStructGetN(e)), 8);
+		my_test::MyTestNestedStructSetV(my_test::MyTestEnclosingStructGetN(e),12);
+		assert_eq!(my_test::MyTestNestedStructGetV(my_test::MyTestEnclosingStructGetN(e)), 12);
+		my_test::MyTestNestedStructSetV(my_test::MyTestEnclosingStructGetN(e),my_test::MyTestNestedStructGetV(my_test::MyTestEnclosingStructGetN(e)) * 4);
+		assert_eq!(my_test::MyTestNestedStructGetV(my_test::MyTestEnclosingStructGetN(e)), 48);
+		my_test::MyTestNestedStructSetV(my_test::MyTestEnclosingStructGetN(e),my_test::MyTestNestedStructGetV(my_test::MyTestEnclosingStructGetN(e)) / 2);
+		assert_eq!(my_test::MyTestNestedStructGetV(my_test::MyTestEnclosingStructGetN(e)), 24);
+	}
+}
+'''

@@ -1,3 +1,40 @@
+<!-- Main Title -->
+
+<div align="center">
+  <h1>Rust ☞ <a href="https://github.com/ejulien/FABGen">FABGen</a></h1>
+  <img src="https://img.shields.io/badge/Made%20in-Vierzon-brightgreen">
+  <img src="https://img.shields.io/badge/Code%20Monkey-%F0%9F%94%A5UNLEASHED%F0%9F%94%A5-red">
+  
+  <h3><em>A Group 7 Project</em></h3>
+</div>
+
+![-----------------------------------------------------](https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.png)
+
+<div align="center">
+  <a href="https://algosup.com/"><img src="/Documents/images/technical/algosupOrange.png" width="500px"></a>
+</div>
+<div align="center">
+  <a href="https://www.harfang3d.com/en_US/"><img src="/Documents/images/technical/harfang.png" height="200px"></a>
+</div>
+<br>
+
+![-----------------------------------------------------](https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.png)
+
+<!-- Links to other documents -->
+
+<div align="center">
+
+|<p align="center"><h3>Functional Specifications</h3>|<p align="center"><h3>Technical Specifications</h3></p>|<p align="center"><h3>Codex</h3></p>|
+|--|--|--|
+|<div align="center"><a href="https://github.com/algosup/2022-2023-project-3-harfang3d-binding-Project-7-group/blob/Docs/Documents/Functional_specifications.md"><img src="/Documents/images/technical/functional.png"></a></p></div>|<div align="center"><a href="https://github.com/algosup/2022-2023-project-3-harfang3d-binding-Project-7-group/blob/Docs/Documents/Technical_specifications.md"><img src="/Documents/images/technical/technical.png"></a></div>|<div align="center"><a href="#authors"><img src="/Documents/images/technical/code.png"></a></div>|
+
+</div>
+
+<!-- End of Project Prologue -->
+
+![-----------------------------------------------------](https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.png)
+
+
 # Fabgen - The fabulous generator
 
 [![Build Status](https://travis-ci.org/ejulien/FABGen.svg?branch=master)](https://travis-ci.org/ejulien/FABGen)
@@ -187,3 +224,5 @@ Consider the following example scenario when binding `std::vector<int>` to CPyth
 
 This can have serious performance implications as the PySequence always need to be extracted to a temporary `std::vector<int>` before the native call is made.  
 A wrapped `std::vector<int>` object does not undergo any transformation and is passed right away to the native layer.
+
+  <div align="right"><a href="#rust--fabgen"><img src="/Documents/images/technical/back.png" width="75px"></a></div>

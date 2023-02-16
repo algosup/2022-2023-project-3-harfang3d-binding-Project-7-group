@@ -24,21 +24,22 @@ enum OwnershipPolicy { NonOwning, Copy, Owning };
 '''
 
 
-#
+#converts a function to its C representation
 def get_fully_qualified_function_signature(func):
 	out = ''
-	if hasattr(func, 'void_rval'):
+	#Get return type
+	if hasattr(func, 'void_rval'): # void return type
 		out += 'void'
 	else:
-		out += str(func.rval)
-
+		out += str(func.rval) # return type
+	#Get all arguments from the Ctype function
 	if hasattr(func, 'args'):
 		args = [str(arg) for arg in func.args]
 		out += '(%s)' % ', '.join(args)
-	else:
+	else: #No arguments
 		out += '()'
 
-	return out
+	return out #return a string of the form rtype [arg1,arg2...]
 
 
 def get_fully_qualified_ctype_name(ctype):
@@ -210,7 +211,6 @@ def clean_name_with_title(name):
 #
 typename = re.compile(r"(_|[A-z])[A-z0-9_]*")
 ref_re = re.compile(r"[&*]+")
-
 
 #
 class _CType:
@@ -574,7 +574,7 @@ class FABGen:
 	#
 	def begin_type(self, conv, features, nobind=False):
 		"""Declare a new type converter."""
-		if self.verbose:
+		if False:#self.verbose:
 			print('Binding type %s (%s)' % (conv.bound_name, conv.ctype))
 
 		self._header += conv.get_type_api(self._name)
@@ -708,7 +708,6 @@ class FABGen:
 	#
 	def select_ctype_conv(self, ctype):
 		"""Select a type converter."""
-
 		if repr(ctype) == 'void':
 			return None
 
@@ -723,7 +722,7 @@ class FABGen:
 
 			if ctype.get_ref() == '':
 				break
-
+			#alt 
 			ctype = ctype.dereference_once()
 
 		raise Exception("Unknown type %s (no converter available)" % ctype)
@@ -1577,7 +1576,7 @@ static void *_type_tag_cast(void *in_ptr, uint32_t in_type_tag, uint32_t out_typ
 		out += ' - %d member\n' % member_count
 		out += ' - %d static member\n' % static_member_count
 
-		return out
+		return ""
 
 	def __print_stats(self):  # pragma: no cover
 		print(self.__get_stats())
