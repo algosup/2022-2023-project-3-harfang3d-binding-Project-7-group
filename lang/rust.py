@@ -1131,48 +1131,6 @@ uint32_t %s(void* p) {
 
 		return rust
 
-	def __extract_sequence_rust(self, conv):
-		rust = ""
-
-		classname = clean_name_with_title(conv.bound_name)
-
-		internal_conv = conv._features["sequence"].wrapped_conv
-
-		arg_bound_name = self.__get_arg_bound_name_to_rust(
-			{"conv": internal_conv})
-
-		# GET
-		rust += f"// Get ...\n" \
-			f"Option 2 func (pointer *{classname}) Get(id int) {arg_bound_name} {{\n"
-		rust += f"v := C.{clean_name_with_title(self._name)}{classname}GetOperator(pointer.h, C.int(id))\n"
-
-		src, retval_rust = self.__arg_from_c_to_rust(
-			{"conv": internal_conv}, "v")
-		rust += src
-		rust += f"return {retval_rust}\n"
-		rust += "}\n"
-
-		# SET
-		rust += f"// Set ...\n" \
-			f"Option 6 func (pointer *{classname}) Set(id int, v {arg_bound_name}) {{\n"
-		# convert to c
-		c_call = self.__arg_from_rust_to_c({"conv": internal_conv}, "v")
-		if c_call != "":
-			rust += c_call
-		else:
-			rust += "vToC := v\n"
-
-		rust += f"	C.{clean_name_with_title(self._name)}{classname}SetOperator(pointer.h, C.int(id), vToC)\n"
-		rust += "}\n"
-
-		# Len
-		rust += f"// Len ...\n" \
-			f"Option 5func (pointer *{classname}) Len() int32 {{\n"
-		rust += f"return int32(C.{clean_name_with_title(self._name)}{classname}LenOperator(pointer.h))\n"
-		rust += "}\n"
-
-		return rust
-
 	def __extract_get_set_member_rust(self, classname, member, static=False, name=None, bound_name=None, is_global=False, implicit_cast=None):
 		rust = ""
 		conv = self.select_ctype_conv(member["ctype"])
@@ -1207,27 +1165,7 @@ uint32_t %s(void* p) {
 				if do_static:
 					rust += f"{clean_name_with_title(classname)}"
 				rust += f"{clean_name_with_title(self._name)}Get{name} ...\n"
-				# rust += f"pub fn "
-				# if do_static:
-				# 	rust += f"{clean_name_with_title(classname)}"
-				# else:
-				# 	rust += f"(pointer *{clean_name_with_title(classname)}) "
 				rust += f"pub fn {clean_name_with_title(self._name)}{clean_name_with_title(classname)}Get{clean_name_with_title(member['name'].naked_name())}({clean_name_with_title(classname).lower()}: *mut {clean_name_with_title(classname)}) -> {self.select_ctype_conv(member['ctype']).rust_type};\n"
-
-				# rust += f"{clean_name_with_title(self._name)}Get{name}() -> {arg_bound_name};\n"
-				# rust += f"v := C.{clean_name_with_title(self._name)}{clean_name_with_title(classname)}Get{name}("
-				# if not static and not is_global:
-				# 	rust += "pointer.h"
-				# rust += ")\n"
-
-				# # check if need convert from c
-				# src, retval_rust = self.__arg_from_c_to_rust({"conv": conv}, "v", True)
-				# rust += src
-				# rust += f"return {retval_rust}\n"
-
-				# rust += "}\n"
-
-				# 	rust_bind +=
 
 			# SET
 			# add set only if the member is not const
@@ -1237,26 +1175,6 @@ uint32_t %s(void* p) {
 					rust += f"{clean_name_with_title(classname)}"
 				rust += f"{clean_name_with_title(self._name)}Set{name} ...\n" \
 					f"pub fn {clean_name_with_title(self._name)}{clean_name_with_title(classname)}Set{clean_name_with_title(member['name'].naked_name())}({clean_name_with_title(classname).lower()}: *mut {clean_name_with_title(classname)},value : {self.select_ctype_conv(member['ctype']).rust_type});\n"
-
-				# if do_static:
-				# 	rust += f"{clean_name_with_title(classname)}"
-				# else:
-				# 	rust += f"(pointer *{clean_name_with_title(classname)}) "
-
-				# rust += f"{clean_name_with_title(self._name)}Set{name}({name.lower()} : {arg_bound_name});\n"
-
-			# 	# convert to c
-			# 	c_call = self.__arg_from_rust_to_c({"conv": conv}, "v")
-			# 	if c_call != "":
-			# 		rust += c_call
-			# 	else:
-			# 		rust += "vToC := v\n"
-
-			# 	rust += f"	C.{clean_name_with_title(self._name)}{clean_name_with_title(classname)}Set{name}("
-			# 	if not static and not is_global:
-			# 		rust += "pointer.h, "
-			# 	rust += "vToC)\n"
-			# 	rust += "}\n"
 			return rust
 
 		# create twice, with and without static, to use it with the class and standalone
@@ -1302,17 +1220,6 @@ uint32_t %s(void* p) {
 		if proto["rval"]["conv"]:
 			rust += " -> "
 			rust += self.__get_arg_bound_name_to_rust(proto["rval"])
-			# has_previous_ret_arg = True
-
-		# only add arg output, NOT ARG IN OUT (pass them by pointer, not return them)
-		# if len(proto['args']):
-		# 	for arg in proto['args']:
-		# 		if 'arg_out' in proto['features'] and str(arg['carg'].name) in proto['features']['arg_out']:
-		# 			if has_previous_ret_arg:
-		# 				rust += " ,"
-
-		# 			rust += self.__get_arg_bound_name_to_rust(arg)
-		# 			has_previous_ret_arg = True
 		rust += ";"
 		return rust
 
@@ -1357,8 +1264,7 @@ uint32_t %s(void* p) {
 			if doc == "":
 				rust += " ...\n"
 			else:
-				rust += " " + re.sub(r'(\[)(.*?)(\])',
-									 r'\1harfang.\2\3', doc) + "\n"
+				rust += " " + re.sub(r'(\[)(.*?)(\])', r'\1harfang.\2\3', doc) + "\n"
 			rust += self.__extract_rust_signature(
 				classname, proto, is_global, name_rust)
 
@@ -1407,8 +1313,7 @@ uint32_t %s(void* p) {
 			if doc == "":
 				rust += " ...\n"
 			else:
-				rust += " " + re.sub(r'(\[)(.*?)(\])',
-									 r'\1harfang.\2\3', doc) + "\n"
+				rust += " " + re.sub(r'(\[)(.*?)(\])', r'\1harfang.\2\3', doc) + "\n"
 
 			rust += "pub fn "
 			if not is_global:
@@ -1449,238 +1354,10 @@ uint32_t %s(void* p) {
 			if proto["rval"]["conv"]:
 				rust += " ->"
 				rust += self.__get_arg_bound_name_to_rust(proto["rval"])
-
-			# # only add arg output, NOT ARG IN OUT (pass them by pointer, not return them)
-			# if len(proto['args']):
-			# 	for arg in proto['args']:
-			# 		if 'arg_out' in proto['features'] and str(arg['carg'].name) in proto['features']['arg_out']:
-			# 			if has_previous_ret_arg:
-			# 				rust += " ,"
-
-			# 			rust += self.__get_arg_bound_name_to_rust(arg)
-			# 			has_previous_ret_arg = True
+			
 			rust += ";\n"
 
-			# # begin function declaration
-			# rust += "{\n"
-
-			# # convert arg in to c
-			# if len(proto["args"]):
-			# 	for arg in proto["args"]:
-			# 		# if arg out only, declare this value
-			# 		if "arg_out" in proto["features"] and str(arg["carg"].name) in proto["features"]["arg_out"]:
-			# 			arg_bound_name = self.__get_arg_bound_name_to_rust(arg)
-
-			# 			if arg["carg"].ctype.is_pointer() or (hasattr(arg["carg"].ctype, "ref") and arg["carg"].ctype.ref == "&"):
-			# 				# if it's a arg out and a class
-			# 				if self.__get_is_type_class_or_pointer_with_class(arg["conv"]):
-			# 					arg_bound_name = clean_name_with_title(f"new_{arg_bound_name.replace('*', '')}")
-			# 					# find the constructor without arg
-			# 					for arg_conv in self._bound_types:
-			# 						if str(arg_conv.ctype) == str(arg["conv"].ctype) and hasattr(arg_conv, "constructor") and arg_conv.constructor is not None:
-			# 							proto_args = self._build_protos(arg_conv.constructor["protos"])
-			# 							break
-			# 					else:
-			# 						proto_args = None
-
-			# 					id_proto_without_arg = ""
-			# 					if proto_args is not None and len(proto_args) > 1:
-			# 						for id_proto_arg, proto_arg in enumerate(proto_args):
-			# 							if len(proto_arg['args']) <= 0:
-			# 								# add bounding_name to the overload function
-			# 								if "bound_name" in proto_arg["features"]:
-			# 									id_proto_without_arg = proto_arg["features"]["bound_name"]
-			# 								# if automatic suffix generated
-			# 								elif "suggested_suffix" in proto_arg:
-			# 									id_proto_without_arg = proto_arg["suggested_suffix"]
-			# 								break
-
-			# 					rust += f"{clean_name(arg['carg'].name)} := {arg_bound_name}{id_proto_without_arg}()\n"
-			# 				else:
-			# 					# not a class, remove the * and make a new
-			# 					rust += f"{clean_name(arg['carg'].name)} := new({arg_bound_name.replace('*', '')})\n"
-			# 			else:
-			# 				rust += f"var {clean_name(arg['carg'].name)} {arg_bound_name}\n"
-
-			# 		c_call = ""
-			# 		if arg["conv"]:
-			# 			c_call = self.__arg_from_rust_to_c(arg, arg['carg'].name)
-			# 		if c_call != "":
-			# 			rust += c_call
-			# 		else:
-			# 			rust += f"{clean_name(arg['carg'].name)}ToC := {clean_name(arg['carg'].name)}\n"
-
-			# # declare arg out
-			# if retval != "":
-			# 	rust += "retval := "
-
-			# if is_constructor:
-			# 	rust += f"C.{clean_name_with_title(self._name)}Constructor{clean_name_with_title(name)}"
-			# else:
-			# 	rust += f"C.{clean_name_with_title(self._name)}{clean_name_with_title(name)}"
-
-			# # is global, add the Name of the class to be sure to avoid double name function name
-			# if not is_global:
-			# 	rust += f"{clean_name_with_title(convClass.bound_name)}"
-
-			# # add bounding_name to the overload function
-			# if "bound_name" in proto["features"]:
-			# 	rust += proto["features"]["bound_name"]
-			# # if automatic suffix generated
-			# elif "suggested_suffix" in proto:
-			# 	rust += proto["suggested_suffix"]
-
-			# rust += "("
-			# if not is_global and not is_constructor:
-			# 	rust += "pointer.h, "
-
-			# if len(proto["args"]):
-			# 	has_previous_arg = False
-			# 	for arg in proto["args"]:
-			# 		if has_previous_arg:
-			# 			rust += " ,"
-
-			# 		# special Slice
-			# 		if isinstance(arg["conv"], lib.rust.stl.RustSliceToStdVectorConverter):
-			# 			slice_name = clean_name(arg['carg'].name)
-			# 			if "RustConstCharPtrConverter" in str(arg["conv"].T_conv) or \
-			# 				"RustStringConverter" in str(arg["conv"].T_conv):
-			# 				slice_name = f"{slice_name}SpecialString"
-			# 			# if it's a class, get a list of pointer to c class
-			# 			elif self.__get_is_type_class_or_pointer_with_class(arg["conv"].T_conv):
-			# 				slice_name = f"{slice_name}Pointer"
-			# 			rust += f"{slice_name}ToCSize, {slice_name}ToCBuf"
-			# 		else:
-			# 			# if (arg['carg'].ctype.is_pointer() or (hasattr(arg['carg'].ctype, 'ref') and arg['carg'].ctype.ref == "&")) and \
-			# 			# 	arg['conv'].bound_name != "string" and not arg['conv'].is_type_class():
-			# 			# 	rust += "&"
-			# 			rust += f"{clean_name(arg['carg'].name)}ToC"
-
-			# 		has_previous_arg = True
-			# rust += ")\n"
-			# ret_args = []
-			# if retval != "":
-			# 	src, retval_rust = self.__arg_from_c_to_rust(proto["rval"], "retval")
-			# 	rust += src
-
-			# 	ret_args.append(retval_rust)
-
-			# # return arg out
-			# # only add arg output, NOT ARG IN OUT (pass them by pointer, not return them)
-			# if "arg_out" in proto["features"]:
-			# 	for arg in proto['args']:
-			# 		if 'arg_out' in proto['features'] and str(arg['carg'].name) in proto['features']['arg_out']:
-			# 			# add name
-			# 			retval_rust = clean_name(str(arg["carg"].name))
-			# 			# if it's a arg out and a class, don't convert because it was already done upper
-			# 			if not self.__get_is_type_class_or_pointer_with_class(arg["conv"]):
-			# 				retval_rust = clean_name(str(arg["carg"].name)) + "ToC"
-			# 				src, retval_rust = self.__arg_from_c_to_rust(arg, retval_rust)
-			# 				rust += src
-
-			# 			ret_args.append(retval_rust)
-
-			# if len(ret_args) > 0:
-			# 	rust += "return "
-			# has_previous_arg = False
-			# for retarg in ret_args:
-			# 	if has_previous_arg:
-			# 		# check and remove "\n" just in case
-			# 		if rust[-1] == "\n":
-			# 			rust = rust[:-1]
-			# 		rust += ", "
-			# 	has_previous_arg = True
-			# 	rust += retarg
-
-			# # check and remove "\n" just in case
-			# if rust[-1] == "\n":
-			# 	rust = rust[:-1]
-			# rust += "\n}\n"
-
 		return rust
-
-	def __rust_temp(self):
-		rust = ""
-		for conv in self._bound_types:
-			if conv.nobind:
-				continue
-
-			cleanBoundName = clean_name_with_title(conv.bound_name)
-
-			# special Slice
-			if isinstance(conv, lib.go.stl.GoSliceToStdVectorConverter):
-				arg_boung_name = self.__get_arg_bound_name_to_go(
-					{"conv": conv.T_conv})
-				rust += f"// {clean_name_with_title(conv.bound_name)} ...\n" \
-					f"type {clean_name_with_title(conv.bound_name)} []{arg_boung_name}\n\n"
-
-			# it's class
-			if self.__get_is_type_class_or_pointer_with_class(conv):
-				doc = self.get_symbol_doc(conv.bound_name)
-				if doc == "":
-					doc = " ..."
-				else:
-					doc = " " + re.sub(r'(\[)(.*?)(\])',
-									   r'\1harfang.\2\3', doc)
-
-				rust += f"// {cleanBoundName} {doc}\n" \
-					f"type {cleanBoundName} struct{{\n" \
-					f"	h C.{clean_name_with_title(self._name)}{cleanBoundName}\n" \
-					"}\n\n" \
-					f"// New{cleanBoundName}FromCPointer ...\n" \
-					f"func New{cleanBoundName}FromCPointer(p unsafe.Pointer) *{cleanBoundName} {{\n" \
-					f"	retvalGO := &{cleanBoundName}{{h: (C.{clean_name_with_title(self._name)}{cleanBoundName})(p)}}\n" \
-					f"	return retvalGO\n" \
-					"}\n"
-
-			# it's a sequence
-			if "sequence" in conv._features:
-				rust += self.__extract_sequence_go(conv)
-
-			# static members
-			rust += self.extract_conv_and_bases(conv.static_members,
-												lambda member: self.__extract_get_set_member_go(
-													conv.bound_name, member, static=True),
-												[base_class.static_members for base_class in conv._bases])
-
-			# members
-			rust += self.extract_conv_and_bases(conv.members,
-												lambda member: self.__extract_get_set_member_go(
-													conv.bound_name, member, static=False),
-												[base_class.members for base_class in conv._bases])
-
-			# constructors
-			if conv.constructor:
-				rust += self.__extract_method_rust(conv.bound_name, conv, conv.constructor,
-												   bound_name=f"{conv.bound_name}", is_global=True, is_constructor=True)
-
-			# destructor for all type class
-			if self.__get_is_type_class_or_pointer_with_class(conv):
-				rust += f"// Free ...\n" \
-					f"func (pointer *{cleanBoundName}) Free(){{\n" \
-					f"	C.{clean_name_with_title(self._name)}{cleanBoundName}Free(pointer.h)\n" \
-					f"}}\n"
-
-				rust += f"// IsNil ...\n" \
-					f"func (pointer *{cleanBoundName}) IsNil() bool{{\n" \
-					f"	return pointer.h == C.{clean_name_with_title(self._name)}{cleanBoundName}(nil)\n" \
-					f"}}\n"
-
-				# runtime.SetFinalizer(funcret, func(ctx *Ret) { C.free(ctx.bufptr) })
-
-		# enum
-		for bound_name, enum in self._enums.items():
-			rust += f"// {bound_name} ...\n"
-			enum_conv = self._get_conv_from_bound_name(bound_name)
-			if enum_conv is not None and hasattr(enum_conv, "go_type") and enum_conv.go_type is not None:
-				rust += f"type {bound_name} {enum_conv.go_type}\n"
-			else:
-				rust += f"type {bound_name} int\n"
-			rust += "var (\n"
-			for id, name in enumerate(enum.keys()):
-				rust += f"	// {clean_name(name)} ...\n"
-				rust += f"	{clean_name(name)} =  {bound_name}(C.Get{bound_name}({id}))\n"
-			rust += ")\n"
 
 	# VERY SPECIAL
 	# check in every methods,
@@ -1956,11 +1633,6 @@ uint32_t %s(void* p) {
 				continue
 			if type.is_type_class():
 				rust_bind += f"// bind {clean_name_with_title(self._name)}{clean_name_with_title(type.bound_name)} methods\n"
-
-				#rust_bind += f"pub fn {clean_name_with_title(self._name)}Constructor{clean_name_with_title(type.bound_name)}() -> *mut {clean_name_with_title(type.bound_name)};\n"
-				# for member in type.members:
-				# 	rust_bind += f"pub fn {clean_name_with_title(self._name)}{clean_name_with_title(type.bound_name)}Get{clean_name_with_title(member['name'].naked_name())}({clean_name_with_title(type.bound_name).lower()}: *mut {clean_name_with_title(type.bound_name)}) -> {self.select_ctype_conv(member['ctype']).rust_type};\n"
-				# 	rust_bind += f"pub fn {clean_name_with_title(self._name)}{clean_name_with_title(type.bound_name)}Set{clean_name_with_title(member['name'].naked_name())}({clean_name_with_title(type.bound_name).lower()}: *mut {clean_name_with_title(type.bound_name)},value : {self.select_ctype_conv(member['ctype']).rust_type});\n"
 
 			# constructors
 			if type.constructor:

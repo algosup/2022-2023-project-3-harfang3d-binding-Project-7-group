@@ -12,8 +12,8 @@
 | return_nullptr_as_none.py            | [OK]     | [OK]     |         |
 | shared_ptr.py                        | [OK]     | [OK]     |         |
 | shared_ptr_default_comparison.py     | [OK]     | [OK]     |         |
-| std_function.py                      | [OK]     | [FAILED] | Function pointers are not yet implemented for Rust. ![ErrorImage](./ErrorMessages/Screenshot%202023-02-15%20at%2009.41.30.png)|
-| std_future.py                        | [OK]     | [OK]     |         |
+| std_function.py                      | [OK]     | [FAILED] | Function pointers are not yet implemented for Rust. ![ErrorImage](./ErrorMessages/std_function.png)|
+| std_future.py                        | [OK]     | [FAILED] | Passes at first but then crashes because the c++ thread is not handled.![ErrorImage](./ErrorMessages/std_future.png) |
 | std_vector.py                        | [OK]     | [FAILED] | Methods on Sequence are not implemented. This results in Constructor, Len Operator, Getters and Setters beeing missing. ![ErrorImage](./ErrorMessages/std_vector.png)|
 | struct_bitfield_member_access.py     | [OK]     | [OK]     |         |
 | struct_default_comparison.py         | [OK]     | [OK]     |         |
