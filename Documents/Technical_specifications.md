@@ -340,6 +340,7 @@
 
 - ### Conversion Tables
 - This is the type conversion table that we have decided to go with for this project.
+
 	|cpp            |rs         |
 	|---------------|-----------|
 	|bool           |bool      |
