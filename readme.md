@@ -11,10 +11,10 @@
 ![-----------------------------------------------------](https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.png)
 
 <div align="center">
-  <a href="https://algosup.com/"><img src="/Documents/images/technical/algosupOrange.png" width="500px"></a>
+  <a href="https://algosup.com/"><img src="/Documents/images/technical/algosupOrange.png" alt="Algosup Logo" width="500px"></a>
 </div>
 <div align="center">
-  <a href="https://www.harfang3d.com/en_US/"><img src="/Documents/images/technical/harfang.png" height="200px"></a>
+  <a href="https://www.harfang3d.com/en_US/"><img src="/Documents/images/technical/logoGreyCropped.png" alt ="Harfang Logo" height="200px"></a>
 </div>
 <br>
 
