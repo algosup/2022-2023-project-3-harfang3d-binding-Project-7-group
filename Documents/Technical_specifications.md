@@ -850,5 +850,6 @@
 - <div> Icons made by <a href="https://www.flaticon.com/authors/orvipixel" title="orvipixel"> orvipixel </a> from <a href="https://www.flaticon.com/" title="Flaticon">www.flaticon.com</a></div>
 - <div> Icons made by <a href="https://www.freepik.com" title="Freepik"> Freepik </a> from <a href="https://www.flaticon.com/" title="Flaticon">www.flaticon.com</a></div>
 - <div> Icons made by <a href="https://www.flaticon.com/authors/hajicon" title="HAJICON"> HAJICON </a> from <a href="https://www.flaticon.com/" title="Flaticon">www.flaticon.com</a></div>
+- <div> Icons made by <a href="https://www.freepik.com" title="Freepik"> Freepik </a> from <a href="https://www.flaticon.com/" title="Flaticon">www.flaticon.com'</a></div>
 
 <div align="right"><a href="#-book-table-of-contents"><img src="/Documents/images/technical/back.png" width="75px"></a></div>
