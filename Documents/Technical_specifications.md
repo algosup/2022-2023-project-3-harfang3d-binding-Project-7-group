@@ -63,13 +63,13 @@
 					<ul>
 						<li><a href="#new-folder-structure">New Folder Structure</a></li>
 						<li><a href="#new-folder-structure">Brief Description</a></li>
-						<li><a href="#new-folder-structure">bind.py</a></li>
-						<li><a href="#new-folder-structure">lang/rust.py</a></li>
-						<li><a href="#new-folder-structure">lib/rust/std.py</a></li>
-						<li><a href="#new-folder-structure">lib/rust/stl.py</a></li>
-						<li><a href="#new-folder-structure">lib/stl.py</a></li>
-						<li><a href="#new-folder-structure">lib/__init__.py</a></li>
-						<li><a href="#new-folder-structure">tests/basic_type_exchange.py</a></li>
+						<li><a href="#bindpy">bind.py</a></li>
+						<li><a href="#langrustpy">lang/rust.py</a></li>
+						<li><a href="#libruststdpy">lib/rust/std.py</a></li>
+						<li><a href="#libruststlpy">lib/rust/stl.py</a></li>
+						<li><a href="#libstlpy">lib/stl.py</a></li>
+						<li><a href="#libinitpy">lib/__init__.py</a></li>
+						<li><a href="#testsbasic_type_exchangepypy">tests/basic_type_exchange.py</a></li>
 					</ul>
 				</li>
 			</ul>
@@ -448,6 +448,253 @@
 		|`gen.py`|No Significant modification made to this file.|
 		|`tests.py`|Handling Rust and adding rust testbed.|
 	
+
+	- ### bind.py
+		- Import the rust language specific definitions
+		  ```python
+		  import lang.rust
+		  ```
+		- Add the argument handling on it....
+		  ```python
+		  parser.add_argument('--rust', help='Bind to Rust', action='store_true')
+		  ```
+		- Execute the Rust generator from lang/rust with the following code and create the required `build.rs` file
+		  ```python
+		  if args.rust:
+			rust_gen = lang.rust.RustGenerator()
+			output_binding(setup_generator(rust_gen))
+			os.chdir(args.out)
+			os.system(f"cargo init {rust_gen._name}")
+			os.chdir("..")
+			#create a build.rs file
+			with open(os.path.join(args.out, "build.rs"), "w") as f:
+				f.write("fn main() {\n\tprintln!(\"cargo:rustc-link-lib=dylib=python3.8\");\n}")
+		  ```
+	- ### lang/rust.py
+		- The language specific definitions.
+		- Too big to document here, however it is composed of 6 Classes, and 3 orphan functions.
+		- The entirety of the definitions can be found in the codex by following this link. [ETIQUETTE]
+		- Classes:
+			- `DummyTypeConverter`
+			- `RustClassTypeDefaultConverter`
+			- `RustExternTypeConverter`
+			- `RustGenerator`
+			- `RustPtrTypeConverter`
+			- `RustTypeConverterCommon`
+		- Functions:
+			- `clean_name`
+			- `clean_name_with_title`
+			- ` route_lambda`
+	- ### lib/rust/std.py
+		- Import the required modues
+		  ```python
+		  import lang.rust
+		  ```
+		- It will only contain one function, which will take care of binding standard types.
+		  ```python
+		  def bind_std(gen):
+		  ```
+		- We will make use of the bind_type  function in gen.py, we need to pass it the type matches and logic (if needed), to help with the type conversion. Much alike what has been done with golang , we will start with the `ConstCharPtrConverter`
+		  ```python
+		  class RustConstCharPtrConverter(lang.rust.RustTypeConverterCommon):
+				def __init__(self, type, to_c_storage_type=None, bound_name=None, from_c_storage_type=None, needs_c_storage_class=None):
+					super().__init__(type, to_c_storage_type, bound_name, from_c_storage_type, needs_c_storage_class)
+
+				def get_type_glue(self, gen, module_name):
+					return ''
+
+				def get_type_api(self, module_name):
+					return ''
+
+				def to_c_call(self, in_var, out_var_p, is_pointer=False):
+					if is_pointer:
+						out = f"{out_var_p.replace('&', '_')}1 := C.CString(*{in_var})\n"
+						out += f"{out_var_p.replace('&', '_')} := &{out_var_p.replace('&', '_')}1\n"
+					else:
+						out = f"{out_var_p.replace('&', '_')}, idFin{out_var_p.replace('&', '_')} := wrapString({in_var})\n"
+						out += f"defer idFin{out_var_p.replace('&', '_')}()\n"
+					return out
+
+				def from_c_call(self, out_var, expr, ownership):
+					return "C.GoString(%s)" % (out_var)
+		  ```
+			- The above will specifically handle the logic for this complex case. All we need to do now is to add the binding itself
+			  ```python
+			  gen.bind_type(RustConstCharPtrConverter("const char *"))
+			  ```
+		- Now we will handle most of the basic types with a `RustBasicTypeConverter`.
+		  ```python
+		  class RustBasicTypeConverter(lang.rust.RustTypeConverterCommon):
+				def __init__(self, type, c_type, rust_type, to_c_storage_type=None, bound_name=None, from_c_storage_type=None, needs_c_storage_class=False):
+					super().__init__(type, to_c_storage_type, bound_name, from_c_storage_type, needs_c_storage_class)
+					self.rust_to_c_type = c_type
+					self.rust_type = rust_type
+
+				def get_type_glue(self, gen, module_name):
+					return ''
+
+				def get_type_api(self, module_name):
+					return ''
+
+				def to_c_call(self, in_var, out_var_p, is_pointer):
+					if is_pointer:
+						out = f"let mut {out_var_p} : *mut {self.rust_type} = {in_var} as *{self.rust_to_c_type};\n"
+					else:
+						out = f"let mut {out_var_p} : {self.rust_type} = {in_var} as {self.rust_to_c_type};\n"
+					return out
+
+				def from_c_call(self, out_var, expr, ownership):
+					return f"{out_var} as {self.rust_to_c_type}"
+		  ```
+				- This will take care of most of the types, all we need is to bind them as such like we did previously: The first argument is the internal type name, the second the `c_type` and the last, the `rust_type`
+				  ```python
+					gen.bind_type(RustBasicTypeConverter('char','char', 'i8'))
+					gen.bind_type(RustBasicTypeConverter('short','short', 'i8'))
+					gen.bind_type(RustBasicTypeConverter('int','int', 'i32'))
+					gen.bind_type(RustBasicTypeConverter('long','long', 'i64'))
+
+					gen.bind_type(RustBasicTypeConverter('int8_t','int8_t', 'i8'))
+					gen.bind_type(RustBasicTypeConverter('int16_t','int16_t', 'i16'))
+					gen.bind_type(RustBasicTypeConverter('int32_t','int32_t', 'i32'))
+					gen.bind_type(RustBasicTypeConverter('int64_t','int64_t', 'i64'))
+
+					gen.bind_type(RustBasicTypeConverter('float','float', 'f32'))
+					gen.bind_type(RustBasicTypeConverter('double','double', 'f64'))
+				  ```
+		- Once that is taken care of, we only need to handle booleans with this class:
+		  ```python
+		  class RustBoolConverter(lang.rust.RustTypeConverterCommon):
+				def __init__(self, type, to_c_storage_type=None, bound_name=None, from_c_storage_type=None, needs_c_storage_class=False):
+					super().__init__(type, to_c_storage_type, bound_name, from_c_storage_type, needs_c_storage_class)
+					self.rust_to_c_type = "bool"
+
+				def get_type_glue(self, gen, module_name):
+					return ''
+
+				def get_type_api(self, module_name):
+					return ''
+
+				def to_c_call(self, in_var, out_var_p, is_pointer):
+					if is_pointer:
+						out = f"let mut {out_var_p} : *mut bool = {in_var} as *bool;\n"
+					else:
+						out = f"let mut {out_var_p} : bool = {in_var} as bool\n"
+					return out
+
+				def from_c_call(self, out_var, expr, ownership):
+					return f"{out_var} as bool"
+		  ```
+			- and implement it with this code:
+			  ```python
+			  gen.bind_type(RustBoolConverter('bool')).nobind = True
+			  ```
+	- ### lib/rust/stl.py
+		- First of all, include the rust language specific definitions
+		  ```python
+		  import lang.rust
+		  ```
+		- Then create the `bind_stl` function:
+		  ```python
+		  def bind_stl(gen):
+		      gen.add_include('vector',True)
+		      gen.add_include('string',True)
+
+		      class RustStringConverter(lang.rust.RustTypeConverterCommon):
+			  def __init__(self, type, to_c_storage_type=None, bound_name=None, from_c_storage_type=None, needs_c_storage_class=False):
+			      super().__init__(type, to_c_storage_type, bound_name, from_c_storage_type, needs_c_storage_class)
+			      self.rust_to_c_type = "*char"
+			      self.rust_type = "string"
+
+			  def get_type_glue(self, gen, module_name):
+			      return ''
+
+			  def get_type_api(self, module_name):
+			      return ''
+
+			  def to_c_call(self, in_var, out_var_p, is_pointer=False):
+			      if is_pointer:
+				  out = f"{out_var_p.replace('&', '_')}1 := C.CString(*{in_var})\n"
+				  out += f"{out_var_p.replace('&', '_')} := &{out_var_p.replace('&', '_')}1\n"
+			      else:
+				  out = f"{out_var_p.replace('&', '_')}, idFin{out_var_p.replace('&', '_')} := wrapString({in_var})\n"
+				  out += f"defer idFin{out_var_p.replace('&', '_')}()\n"
+			      return out
+
+			  def from_c_call(self, out_var, expr, ownership):
+			      return "C.RustString(%s)" % (out_var)
+		  ```
+		- Then the `binf_function_T` handler:
+		  ```python
+		  def bind_function_T(gen, type, bound_name=None):
+			class RustStdFunctionConverter(lang.rust.RustTypeConverterCommon):
+				def get_type_glue(self, gen, module_name):
+					return ""
+
+			return gen.bind_type(RustStdFunctionConverter(type))
+		  ```
+		- Then the `SliceToStdVector` handler:
+		  ```python
+		  class RustSliceToStdVectorConverter(lang.rust.RustTypeConverterCommon):
+			def __init__(self, type, T_conv):
+				native_type = f"std::vector<{T_conv.ctype}>"
+				super().__init__(type, native_type, None, native_type)
+				self.T_conv = T_conv
+
+			def get_type_glue(self, gen, module_name):
+				return ''
+
+			def to_c_call(self, in_var, out_var_p, is_pointer):
+				return ""
+
+			def from_c_call(self, out_var, expr, ownership):
+				return ""
+		  ```
+	- ### lib/stl.py
+		- Add the following to the code, which will connect the stl logic to the rust specific one
+		  ```python
+		  elif gen.get_language() == 'Rust':
+			import lib.rust.stl
+			lib.rust.stl.bind_function_T(gen, type, bound_name)
+		  ```
+	- ### lib/init.py
+		- Allow the import of the right libraries by adding this code to `__init__.py`
+		  ```python
+		  elif gen.get_language() == 'Rust':
+				import lib.rust.std
+				import lib.rust.stl
+
+				lib.rust.std.bind_std(gen)
+				lib.rust.stl.bind_stl(gen)
+		  ```
+	- ### tests/basic_type_exchange.py.py
+		- As an example of test, we will cover one of the most basic, `basic_type_exchange.py`.
+		- each of the 29 tests test a specific feature.
+		- The goal is to translate all those tests in the target language.
+		- for instance, for this test, after the go-specific code, add the following:
+		  ```python
+		  test_rust = '''\
+		  mod my_test;
+		  #[test]
+		  fn test() {
+			unsafe {
+				assert_eq!(my_test::MyTestReturnInt(), 8);
+				assert_eq!(my_test::MyTestReturnFloat(), 8.0);
+				let c_str = my_test::print_c_string(my_test::MyTestReturnConstCharPtr() as *mut std::ffi::c_void);
+				assert_eq!(c_str, "const char * -> string");
+
+				assert_eq!(*my_test::MyTestReturnIntByPointer(), 9);
+				assert_eq!(*my_test::MyTestReturnIntByReference(), 9);
+
+				assert_eq!(my_test::MyTestAddIntByValue(3, 4), 7);
+				let mut a = 3;
+				let mut b = 4;
+				assert_eq!(my_test::MyTestAddIntByPointer(&mut a, &mut b), 7);
+				assert_eq!(my_test::MyTestAddIntByReference(&mut a, &mut b), 7);
+			}
+		  }
+		  '''
+		  ```
+
 
 
 - ## Risk assessment and security risks/measures
