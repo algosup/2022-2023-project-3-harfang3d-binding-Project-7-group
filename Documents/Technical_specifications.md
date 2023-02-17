@@ -131,6 +131,7 @@
 	|0.3.0|Mathis KAKAL; Ivan MOLNAR|07.02.2023|Finish Introduction, Development and Conclusion|
 	|0.4.0|Mathis KAKAL|13.02.2023|Added Technical Specifications|
 	|0.5.0|Mathis KAKAL|14.02.2023|Added Architecture Diagrams; updated Glossary; Minor changes|
+	|1.0.0|Mathis KAKAL|17.02.2023|Initial Release, experimental Codex & Graph|
 - ## Purpose of Document
 - ### Global definition
 	- The purpose of this Technical Specifications Document (TSD) is to present the stakeholders with the technical discussion and choices made for the implementation of a new programming language (Rust), to the already existing FABGen code binding generator, completely, accurately and unambiguously in the most concrete way possible. This information is the work of the Tech Lead during the the second and third week of the project (ideation phase), and was updated few times during the development phases. It is derived from the Functional Requirements (FRD) which state what should and shouldn't be implemented.
