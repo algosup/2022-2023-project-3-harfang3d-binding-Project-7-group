@@ -1,5 +1,7 @@
 <div align="left"><a href="https://github.com/algosup/2022-2023-project-3-harfang3d-binding-Project-7-group/"><img src="/Documents/images/technical/back2.png" width="48px"></a></div>
 
+# Technical Specifications
+
 <!-- TABLE OF CONTENTS -->
 <h2 id="table-of-contents"> :book: Table of Contents</h2>
 
