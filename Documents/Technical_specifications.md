@@ -473,7 +473,7 @@
 	- ### lang/rust.py
 		- The language specific definitions.
 		- Too big to document here, however it is composed of 6 Classes, and 3 orphan functions.
-		- The entirety of the definitions can be found in the codex by following this link. [ETIQUETTE]
+		- The entirety of the definitions can be found in the codex by following [this link](https://algosup.github.io/2022-2023-project-3-harfang3d-binding-Project-7-group/rust).
 		- Classes:
 			- `DummyTypeConverter`
 			- `RustClassTypeDefaultConverter`
