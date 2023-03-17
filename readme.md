@@ -32,8 +32,8 @@
 
 # Project management artifacts
 
-- [Preliminary documentation (KPIs, timesheet and risk analiysis)](https://docs.google.com/spreadsheets/d/1cFyogl89SBOHCSURh86Nv2dAjNgu5Tr-8UwNIabvVlE/edit?usp=sharing)
-- [Custom made KPI tool](https://github.com/ivan-molnar/KPI-tool)
+- [Preliminary documentation (KPIs, timesheet and risk analiysis) - document left unubdated after creaton on purpose](https://docs.google.com/spreadsheets/d/1cFyogl89SBOHCSURh86Nv2dAjNgu5Tr-8UwNIabvVlE/edit?usp=sharing)
+- [Custom made KPI tool - contains updated KPIs](https://github.com/ivan-molnar/KPI-tool)
 - [Project management Trello](https://trello.com/b/USPVR9F9/main-harfang-board)
 - [TDD translations Trello](https://trello.com/b/G3b4jeD8/rust-tdd-translations)
 
